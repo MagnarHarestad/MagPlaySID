@@ -19,6 +19,7 @@ public static class EditorSettings
 
     private static bool _showHighHex;
     private static string _sidAuthor = string.Empty;
+    private static int _sidLoadAddress = MagSid.Core.SidLoadAddress.Default;
     private static bool _loaded;
 
     public static bool ShowHighHex
@@ -60,6 +61,26 @@ public static class EditorSettings
         }
     }
 
+    /// <summary>The address last exported to. Someone building a demo exports to the same spot
+    /// every time, and $1000 is only the right default until they have chosen otherwise once.</summary>
+    public static int SidLoadAddress
+    {
+        get
+        {
+            EnsureLoaded();
+            return _sidLoadAddress;
+        }
+        set
+        {
+            EnsureLoaded();
+            if (_sidLoadAddress == value)
+                return;
+
+            _sidLoadAddress = value;
+            Save();
+        }
+    }
+
     private static void EnsureLoaded()
     {
         if (_loaded)
@@ -73,6 +94,10 @@ public static class EditorSettings
             {
                 _showHighHex = stored.ShowHighHex;
                 _sidAuthor = stored.SidAuthor ?? string.Empty;
+                // Absent in settings written before the address was settable, and 0 there means
+                // "never chosen" rather than "load at $0000".
+                if (stored.SidLoadAddress is > 0)
+                    _sidLoadAddress = stored.SidLoadAddress.Value;
             }
         }
         catch
@@ -86,8 +111,12 @@ public static class EditorSettings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(
-                new StoredSettings { ShowHighHex = _showHighHex, SidAuthor = _sidAuthor }));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(new StoredSettings
+            {
+                ShowHighHex = _showHighHex,
+                SidAuthor = _sidAuthor,
+                SidLoadAddress = _sidLoadAddress,
+            }));
         }
         catch
         {
@@ -99,5 +128,6 @@ public static class EditorSettings
     {
         public bool ShowHighHex { get; set; }
         public string? SidAuthor { get; set; }
+        public int? SidLoadAddress { get; set; }
     }
 }

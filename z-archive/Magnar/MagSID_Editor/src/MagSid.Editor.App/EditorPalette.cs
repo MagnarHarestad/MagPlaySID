@@ -15,6 +15,10 @@ public static class EditorPalette
     public static readonly Color Body = Color.FromArgb(0xD2, 0xD2, 0xDE);
     public static readonly Color Mono = Color.FromArgb(0x9E, 0xC8, 0xFF);
 
+    /// <summary>For text that says a value will not work, where a message box would be too much -
+    /// amber rather than red, since it marks an input still being typed, not a failure.</summary>
+    public static readonly Color Warning = Color.FromArgb(0xFF, 0xB0, 0x5C);
+
     public static readonly Color FieldBackground = Color.FromArgb(0x1C, 0x1C, 0x30);
     public static readonly Color ButtonBackground = Color.FromArgb(0x28, 0x28, 0x3C);
     public static readonly Color ButtonHover = Color.FromArgb(0x36, 0x36, 0x50);

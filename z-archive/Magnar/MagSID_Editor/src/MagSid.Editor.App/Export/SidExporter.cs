@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using MagSid.Core;
 using MagSid.Core.Model;
 using MagSid.Core.Serialization;
 using MagSid.Sid;
@@ -19,17 +20,21 @@ public sealed class SidExportException : Exception
 /// MAGSIDv7_LowMemory project rather than re-implementing 6502 code generation here.
 ///
 /// The player's music.init/music.play code plus the Lua-generated song/pattern tables live
-/// entirely in one self-contained, position-fixed $1000-$1383 memory segment (confirmed
-/// byte-identical to the real demo build) - which is exactly the PSID convention (init/play
-/// entry points called by an external driver, no on-chip IRQ setup required). export_sid.s
-/// (in MAGSIDv7_LowMemory\, checked in alongside the assembly source it drives) assembles
-/// just that segment, with the demo's BASIC stub/IRQ/sprite/screen code left out.
+/// entirely in one self-contained memory segment (confirmed byte-identical to the real demo
+/// build) - which is exactly the PSID convention (init/play entry points called by an external
+/// driver, no on-chip IRQ setup required). export_sid.s (in MAGSIDv7_LowMemory\, checked in
+/// alongside the assembly source it drives) assembles just that segment, with the demo's BASIC
+/// stub/IRQ/sprite/screen code left out.
+///
+/// The segment is relocatable, so the load address is the caller's choice: it is passed to the
+/// assembler rather than patched afterwards, which is what keeps the player's absolute references
+/// into its own tables correct.
 /// </summary>
 public static class SidExporter
 {
-    private const int PlayerLoadAddress = 0x1000;
-    private const int PlayerInitAddress = 0x1000;
-    private const int PlayerPlayAddress = 0x1003;
+    /// <summary>music.play sits three bytes past music.init, which is the load address itself -
+    /// the two JMPs at the top of the player, in that order.</summary>
+    private const int PlayEntryOffset = 0x3;
 
     public sealed record Metadata(string Name, string Author, string Released);
 
@@ -45,7 +50,11 @@ public static class SidExporter
         return vsidPath;
     }
 
-    public static byte[] Export(Song song, Metadata metadata, ChipModel chipModel)
+    /// <param name="loadAddress">Where the tune loads, and therefore where init/play are. The
+    /// player is relocated by reassembling at this origin rather than by patching, so any address
+    /// <see cref="SidLoadAddress.Validate"/> accepts produces a byte-identical tune bar the
+    /// addresses themselves.</param>
+    public static byte[] Export(Song song, Metadata metadata, ChipModel chipModel, int loadAddress = SidLoadAddress.Default)
     {
         string playerRoot = LocatePlayerProjectRoot();
         string patternsPath = Path.Combine(playerRoot, "SongData", "Patterns.s");
@@ -76,17 +85,24 @@ public static class SidExporter
             // returns a copy, so the song the user has open is untouched.
             PatternsFileWriter.Write(song.WithUnusedPatternsRemoved(), patternsPath);
 
-            RunAssembler(assemblerPath, playerRoot, tempPrgPath, tempSymPath);
+            RunAssembler(assemblerPath, playerRoot, tempPrgPath, tempSymPath, loadAddress);
 
             byte[] prgBytes = File.ReadAllBytes(tempPrgPath);
-            if (prgBytes.Length < 2 || prgBytes[0] != (PlayerLoadAddress & 0xFF) || prgBytes[1] != (PlayerLoadAddress >> 8))
+            if (prgBytes.Length < 2 || prgBytes[0] != (loadAddress & 0xFF) || prgBytes[1] != (loadAddress >> 8))
             {
                 throw new SidExportException(
-                    $"Assembled .prg has an unexpected load address (expected ${PlayerLoadAddress:X4}).");
+                    $"Assembled .prg has an unexpected load address (expected ${loadAddress:X4}).");
             }
 
             byte[] memoryImage = prgBytes[2..];
-            return BuildPsid(memoryImage, metadata, chipModel);
+
+            // Re-checked here and not only in the dialog: Export is callable on its own, and a
+            // tune that runs into I/O or off the top of memory is worth refusing rather than
+            // writing a .sid that cannot play.
+            if (SidLoadAddress.Validate(loadAddress, memoryImage.Length) is { } problem)
+                throw new SidExportException(problem);
+
+            return BuildPsid(memoryImage, metadata, chipModel, loadAddress);
         }
         finally
         {
@@ -98,7 +114,8 @@ public static class SidExporter
         }
     }
 
-    private static void RunAssembler(string assemblerPath, string playerRoot, string tempPrgPath, string tempSymPath)
+    private static void RunAssembler(
+        string assemblerPath, string playerRoot, string tempPrgPath, string tempSymPath, int loadAddress)
     {
         var psi = new ProcessStartInfo
         {
@@ -110,9 +127,14 @@ public static class SidExporter
         };
         psi.ArgumentList.Add("-p");
         psi.ArgumentList.Add("../../../include/");
+        // export_sid.s defaults to $1000 behind an "if !def" guard, so this declaration is what
+        // moves the whole segment. The -s start address has to agree with it or the saved block
+        // would begin somewhere the assembler put nothing.
+        psi.ArgumentList.Add("-d");
+        psi.ArgumentList.Add($"v_export_loc=${loadAddress:X4}");
         psi.ArgumentList.Add("-s");
         psi.ArgumentList.Add(tempPrgPath);
-        psi.ArgumentList.Add($"${PlayerLoadAddress:X4}");
+        psi.ArgumentList.Add($"${loadAddress:X4}");
         psi.ArgumentList.Add("+");
         psi.ArgumentList.Add("export_sid.s");
         psi.ArgumentList.Add("-y");
@@ -130,7 +152,7 @@ public static class SidExporter
         }
     }
 
-    private static byte[] BuildPsid(byte[] memoryImage, Metadata metadata, ChipModel chipModel)
+    private static byte[] BuildPsid(byte[] memoryImage, Metadata metadata, ChipModel chipModel, int loadAddress)
     {
         const int headerSize = 0x7C;
         var header = new byte[headerSize];
@@ -138,9 +160,9 @@ public static class SidExporter
         Encoding.ASCII.GetBytes("PSID").CopyTo(header, 0x00);
         PutBigEndian16(header, 0x04, 2);            // version 2
         PutBigEndian16(header, 0x06, headerSize);   // dataOffset
-        PutBigEndian16(header, 0x08, PlayerLoadAddress);
-        PutBigEndian16(header, 0x0A, PlayerInitAddress);
-        PutBigEndian16(header, 0x0C, PlayerPlayAddress);
+        PutBigEndian16(header, 0x08, loadAddress);
+        PutBigEndian16(header, 0x0A, loadAddress);
+        PutBigEndian16(header, 0x0C, loadAddress + PlayEntryOffset);
         PutBigEndian16(header, 0x0E, 1);             // songs
         PutBigEndian16(header, 0x10, 1);             // startSong
         // speed left at 0: play is driven once per vertical blank (50Hz PAL), matching how

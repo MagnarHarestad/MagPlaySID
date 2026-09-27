@@ -241,8 +241,12 @@ public sealed class MainForm : Form
         // with the "$1000-$11ec" ranges the assembler's memory map and VICE print. The tooltip
         // still gives the true count.
         _songLengthLabel.Text = $"Song Length: ${size.EndAddress - 0x1000:X3}";
+
+        // The range follows whatever address the last export chose, since the length itself does
+        // not depend on it - the player relocates without changing size.
+        int loadAddress = EditorSettings.SidLoadAddress;
         _songLengthLabel.ToolTipText = string.Join(Environment.NewLine,
-            $"{size.TotalBytes} bytes exported, $1000-${size.EndAddress:X4}",
+            $"{size.TotalBytes} bytes exported, ${loadAddress:X4}-${loadAddress + size.TotalBytes - 1:X4}",
             $"  player      {size.PlayerBytes,5}",
             $"  patterns    {size.PatternBytes,5}",
             $"  pattern ptr {size.PatternPointerBytes,5}",
@@ -1154,8 +1158,14 @@ public sealed class MainForm : Form
     {
         string defaultName = _session.FilePath is { } path ? Path.GetFileNameWithoutExtension(path) : "Untitled";
 
+        // The dialog needs the finished size to tell a usable load address from one that would run
+        // the tune into I/O, and it must be the size of what actually gets exported - dead
+        // patterns are pruned on the way out, exactly as SidExporter does.
+        int songByteLength = SongSizeCalculator.Measure(_session.Song.WithUnusedPatternsRemoved()).TotalBytes;
+
         using var metadataDialog = new SidExportDialog(
-            defaultName, EditorSettings.SidAuthor, DateTime.Now.Year.ToString());
+            defaultName, EditorSettings.SidAuthor, DateTime.Now.Year.ToString(),
+            EditorSettings.SidLoadAddress, songByteLength);
         if (metadataDialog.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -1163,12 +1173,13 @@ public sealed class MainForm : Form
         // fails on the assembler still had the name typed into it, and retyping it to try again
         // is the annoyance this removes.
         EditorSettings.SidAuthor = metadataDialog.Author;
+        EditorSettings.SidLoadAddress = metadataDialog.LoadAddress;
 
         byte[] sidBytes;
         try
         {
             var metadata = new SidExporter.Metadata(metadataDialog.SongName, metadataDialog.Author, metadataDialog.Released);
-            sidBytes = SidExporter.Export(_session.Song, metadata, _chipModel);
+            sidBytes = SidExporter.Export(_session.Song, metadata, _chipModel, metadataDialog.LoadAddress);
         }
         catch (SidExportException ex)
         {
