@@ -115,6 +115,85 @@ public class SidFilePlaybackTests
         Assert.True(peak > 1000, $"A second of BellaCiao peaked at {peak}, which is effectively silence.");
     }
 
+    /// <summary>The player window draws entirely from these buffers, and a silent one would show as
+    /// a flat line rather than as an error - so what fills them is checked here instead of by looking
+    /// at the window.</summary>
+    [Fact]
+    public void Fills_a_scope_for_every_voice_and_the_mix()
+    {
+        // BellaCiao uses all three voices, which is what makes it the right song for this.
+        var engine = new SidFilePlaybackEngine(SidFile.Parse(BuildPsid(LoadSong("BellaCiao.s"))));
+        Render(engine, SidFilePlaybackEngine.SampleRate / 2);
+
+        var capture = new float[SidFilePlaybackEngine.ScopeSamples];
+
+        for (int voice = 0; voice < 3; voice++)
+        {
+            engine.CaptureVoiceScope(voice, capture);
+            Assert.True(Peak(capture) > 0.001f,
+                $"Voice {voice + 1}'s scope is flat after half a second; its panel would draw a dead line.");
+            // Centred the way the view centres it, which is where the [-1, 1] contract applies -
+            // a 6581 voice arrives sitting on a DC offset.
+            float peak = Peak(Centred(capture));
+            Assert.True(peak <= 1.0f,
+                $"Voice {voice + 1}'s scope swings to {peak} once centred, past the [-1, 1] the view scales to.");
+        }
+
+        engine.CaptureMix(capture);
+        Assert.True(Peak(capture) > 0.001f, "The mix window is flat, so the spectrum would show nothing.");
+    }
+
+    /// <summary>Pause has to hold the tune rather than end it: NAudio keeps asking for samples, and
+    /// returning none would stop playback outright.</summary>
+    [Fact]
+    public void Pausing_yields_silence_without_ending_playback()
+    {
+        var engine = new SidFilePlaybackEngine(SidFile.Parse(BuildPsid(LoadSong("BellaCiao.s"))));
+        Render(engine, SidFilePlaybackEngine.SampleRate / 4);
+
+        long beforePause = engine.SamplesProduced;
+        engine.Paused = true;
+
+        var buffer = new byte[4096];
+        int bytesRead = engine.Read(buffer, 0, buffer.Length);
+        Assert.Equal(buffer.Length, bytesRead);
+        Assert.Equal(0, PeakOf(buffer, bytesRead));
+
+        engine.Paused = false;
+        Render(engine, SidFilePlaybackEngine.SampleRate / 4);
+        Assert.True(engine.SamplesProduced > beforePause, "Playback did not resume after unpausing.");
+    }
+
+    private static void Render(SidFilePlaybackEngine engine, long samples)
+    {
+        var buffer = new byte[4096];
+        long produced = 0;
+        while (produced < samples)
+            produced += engine.Read(buffer, 0, buffer.Length) / 2;
+    }
+
+    private static float[] Centred(float[] samples)
+    {
+        float mean = samples.Average();
+        return samples.Select(sample => sample - mean).ToArray();
+    }
+
+    private static float Peak(float[] samples)
+    {
+        float peak = 0f;
+        foreach (float sample in samples)
+            peak = Math.Max(peak, Math.Abs(sample));
+        return peak;
+    }
+
+    private static int PeakOf(byte[] buffer, int count)
+    {
+        int peak = 0;
+        for (int i = 0; i < count; i += 2)
+            peak = Math.Max(peak, Math.Abs((short)(buffer[i] | (buffer[i + 1] << 8))));
+        return peak;
+    }
+
     [Fact]
     public void Round_trips_the_header_fields_the_editor_writes()
     {

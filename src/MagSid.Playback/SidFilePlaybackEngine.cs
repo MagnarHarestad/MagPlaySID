@@ -37,15 +37,55 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
     private double _nextFrameBoundaryCycles;
     private long _samplesProduced;
 
+    /// <summary>How many samples each per-voice scope and the mix window hold. 2048 at 44.1kHz is
+    /// 46ms - a couple of cycles of a bass note, which is what makes a scope trace readable - and a
+    /// power of two, which the spectrum's FFT needs.</summary>
+    public const int ScopeSamples = 2048;
+
+    // Written on the audio thread, read on the UI thread. Plain circular buffers behind one lock,
+    // as elsewhere in this project: the critical section is a copy of a few KB and the alternative,
+    // a lock-free ring, buys nothing at 60 reads a second.
+    private readonly float[][] _voiceScopes =
+        [new float[ScopeSamples], new float[ScopeSamples], new float[ScopeSamples]];
+
+    private readonly float[] _mixScope = new float[ScopeSamples];
+    private int _scopeWrite;
+    private readonly object _scopeLock = new();
+
+    /// <summary>Half a voice's peak-to-peak swing, as a divisor bringing a trace to [-1, 1].
+    ///
+    /// Voice.Output()'s own comment gives the range as [-2048*255, 2047*255], which holds for the
+    /// 8580 but not the 6581: that model carries a waveform-DAC zero of $380 and an envelope DAC
+    /// offset of $800*$FF, so its output never goes negative at all. The swing is the same either
+    /// way - it is centred differently - so the scale is right for both and the offset is what a
+    /// scope removes, exactly as AC coupling does on real hardware. See VoiceScopeView.</summary>
+    private const float VoiceOutputScale = 2048f * 255f;
+
+    private bool _paused;
+
+    /// <summary>Silences output without tearing the tune down, so resuming carries on rather than
+    /// restarting. The CPU stops being called, so the song stops advancing too.</summary>
+    public bool Paused
+    {
+        get => _paused;
+        set => _paused = value;
+    }
+
     public WaveFormat WaveFormat { get; } = new(SampleRate, 16, 1);
 
     public long SamplesProduced => Interlocked.Read(ref _samplesProduced);
 
     public SidFile File { get; }
 
+    /// <summary>Which subtune is playing, counting from 1.</summary>
+    public int Song { get; }
+
     /// <param name="chipModel">Overrides what the file's own header asks for. Null follows the
     /// header, which is what makes an export of an 8580 song sound like one.</param>
-    public SidFilePlaybackEngine(SidFile file, ChipModel? chipModel = null)
+    /// <param name="song">Which subtune to play, counting from 1. Null takes the file's own start
+    /// song. A tune is set up entirely by its init routine, so switching subtunes means a new
+    /// engine rather than a call on this one.</param>
+    public SidFilePlaybackEngine(SidFile file, ChipModel? chipModel = null, int? song = null)
     {
         if (file.UnsupportedReason() is { } reason)
             throw new SidPlaybackException(reason);
@@ -66,8 +106,10 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
                 _sid.Write(address & 0x1F, value);
         });
 
+        Song = Math.Clamp(song ?? file.StartSong, 1, file.Songs);
+
         // The PSID convention: A holds the song number, counting from zero.
-        _cpu.A = Math.Max(0, file.StartSong - 1);
+        _cpu.A = Song - 1;
         _cpu.X = 0;
         _cpu.Y = 0;
         _cpu.Call(file.InitAddress);
@@ -83,7 +125,7 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
         _nextFrameBoundaryCycles = 0;
     }
 
-    public static SidFilePlaybackEngine FromFile(string path, ChipModel? chipModel = null)
+    public static SidFilePlaybackEngine FromFile(string path, ChipModel? chipModel = null, int? song = null)
     {
         byte[] bytes;
         try
@@ -95,7 +137,7 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
             throw new SidPlaybackException($"Could not read {path}: {ex.Message}");
         }
 
-        return new SidFilePlaybackEngine(SidFile.Parse(bytes), chipModel);
+        return new SidFilePlaybackEngine(SidFile.Parse(bytes), chipModel, song);
     }
 
     /// <summary>Mutes one of the three voices in this engine's output only - a listening aid, exactly
@@ -110,6 +152,15 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
 
         while (samplesWritten < samplesRequested)
         {
+            if (_paused)
+            {
+                // Silence rather than a stalled device: NAudio keeps asking, and returning nothing
+                // would end playback instead of holding it.
+                Array.Clear(samples, samplesWritten, samplesRequested - samplesWritten);
+                samplesWritten = samplesRequested;
+                break;
+            }
+
             double cyclesToNextFrame = _nextFrameBoundaryCycles - _totalCyclesClocked;
             if (cyclesToNextFrame < 1.0)
             {
@@ -120,8 +171,22 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
 
             int deltaT = (int)cyclesToNextFrame;
             int deltaTRemaining = deltaT;
-            int produced = _sid.ClockAndSample(
-                ref deltaTRemaining, samples, samplesWritten, samplesRequested - samplesWritten);
+
+            // One sample at a time, so each voice's own output can be read at the instant that
+            // sample was taken - which is what the scopes draw. ClockAndSample only consumes the
+            // cycles a sample actually needs and checks its count before clocking, so asking for
+            // one repeatedly advances the chip exactly as asking for many at once does.
+            int produced = 0;
+            int room = samplesRequested - samplesWritten;
+            while (produced < room)
+            {
+                int wrote = _sid.ClockAndSample(ref deltaTRemaining, samples, samplesWritten + produced, 1);
+                if (wrote == 0)
+                    break;
+
+                CaptureScopePoint(samples[samplesWritten + produced]);
+                produced += wrote;
+            }
 
             _totalCyclesClocked += deltaT - deltaTRemaining;
             samplesWritten += produced;
@@ -130,6 +195,44 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
 
         Buffer.BlockCopy(samples, 0, buffer, offset, samplesRequested * 2);
         return samplesRequested * 2;
+    }
+
+    private void CaptureScopePoint(short mixSample)
+    {
+        lock (_scopeLock)
+        {
+            int at = _scopeWrite;
+            for (int voice = 0; voice < 3; voice++)
+                _voiceScopes[voice][at] = _sid.Voice(voice).Output() / VoiceOutputScale;
+
+            _mixScope[at] = mixSample / 32768f;
+            _scopeWrite = (at + 1) % ScopeSamples;
+        }
+    }
+
+    /// <summary>The most recent <see cref="ScopeSamples"/> of one voice's own output, oldest first,
+    /// scaled so a full-amplitude voice swings by 2. This is the waveform before the filter, which
+    /// is what a per-channel scope shows and what makes each voice legible on its own.
+    ///
+    /// Not centred on zero: a 6581 voice carries a large DC offset (see VoiceOutputScale), so a
+    /// caller drawing this has to remove the mean the way a scope's AC coupling would.</summary>
+    public void CaptureVoiceScope(int voice, float[] destination) =>
+        CaptureRing(_voiceScopes[voice], destination);
+
+    /// <summary>The most recent <see cref="ScopeSamples"/> of the mixed output, for the spectrum.</summary>
+    public void CaptureMix(float[] destination) => CaptureRing(_mixScope, destination);
+
+    private void CaptureRing(float[] source, float[] destination)
+    {
+        if (destination.Length != ScopeSamples)
+            throw new ArgumentException($"A scope capture is {ScopeSamples} samples.", nameof(destination));
+
+        lock (_scopeLock)
+        {
+            int at = _scopeWrite;
+            Array.Copy(source, at, destination, 0, ScopeSamples - at);
+            Array.Copy(source, 0, destination, ScopeSamples - at, at);
+        }
     }
 
     /// <summary>

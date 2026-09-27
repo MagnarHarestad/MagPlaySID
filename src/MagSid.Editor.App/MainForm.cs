@@ -6,6 +6,7 @@ using MagSid.Core.Serialization;
 using MagSid.Core.Validation;
 using MagSid.Editor.App.Controls;
 using MagSid.Editor.App.Export;
+using MagSid.Editor.App.Player;
 using MagSid.Playback;
 using MagSid.Sid;
 using NAudio.Wave;
@@ -104,12 +105,6 @@ public sealed class MainForm : Form
     private JamEngine? _jamEngine;
     private string? _lastExportedSidPath;
 
-    /// <summary>Plays the exported file by running its own 6502 code, which is a different question
-    /// from what the tracker plays: this one answers "is the file right", not "is the song right".
-    /// Its own device, because it and <see cref="_waveOut"/> each own a SidChip and must never be
-    /// mixing into the same output at once.</summary>
-    private WaveOutEvent? _sidFileOutput;
-    private ToolStripMenuItem? _playLastExportItem;
 
     /// <summary>Where each channel was when playback last stopped, for Space to resume from,
     /// together with where the edit cursor sat at that moment. The cursor is the test for
@@ -184,8 +179,7 @@ public sealed class MainForm : Form
         var saveItem = new ToolStripMenuItem("&Save", null, (_, _) => DoSave());
         var saveAsItem = new ToolStripMenuItem("Save &As...", null, (_, _) => DoSaveAs());
         var exportSidItem = new ToolStripMenuItem("&Export to .sid...", null, (_, _) => DoExportSid());
-        var playInVsidItem = _playLastExportItem =
-            new ToolStripMenuItem("Play &Last Export", null, (_, _) => DoPlayLastExport());
+        var playInVsidItem = new ToolStripMenuItem("&Load and Play .sid...", null, (_, _) => DoLoadAndPlaySid());
 
         // Moved here from a checkbox inside the instrument editor panel itself - it is a
         // once-in-a-while display preference (see EditorPalette... no, EditorSettings.ShowHighHex
@@ -1215,27 +1209,29 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Plays the .sid this session last exported, by executing it.
+    /// Opens a .sid file in the player window, which runs the tune's own 6502 code.
     ///
-    /// This used to hand the file to VICE's vsid.exe. Running it here instead removes the last
-    /// external dependency, and keeps what made the button worth having: the tracker plays a C# port
-    /// of the player, while this runs the bytes that were actually written to disk. When they agree,
-    /// the export is right - which is also asserted, over 1500 frames of every song, in
-    /// SidFilePlaybackTests.
+    /// Any .sid, not only this session's export - but the export is what it is for: the tracker plays
+    /// a C# port of the player, while this executes the bytes that were written to disk, so hearing
+    /// them agree is the last check on an export. It defaults to the file just written for that
+    /// reason.
     /// </summary>
-    private void DoPlayLastExport()
+    private void DoLoadAndPlaySid()
     {
-        if (_sidFileOutput is not null)
+        using var open = new OpenFileDialog
         {
-            StopExportPlayback();
-            return;
+            Filter = "SID tunes (*.sid)|*.sid|All files (*.*)|*.*",
+            Title = "Load and play a .sid",
+        };
+
+        if (_lastExportedSidPath is not null && File.Exists(_lastExportedSidPath))
+        {
+            open.InitialDirectory = Path.GetDirectoryName(_lastExportedSidPath);
+            open.FileName = Path.GetFileName(_lastExportedSidPath);
         }
 
-        if (_lastExportedSidPath is null)
-        {
-            MessageBox.Show(this, "Export a .sid file first.", "Nothing to play", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        if (open.ShowDialog(this) != DialogResult.OK)
             return;
-        }
 
         // The editor's own playback owns a SidChip too, and two of them mixing into one device is
         // not something anyone wants to hear.
@@ -1243,34 +1239,15 @@ public sealed class MainForm : Form
 
         try
         {
-            // No chip model passed: the file's own header says which it was exported for, and
-            // following it is the point of playing the file rather than the song.
-            var engine = SidFilePlaybackEngine.FromFile(_lastExportedSidPath);
-
-            _sidFileOutput = new WaveOutEvent();
-            _sidFileOutput.PlaybackStopped += (_, _) => BeginInvoke(StopExportPlayback);
-            _sidFileOutput.Init(engine);
-            _sidFileOutput.Play();
-
-            if (_playLastExportItem is not null)
-                _playLastExportItem.Text = "Stop P&laying Export";
+            // Owned by the form, and shown non-modally so the tracker stays usable behind it.
+            var player = new SidPlayerForm(open.FileName);
+            player.FormClosed += (_, _) => player.Dispose();
+            player.Show(this);
         }
         catch (SidPlaybackException ex)
         {
-            StopExportPlayback();
-            MessageBox.Show(this, ex.Message, "Cannot play the exported .sid", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "Cannot play this .sid", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-    }
-
-    private void StopExportPlayback()
-    {
-        var output = _sidFileOutput;
-        _sidFileOutput = null;
-        output?.Stop();
-        output?.Dispose();
-
-        if (_playLastExportItem is not null)
-            _playLastExportItem.Text = "Play &Last Export";
     }
 
     private void SaveTo(string path)
