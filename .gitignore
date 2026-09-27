@@ -7,14 +7,17 @@ obj/
 !/bin/win_x86/
 !/bin/win_x86/c6510.exe
 
-# Assembler output
+# Assembler output. The differential tests write these beside the player source and clean up after
+# themselves, but a crashed run leaves them behind.
 *.prg
 *.sym
-program.prg
-program.sym
 
-# VICE
-vice.log
+# The editor's scratch copy of the song being exported through the c6510 path. Overwritten on every
+# such export and restored afterwards, so it is never worth committing.
+SongData/Patterns.s
+
+# Sound Forge peak caches, regenerated on demand from the .wav beside them.
+*.sfk
 
 # OS
 Thumbs.db
