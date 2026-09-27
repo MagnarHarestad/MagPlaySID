@@ -1,7 +1,11 @@
-# Build output
+# Build output. "bin/" would also catch the top-level bin/ that holds the c6510
+# assembler, which is part of this repository - hence the negations.
 bin/
 obj/
 .vs/
+!/bin/
+!/bin/win_x86/
+!/bin/win_x86/c6510.exe
 
 # Assembler output
 *.prg
