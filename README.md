@@ -44,6 +44,12 @@ if nothing checked them. So each is pinned to real assembler output rather than 
   port of the player, and five emitters mirroring the tables `Tables.s` generates. 34 mnemonics in 7
   addressing modes is all the player uses, which is small enough to emit directly.
 
+**Playing the exported file back** is a separate answer to a separate question. `MagSid.Playback`
+carries a 6502 interpreter and a PSID loader, so the editor plays a `.sid` by *executing* it —
+`SidFilePlaybackTests` then checks that those bytes, run on the CPU, write the same SID registers as
+`SongSequencer` over 1500 frames of every song. Goldens prove the export is the right bytes; this
+proves those bytes make the right music. Neither alone would.
+
 `SongImageTests` compares the **complete image** — player and song data — against what c6510
 produced, for every song and for BellaCiao at `$2000` and `$4400`. Two fixture songs come with it
 because the real songs reach only two of the four feature combinations: five are bare, BellaCiao has
@@ -73,9 +79,6 @@ dotnet publish src/MagSid.Editor.App/MagSid.Editor.App.csproj -c Release -r win-
 ```
 
 ## Optional
-
-**VICE**, for the editor's "Play in VSID" button. Install it anywhere usual and the editor will find
-`vsid.exe`; set `VICE_HOME` if it does not. Everything else works without it.
 
 **The player sources**, if you want to assemble the C64 side or regenerate a golden. They are in the
 Censor SVN tree under `MAGSIDv7_LowMemory`, together with the c6510 assembler, its include library,

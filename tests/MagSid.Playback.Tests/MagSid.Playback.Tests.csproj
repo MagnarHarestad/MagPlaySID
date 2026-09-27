@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MagSid.Playback\MagSid.Playback.csproj" />
     <ProjectReference Include="..\..\src\MagSid.Core\MagSid.Core.csproj" />
+    <ProjectReference Include="..\..\src\MagSid.Assembler\MagSid.Assembler.csproj" />
   </ItemGroup>
 
 </Project>

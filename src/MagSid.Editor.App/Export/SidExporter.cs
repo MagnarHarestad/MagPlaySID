@@ -37,61 +37,6 @@ public static class SidExporter
 
     public sealed record Metadata(string Name, string Author, string Released);
 
-    /// <summary>
-    /// Finds VICE's dedicated SID player, for auditioning an exported file without leaving the
-    /// editor.
-    ///
-    /// VICE is not part of this repository and is not needed to build or export anything, so this
-    /// looks where someone would actually have installed it rather than at a fixed path. Set
-    /// VICE_HOME to point at an install this does not find.
-    /// </summary>
-    public static string LocateVsidExecutable()
-    {
-        var searched = new List<string>();
-
-        foreach (string directory in VsidSearchDirectories())
-        {
-            string candidate = Path.Combine(directory, "vsid.exe");
-            searched.Add(candidate);
-            if (File.Exists(candidate))
-                return candidate;
-        }
-
-        throw new SidExportException(
-            "VICE's vsid.exe was not found. Install VICE, or set VICE_HOME to the folder holding " +
-            "vsid.exe." + Environment.NewLine + Environment.NewLine + "Looked in:" +
-            Environment.NewLine + string.Join(Environment.NewLine, searched.Select(p => "  " + p)));
-    }
-
-    private static IEnumerable<string> VsidSearchDirectories()
-    {
-        if (Environment.GetEnvironmentVariable("VICE_HOME") is { Length: > 0 } viceHome)
-            yield return viceHome;
-
-        // Beside the editor, which is how a self-contained folder install would look.
-        yield return AppContext.BaseDirectory;
-
-        foreach (string root in new[]
-                 {
-                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                     @"C:\",
-                 })
-        {
-            if (root.Length == 0)
-                continue;
-
-            yield return Path.Combine(root, "VICE");
-            yield return Path.Combine(root, "vice");
-        }
-
-        foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-                 .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            yield return directory;
-        }
-    }
-
     public static byte[] Export(
         Song song, Metadata metadata, ChipModel chipModel, int loadAddress = SidLoadAddress.Default)
     {
