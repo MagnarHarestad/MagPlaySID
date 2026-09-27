@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using MagSid.Assembler;
 using MagSid.Core;
 using MagSid.Core.Model;
 using MagSid.Core.Serialization;
@@ -15,19 +16,21 @@ public sealed class SidExportException : Exception
 }
 
 /// <summary>
-/// Builds a playable PSID (.sid) file out of the song currently open in the editor, by
-/// round-tripping through the REAL, already-verified assembly player in the sibling
-/// MAGSIDv7_LowMemory project rather than re-implementing 6502 code generation here.
+/// Builds a playable PSID (.sid) file out of the song currently open in the editor.
 ///
-/// The player's music.init/music.play code plus the Lua-generated song/pattern tables live
-/// entirely in one self-contained memory segment (confirmed byte-identical to the real demo
-/// build) - which is exactly the PSID convention (init/play entry points called by an external
-/// driver, no on-chip IRQ setup required). export_sid.s (in MAGSIDv7_LowMemory\, checked in
-/// alongside the assembly source it drives) assembles just that segment, with the demo's BASIC
-/// stub/IRQ/sprite/screen code left out.
+/// The image is built in C# by <see cref="SongImageBuilder"/>, so a copy of the editor exports on
+/// its own - it no longer needs c6510.exe, the include library or the player sources beside it,
+/// which a distributed .exe does not have. That is only defensible because the C# build is compared
+/// byte for byte against what c6510 produces from the real Code\musicplayer.s and Startup\Tables.s,
+/// for every song and at more than one load address, in MagSid.Assembler.Tests.
 ///
-/// The segment is relocatable, so the load address is the caller's choice: it is passed to the
-/// assembler rather than patched afterwards, which is what keeps the player's absolute references
+/// The old path is still here behind <c>useExternalAssembler</c>, as the cross-check that keeps the
+/// two honest. Play in VSID and the demo build are unaffected either way.
+///
+/// What comes out is one self-contained memory segment with music.init/music.play at its head, which
+/// is exactly the PSID convention: entry points an external driver calls, no on-chip IRQ setup. The
+/// segment is relocatable, so the load address is the caller's choice - the labels are resolved
+/// against it rather than patched afterwards, which is what keeps the player's absolute references
 /// into its own tables correct.
 /// </summary>
 public static class SidExporter
@@ -54,7 +57,48 @@ public static class SidExporter
     /// player is relocated by reassembling at this origin rather than by patching, so any address
     /// <see cref="SidLoadAddress.Validate"/> accepts produces a byte-identical tune bar the
     /// addresses themselves.</param>
-    public static byte[] Export(Song song, Metadata metadata, ChipModel chipModel, int loadAddress = SidLoadAddress.Default)
+    /// <param name="useExternalAssembler">Assembles through c6510 instead of building the image in
+    /// C#. The two produce identical bytes for every song in SongData, so this exists to settle an
+    /// argument rather than because either is the real one - but it needs the assembler and the
+    /// player sources beside the editor, which a distributed copy does not have.</param>
+    public static byte[] Export(
+        Song song, Metadata metadata, ChipModel chipModel,
+        int loadAddress = SidLoadAddress.Default, bool useExternalAssembler = false)
+    {
+        // Patterns no channel plays any more are pruned on the way out: dropping a song-order entry
+        // deliberately leaves its pattern in the pool so typing the number again brings the data
+        // back, but carrying that dead weight into the C64 binary would cost bytes for something
+        // that can never sound. WithUnusedPatternsRemoved returns a copy, so the open song is
+        // untouched.
+        var exported = song.WithUnusedPatternsRemoved();
+
+        byte[] memoryImage;
+        try
+        {
+            memoryImage = useExternalAssembler
+                ? AssembleWithC6510(exported, loadAddress)
+                : SongImageBuilder.Build(exported, loadAddress);
+        }
+        catch (SongTooLargeException ex)
+        {
+            // A real "this song does not fit the format", not a bug - the same limits Tables.s
+            // asserts. Worth showing in the user's own terms rather than as a crash.
+            throw new SidExportException(ex.Message);
+        }
+
+        // Re-checked here and not only in the dialog: Export is callable on its own, and a tune that
+        // runs into I/O or off the top of memory is worth refusing rather than writing a .sid that
+        // cannot play.
+        if (SidLoadAddress.Validate(loadAddress, memoryImage.Length) is { } problem)
+            throw new SidExportException(problem);
+
+        return BuildPsid(memoryImage, metadata, chipModel, loadAddress);
+    }
+
+    /// <summary>The original path: overwrite SongData\Patterns.s, run c6510 over export_sid.s, read
+    /// the .prg back. Kept because it is what proves the C# build right - but it mutates checked-in
+    /// source and needs the whole build tree, which is why it is no longer the default.</summary>
+    private static byte[] AssembleWithC6510(Song song, int loadAddress)
     {
         string playerRoot = LocatePlayerProjectRoot();
         string patternsPath = Path.Combine(playerRoot, "SongData", "Patterns.s");
@@ -74,16 +118,10 @@ public static class SidExporter
 
         try
         {
-            // Tables.s reads its song data from this exact, hardcoded relative path - swap in
-            // the song being exported, build, then always restore what was there before,
-            // whether or not the assembly below succeeds.
-            //
-            // Patterns no channel plays any more are pruned here rather than in the editor:
-            // dropping a song-order entry deliberately leaves its pattern in the pool so typing
-            // the number again brings the data back, but carrying that dead weight into the C64
-            // binary would cost bytes for something that can never sound. WithUnusedPatternsRemoved
-            // returns a copy, so the song the user has open is untouched.
-            PatternsFileWriter.Write(song.WithUnusedPatternsRemoved(), patternsPath);
+            // Tables.s reads its song data from this exact, hardcoded relative path - swap in the
+            // song being exported, build, then always restore what was there before, whether or not
+            // the assembly below succeeds. The song arrives already pruned.
+            PatternsFileWriter.Write(song, patternsPath);
 
             RunAssembler(assemblerPath, playerRoot, tempPrgPath, tempSymPath, loadAddress);
 
@@ -94,15 +132,7 @@ public static class SidExporter
                     $"Assembled .prg has an unexpected load address (expected ${loadAddress:X4}).");
             }
 
-            byte[] memoryImage = prgBytes[2..];
-
-            // Re-checked here and not only in the dialog: Export is callable on its own, and a
-            // tune that runs into I/O or off the top of memory is worth refusing rather than
-            // writing a .sid that cannot play.
-            if (SidLoadAddress.Validate(loadAddress, memoryImage.Length) is { } problem)
-                throw new SidExportException(problem);
-
-            return BuildPsid(memoryImage, metadata, chipModel, loadAddress);
+            return prgBytes[2..];
         }
         finally
         {

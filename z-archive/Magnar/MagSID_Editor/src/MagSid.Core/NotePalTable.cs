@@ -1,12 +1,16 @@
 using MagSid.Core.Model;
 
-namespace MagSid.Playback;
+namespace MagSid.Core;
 
 /// <summary>
 /// The 96-entry (C-0..B-7) PAL SID frequency table, ported byte-for-byte from
 /// MAGSIDv7_LowMemory\Includes\SID_PAL_Note_table.s - the exact same data already built
-/// and verified sounding correct in VICE earlier this session. Not recomputed
+/// and verified sounding correct in VICE. Not recomputed
 /// mathematically, to guarantee bit-exact parity with the assembly player.
+///
+/// In MagSid.Core rather than MagSid.Playback because it is model data, not playback: the .sid
+/// export's note_freq_low/high tables are built from it too, and the assembler has no business
+/// depending on the audio engine to read a lookup table.
 /// </summary>
 public static class NotePalTable
 {

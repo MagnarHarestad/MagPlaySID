@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
+  </ItemGroup>
+
   <!-- Opcodes and Emitter6502.Emit are internal seams the table test drives directly, so it can
        check every (mnemonic, mode) pair against c6510 without widening the public API. -->
   <ItemGroup>

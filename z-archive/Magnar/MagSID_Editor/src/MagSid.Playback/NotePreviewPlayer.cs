@@ -1,3 +1,4 @@
+using MagSid.Core;
 using MagSid.Core.Model;
 using MagSid.Sid;
 using NAudio.Wave;

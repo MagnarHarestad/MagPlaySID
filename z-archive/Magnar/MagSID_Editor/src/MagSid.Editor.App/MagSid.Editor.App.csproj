@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
+    <ProjectReference Include="..\MagSid.Assembler\MagSid.Assembler.csproj" />
     <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
   </ItemGroup>
 

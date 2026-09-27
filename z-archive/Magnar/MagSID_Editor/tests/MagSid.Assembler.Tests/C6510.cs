@@ -54,6 +54,12 @@ internal static class C6510
             {
                 args.Add("-p");
                 args.Add("../../../include/");
+                // Both halves are needed when the origin moves: the declaration moves what the
+                // driver assembles, and -s says which block to save. Passing only the second saves
+                // from an address the assembler put nothing at, which comes back as filler. Drivers
+                // that do not read v_export_loc ignore the declaration.
+                args.Add("-d");
+                args.Add($"v_export_loc=${origin:X4}");
                 args.Add("-s");
                 args.Add(prgPath);
                 args.Add($"${origin:X4}");
