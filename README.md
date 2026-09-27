@@ -18,6 +18,23 @@ deliberate port of `Code/musicplayer.s`, and `MagSid.Core.SongSizeCalculator` mi
 emitter in `Startup/Tables.s` closely enough that its byte counts are pinned against real assembler
 output in `SongSizeTests`.
 
+**`MagSid.Assembler`** — the beginning of a standalone `.sid` export, so a copy of the editor can
+build one without the c6510 binary beside it. Not an assembler for text: it is a byte emitter with
+labels, plus `PlayerProgram`, a line-for-line port of `Code/musicplayer.s`. The sources could not be
+fed to an off-the-shelf 6502 assembler anyway — `Startup/Tables.s` is a Lua program and the macro
+library is written in c6510's own dialect — but the player itself only uses 34 mnemonics in 7
+addressing modes, which is small enough to emit directly.
+
+Both halves of it are checked against the real assembler rather than reviewed: `OpcodeTableTests`
+assembles one instruction per entry in the opcode table through c6510 and compares the bytes, and
+`PlayerImageTests` compares the whole emitted player against `Code/musicplayer.s` for every song,
+plus two fixtures that turn on the SLIDE paths no real song uses. Those tests fail loudly when
+c6510 is missing instead of skipping — a silently skipped differential test reports green while
+checking nothing.
+
+Still to come: emitting the song tables, which is what would let `SidExporter` drop the external
+assembler entirely. Until then the export shells out to c6510 as before.
+
 ## Layout
 
 The folder structure looks odd on purpose. The editor locates the assembler and the include library

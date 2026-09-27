@@ -584,7 +584,7 @@ Voice_Tick:
 		iny
 		lda (ZP_lb),y
 		beq .loopback
-		; ISC (illegal $FF) is INC then SBC, so this one 3-byte instruction is the inc + cmp pair it
+		; ISC (illegal $F7 zp,x) is INC then SBC, so this one instruction is the inc + cmp pair it
 		; replaces: with carry set, SBC gives A - counter, zero exactly when equal. CARRY MUST BE SET
 		; - it is, only because the sole way in is the falling-through cmp #LOOP_END above.
 		isc voice_loop_counter,x
