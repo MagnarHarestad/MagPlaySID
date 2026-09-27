@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
+    <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- The file Magnar actually double-clicks. The project keeps its own name; only the built
+         assembly is renamed, so the .exe and its .dll are MagSID-Editor.* -->
+    <AssemblyName>MagSID-Editor</AssemblyName>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>MagSID.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embedded as well as set as ApplicationIcon: the latter only puts it on the .exe for
+         Explorer/taskbar, while Form.Icon needs to load it at runtime. See AppIcon.cs. -->
+    <EmbeddedResource Include="MagSID.ico" />
+  </ItemGroup>
+
+  <!-- Everything the app needs except its own four files goes into Addons\, so the folder shows
+       the .exe rather than twenty DLLs. Program.Main registers a resolver for that folder before
+       anything is loaded from it - the runtime only looks beside the .exe on its own. -->
+  <!-- Skipped when publishing: a single-file publish bundles the dependencies into the .exe
+       itself, and moving them aside first would take them out from under the bundler. -->
+  <Target Name="CollectDependenciesIntoAddons" AfterTargets="Build"
+          Condition="'$(_IsPublishing)' != 'true'">
+    <ItemGroup>
+      <AddonFile Include="$(OutDir)*.dll;$(OutDir)*.pdb"
+                 Exclude="$(OutDir)$(AssemblyName).dll;$(OutDir)$(AssemblyName).pdb" />
+    </ItemGroup>
+    <Move SourceFiles="@(AddonFile)" DestinationFolder="$(OutDir)Addons" ContinueOnError="true" />
+  </Target>
+
+</Project>

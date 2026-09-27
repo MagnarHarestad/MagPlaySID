@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+.vs/
+
+# Assembler output
+*.prg
+*.sym
+program.prg
+program.sym
+
+# VICE
+vice.log
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Python tool cache
+__pycache__/
+*.pyc
