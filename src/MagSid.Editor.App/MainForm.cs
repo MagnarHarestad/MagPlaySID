@@ -6,6 +6,7 @@ using MagSid.Core.Serialization;
 using MagSid.Core.Validation;
 using MagSid.Editor.App.Controls;
 using MagSid.Editor.App.Export;
+using MagSid.Editor.App.Daw;
 using MagSid.Editor.App.Player;
 using MagSid.Playback;
 using MagSid.Sid;
@@ -21,6 +22,13 @@ public sealed class MainForm : Form
     private readonly InstrumentListControl _instrumentList = new();
     private readonly InstrumentEditorPanel _instrumentEditorPanel = new();
     private readonly TrackerGridControl _trackerGrid = new();
+
+    /// <summary>The DAW view, built once and swapped in beside the retro layout rather than
+    /// rebuilt on every switch - it carries selection and scroll state that should survive going
+    /// away and coming back.</summary>
+    private readonly DawView _dawView = new();
+    private ToolStripMenuItem? _viewToggleItem;
+    private bool _dawShowing;
 
     // Minimum 0, not 1: Song.Speed=0 is a real, legal value - "tick every frame", which
     // e.g. the Lightforce port uses deliberately (its original has no internal speed divider
@@ -219,6 +227,12 @@ public sealed class MainForm : Form
         var optimizeItem = new ToolStripMenuItem("&Optimize", null, (_, _) => DoOptimize());
         menu.Items.Add(optimizeItem);
 
+        // Beside Optimize, as asked. It swaps the middle of the window and nothing else: the menu,
+        // the toolbar, the transport and the status bar stay exactly where they were, so switching
+        // never moves what you were reaching for.
+        _viewToggleItem = new ToolStripMenuItem("&DAW", null, (_, _) => ToggleView());
+        menu.Items.Add(_viewToggleItem);
+
         return menu;
     }
 
@@ -322,7 +336,51 @@ public sealed class MainForm : Form
         _trackerGrid.Dock = DockStyle.Fill;
         _rootSplit.Panel2.Controls.Add(_trackerGrid);
 
-        return _rootSplit;
+        _dawView.Dock = DockStyle.Fill;
+        _dawView.Visible = false;
+        _dawView.InstrumentEdited += _ =>
+        {
+            _session.MarkDirty();
+            _instrumentList.SetInstruments(_session.Song.Instruments);
+        };
+
+        // Both fill the same host. Added DAW first so the docked tracker is laid out last and keeps
+        // the space it already had; only one is ever visible.
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = EditorPalette.Background };
+        host.Controls.Add(_dawView);
+        host.Controls.Add(_rootSplit);
+        return host;
+    }
+
+    /// <summary>
+    /// Swaps the centre of the window between the tracker and the DAW view.
+    ///
+    /// Both edit the same Song object, so there is nothing to convert and nothing that can fall out
+    /// of step - the two views are two ways of looking at one thing. The controls are kept alive on
+    /// both sides rather than rebuilt, so selection and scroll survive a round trip.
+    /// </summary>
+    private void ToggleView()
+    {
+        _dawShowing = !_dawShowing;
+
+        if (_dawShowing)
+        {
+            _dawView.LoadSong(_session.Song);
+            if (_instrumentList.SelectedInstrument is { } selected)
+                _dawView.SelectInstrument(selected.Number);
+        }
+        else if (_dawView.SelectedInstrumentNumber is { } number)
+        {
+            // Carry the DAW's own selection back, so the retro view opens on whatever was just
+            // being worked on rather than jumping somewhere else.
+            _instrumentList.SelectInstrumentNumber(number);
+        }
+
+        _rootSplit.Visible = !_dawShowing;
+        _dawView.Visible = _dawShowing;
+
+        if (_viewToggleItem is not null)
+            _viewToggleItem.Text = _dawShowing ? "&Retro" : "&DAW";
     }
 
     /// <summary>SplitterDistance is a pixel offset into a control that, at the point
