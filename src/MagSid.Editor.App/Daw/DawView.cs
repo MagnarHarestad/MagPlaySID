@@ -14,6 +14,7 @@ namespace MagSid.Editor.App.Daw;
 /// </summary>
 internal sealed class DawView : Panel
 {
+    private readonly ArrangeView _arrange = new();
     private readonly DawInstrumentView _instrument = new();
     private readonly Panel _placeholder = new();
     private readonly FlowLayoutPanel _tabs = new();
@@ -41,11 +42,21 @@ internal sealed class DawView : Panel
     /// refresh whatever else is showing the same data.</summary>
     public event Action<Instrument>? InstrumentEdited;
 
+    /// <summary>The song order changed here. The tracker is showing the same list in its own
+    /// column, so it has to be told.</summary>
+    public event Action? OrderEdited;
+
     public void LoadSong(Song song)
     {
         _song = song;
+        _arrange.LoadSong(song);
         RefreshInstrumentList();
     }
+
+    /// <summary>Which order entry each channel is playing. Three numbers, because the channels
+    /// genuinely are in three different places - see ArrangeView.</summary>
+    public void SetPlayheads(int channel1, int channel2, int channel3) =>
+        _arrange.SetPlayheads(channel1, channel2, channel3);
 
     /// <summary>Follows the retro view's own selection, so switching views lands on the instrument
     /// that was already being worked on rather than resetting to the first.</summary>
@@ -97,7 +108,7 @@ internal sealed class DawView : Panel
 
         foreach (var (tab, label, ready) in new[]
                  {
-                     (DawTab.Arrange, "ARRANGE", false),
+                     (DawTab.Arrange, "ARRANGE", true),
                      (DawTab.Instrument, "INSTRUMENT", true),
                      (DawTab.PianoRoll, "PIANO ROLL", false),
                  })
@@ -118,6 +129,10 @@ internal sealed class DawView : Panel
         _instrumentList.ItemHeight = 22;
         _instrumentList.SelectedIndexChanged += (_, _) => ShowSelectedInstrument();
 
+        _arrange.Dock = DockStyle.Fill;
+        _arrange.OrderEdited += () => OrderEdited?.Invoke();
+        _arrange.PatternActivated += (_, _) => { /* the piano roll's cue, once it exists */ };
+
         _instrument.Dock = DockStyle.Fill;
         _instrument.Edited += instrument =>
         {
@@ -137,6 +152,7 @@ internal sealed class DawView : Panel
             Text = "Not built yet — use RETRO for this.",
         });
 
+        Controls.Add(_arrange);
         Controls.Add(_instrument);
         Controls.Add(_placeholder);
         Controls.Add(_instrumentList);
@@ -160,8 +176,12 @@ internal sealed class DawView : Panel
     private void Show(DawTab tab)
     {
         _current = tab;
+        _arrange.Visible = tab == DawTab.Arrange;
         _instrument.Visible = tab == DawTab.Instrument;
-        _placeholder.Visible = tab != DawTab.Instrument;
+        _placeholder.Visible = tab == DawTab.PianoRoll;
+
+        // The instrument list belongs to the instrument editor; the arrangement has its own
+        // channel headers and would only be narrowed by it.
         _instrumentList.Visible = tab == DawTab.Instrument;
 
         foreach (var button in _tabButtons)

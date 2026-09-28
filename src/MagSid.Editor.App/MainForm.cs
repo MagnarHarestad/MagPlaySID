@@ -344,6 +344,16 @@ public sealed class MainForm : Form
             _instrumentList.SetInstruments(_session.Song.Instruments);
         };
 
+        _dawView.OrderEdited += () =>
+        {
+            _session.MarkDirty();
+
+            // The tracker shows the same order in its own column, and MarkDirty deliberately does
+            // not repopulate controls - so it is told here rather than left a view behind.
+            _trackerGrid.SetSong(_session.Song);
+            RefreshSongLength();
+        };
+
         // Both fill the same host. Added DAW first so the docked tracker is laid out last and keeps
         // the space it already had; only one is ever visible.
         var host = new Panel { Dock = DockStyle.Fill, BackColor = EditorPalette.Background };
@@ -908,6 +918,12 @@ public sealed class MainForm : Form
 
         _instrumentList.SetInstruments(song.Instruments);
         _trackerGrid.SetSong(song);
+
+        // Undo restores a whole-song snapshot rather than reversing an action, so the DAW view has
+        // to be pointed at the new object too - it would otherwise go on editing the song that was
+        // just undone, and the two views would silently disagree about what the song is.
+        _dawView.LoadSong(song);
+
         RefreshStatusBar();
     }
 
