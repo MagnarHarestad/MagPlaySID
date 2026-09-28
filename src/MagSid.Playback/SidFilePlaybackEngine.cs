@@ -37,19 +37,34 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
     private double _nextFrameBoundaryCycles;
     private long _samplesProduced;
 
-    /// <summary>How many samples each per-voice scope and the mix window hold. 2048 at 44.1kHz is
-    /// 46ms - a couple of cycles of a bass note, which is what makes a scope trace readable - and a
-    /// power of two, which the spectrum's FFT needs.</summary>
+    /// <summary>How many samples one capture returns. 2048 at 44.1kHz is 46ms - a couple of cycles
+    /// of a bass note, which is what makes a scope trace readable - and a power of two, which the
+    /// spectrum's FFT needs.</summary>
     public const int ScopeSamples = 2048;
+
+    /// <summary>
+    /// How much history the rings keep: 1.5 seconds.
+    ///
+    /// It has to be longer than the output device's latency, and by a wide margin. Read() runs as
+    /// far ahead as the buffer is deep - WaveOutEvent defaults to 300ms - so the samples a listener
+    /// is hearing right now were written that long ago. A ring only as long as one capture would
+    /// have overwritten them before anything could draw them, which is what made the scopes look
+    /// frozen: they were showing the render frontier, refreshed in bursts about ten times a second,
+    /// rather than the music.
+    /// </summary>
+    private const int RingSamples = 65536;
 
     // Written on the audio thread, read on the UI thread. Plain circular buffers behind one lock,
     // as elsewhere in this project: the critical section is a copy of a few KB and the alternative,
     // a lock-free ring, buys nothing at 60 reads a second.
     private readonly float[][] _voiceScopes =
-        [new float[ScopeSamples], new float[ScopeSamples], new float[ScopeSamples]];
+        [new float[RingSamples], new float[RingSamples], new float[RingSamples]];
 
-    private readonly float[] _mixScope = new float[ScopeSamples];
-    private int _scopeWrite;
+    private readonly float[] _mixScope = new float[RingSamples];
+
+    /// <summary>The absolute index of the next sample to be written, so a caller holding a play
+    /// position can ask for the window that ends there.</summary>
+    private long _scopeWritten;
     private readonly object _scopeLock = new();
 
     /// <summary>Half a voice's peak-to-peak swing, as a divisor bringing a trace to [-1, 1].
@@ -201,12 +216,22 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
     {
         lock (_scopeLock)
         {
-            int at = _scopeWrite;
+            int at = (int)(_scopeWritten % RingSamples);
             for (int voice = 0; voice < 3; voice++)
                 _voiceScopes[voice][at] = _sid.Voice(voice).Output() / VoiceOutputScale;
 
             _mixScope[at] = mixSample / 32768f;
-            _scopeWrite = (at + 1) % ScopeSamples;
+            _scopeWritten++;
+        }
+    }
+
+    /// <summary>How many samples have been captured. The newest window ends here.</summary>
+    public long ScopeSamplesWritten
+    {
+        get
+        {
+            lock (_scopeLock)
+                return _scopeWritten;
         }
     }
 
@@ -217,21 +242,50 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
     /// Not centred on zero: a 6581 voice carries a large DC offset (see VoiceOutputScale), so a
     /// caller drawing this has to remove the mean the way a scope's AC coupling would.</summary>
     public void CaptureVoiceScope(int voice, float[] destination) =>
-        CaptureRing(_voiceScopes[voice], destination);
+        CaptureRing(_voiceScopes[voice], destination, long.MaxValue);
+
+    /// <param name="endingAt">The absolute sample index the window should end at - pass the output
+    /// device's own play position (AuditionClock.SamplesPlayed), not this engine's produced count.
+    /// Produced samples are ones already handed to the sound card, up to a whole buffer before
+    /// anyone hears them, so drawing those makes the scope lead the music and jump a buffer at a
+    /// time. Clamped to what the ring still holds.</param>
+    public void CaptureVoiceScope(int voice, float[] destination, long endingAt) =>
+        CaptureRing(_voiceScopes[voice], destination, endingAt);
 
     /// <summary>The most recent <see cref="ScopeSamples"/> of the mixed output, for the spectrum.</summary>
-    public void CaptureMix(float[] destination) => CaptureRing(_mixScope, destination);
+    public void CaptureMix(float[] destination) => CaptureRing(_mixScope, destination, long.MaxValue);
 
-    private void CaptureRing(float[] source, float[] destination)
+    /// <inheritdoc cref="CaptureVoiceScope(int, float[], long)"/>
+    public void CaptureMix(float[] destination, long endingAt) =>
+        CaptureRing(_mixScope, destination, endingAt);
+
+    private void CaptureRing(float[] source, float[] destination, long endingAt)
     {
         if (destination.Length != ScopeSamples)
             throw new ArgumentException($"A scope capture is {ScopeSamples} samples.", nameof(destination));
 
         lock (_scopeLock)
         {
-            int at = _scopeWrite;
-            Array.Copy(source, at, destination, 0, ScopeSamples - at);
-            Array.Copy(source, 0, destination, ScopeSamples - at, at);
+            // Never past what has been written, and never further back than the ring still holds.
+            long end = Math.Min(endingAt, _scopeWritten);
+            end = Math.Max(end, Math.Min(_scopeWritten, ScopeSamples));
+            end = Math.Max(end, _scopeWritten - RingSamples + ScopeSamples);
+
+            long start = end - ScopeSamples;
+            if (start < 0)
+            {
+                // Before the first full window exists, hand back silence rather than whatever the
+                // ring was allocated with - a scope drawing uninitialised memory would be worse
+                // than one drawing a flat line.
+                Array.Clear(destination);
+                return;
+            }
+
+            int from = (int)(start % RingSamples);
+            int firstRun = Math.Min(ScopeSamples, RingSamples - from);
+            Array.Copy(source, from, destination, 0, firstRun);
+            if (firstRun < ScopeSamples)
+                Array.Copy(source, 0, destination, firstRun, ScopeSamples - firstRun);
         }
     }
 

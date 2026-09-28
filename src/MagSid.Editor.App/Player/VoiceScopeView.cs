@@ -55,9 +55,11 @@ internal sealed class VoiceScopeView : Control
         }
     }
 
-    public void Update(SidFilePlaybackEngine engine)
+    /// <param name="atSample">Where the listener actually is, from the output device - see
+    /// SidPlayerForm.</param>
+    public void Update(SidFilePlaybackEngine engine, long atSample)
     {
-        engine.CaptureVoiceScope(_voice, _samples);
+        engine.CaptureVoiceScope(_voice, _samples, atSample);
 
         // AC coupling, as a scope's input stage does it. A 6581 voice never goes negative - it sits
         // on a large DC offset - so without this the trace would sit off the top of the panel and a

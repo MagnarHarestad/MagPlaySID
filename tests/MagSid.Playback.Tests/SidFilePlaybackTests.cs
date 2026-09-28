@@ -143,6 +143,65 @@ public class SidFilePlaybackTests
         Assert.True(Peak(capture) > 0.001f, "The mix window is flat, so the spectrum would show nothing.");
     }
 
+    /// <summary>
+    /// A capture must follow the sample it is asked for, not the render frontier.
+    ///
+    /// This is the bug that made the scopes look frozen: Read() runs a whole output buffer ahead,
+    /// so the newest samples are ones nobody has heard yet, and they arrive in bursts about ten
+    /// times a second however often the UI ticks. Drawing the window that ends at the device's play
+    /// position fixes both the lag and the stepping - but only if the ring is longer than the
+    /// latency, which is the half that is easy to get wrong and impossible to see.
+    /// </summary>
+    [Fact]
+    public void A_capture_follows_the_sample_it_is_asked_for()
+    {
+        var engine = new SidFilePlaybackEngine(SidFile.Parse(BuildPsid(LoadSong("BellaCiao.s"))));
+        Render(engine, SidFilePlaybackEngine.SampleRate);
+
+        long frontier = engine.ScopeSamplesWritten;
+        Assert.True(frontier >= SidFilePlaybackEngine.SampleRate,
+            $"Only {frontier} samples were captured; the test would prove little.");
+
+        // A third of a second back - well past any sane output latency, and the distance at which
+        // the old ring had already overwritten what was audible.
+        long behind = frontier - (SidFilePlaybackEngine.SampleRate / 3);
+
+        var newest = new float[SidFilePlaybackEngine.ScopeSamples];
+        var earlier = new float[SidFilePlaybackEngine.ScopeSamples];
+        engine.CaptureVoiceScope(0, newest, frontier);
+        engine.CaptureVoiceScope(0, earlier, behind);
+
+        Assert.False(newest.SequenceEqual(earlier),
+            "The same window came back for two positions a third of a second apart, so the capture " +
+            "is ignoring the position it was given and the scopes cannot follow the music.");
+
+        // And asking twice for the same instant is stable, or the trace would shimmer.
+        var again = new float[SidFilePlaybackEngine.ScopeSamples];
+        engine.CaptureVoiceScope(0, again, behind);
+        Assert.Equal(earlier, again);
+    }
+
+    /// <summary>The ring has to outlast the output latency by a wide margin, or the window a
+    /// listener is hearing is gone before anything can draw it.</summary>
+    [Fact]
+    public void Keeps_more_than_a_second_of_history()
+    {
+        var engine = new SidFilePlaybackEngine(SidFile.Parse(BuildPsid(LoadSong("BellaCiao.s"))));
+        Render(engine, SidFilePlaybackEngine.SampleRate);
+
+        long frontier = engine.ScopeSamplesWritten;
+        var oldest = new float[SidFilePlaybackEngine.ScopeSamples];
+        var newest = new float[SidFilePlaybackEngine.ScopeSamples];
+
+        // A full second back: further than WaveOutEvent's own 300ms default, with room to spare.
+        engine.CaptureVoiceScope(0, oldest, frontier - SidFilePlaybackEngine.SampleRate + SidFilePlaybackEngine.ScopeSamples);
+        engine.CaptureVoiceScope(0, newest, frontier);
+
+        Assert.False(oldest.SequenceEqual(newest),
+            "A window a second old came back identical to the newest one, so the ring is no longer " +
+            "than the latency it has to outlast.");
+    }
+
     /// <summary>Pause has to hold the tune rather than end it: NAudio keeps asking for samples, and
     /// returning none would stop playback outright.</summary>
     [Fact]

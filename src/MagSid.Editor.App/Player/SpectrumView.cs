@@ -75,10 +75,13 @@ internal sealed class SpectrumView : Control
         }
     }
 
-    /// <summary>Takes a fresh window of mixed output and advances the display by one frame.</summary>
-    public void Update(SidFilePlaybackEngine engine)
+    /// <summary>Takes the window of mixed output the listener is hearing and advances the display by
+    /// one frame.</summary>
+    /// <param name="atSample">Where the listener actually is, from the output device - see
+    /// SidPlayerForm.</param>
+    public void Update(SidFilePlaybackEngine engine, long atSample)
     {
-        engine.CaptureMix(_samples);
+        engine.CaptureMix(_samples, atSample);
 
         for (int i = 0; i < _fft.Length; i++)
         {

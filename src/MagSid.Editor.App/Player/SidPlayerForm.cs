@@ -215,7 +215,10 @@ public sealed class SidPlayerForm : Form
         for (int voice = 0; voice < 3; voice++)
             _engine.SetVoiceMuted(voice, _muted[voice]);
 
-        _output = new WaveOutEvent();
+        // 100ms in four buffers, so a refill lands every ~25ms. The visuals no longer depend on
+        // refill granularity - they follow the device's play position - but a shallower buffer also
+        // shortens the gap between pressing pause and hearing it.
+        _output = new WaveOutEvent { DesiredLatency = 100, NumberOfBuffers = 4 };
         _output.Init(_engine);
         _output.Play();
 
@@ -273,11 +276,19 @@ public sealed class SidPlayerForm : Form
         if (_engine is not { } engine)
             return;
 
-        _spectrum.Update(engine);
-        foreach (var scope in _scopes)
-            scope.Update(engine);
+        // The device's own play position, not SamplesProduced. Read() runs a whole buffer ahead, so
+        // produced samples are ones the sound card has but nobody has heard yet - drawing those made
+        // the scopes lead the music and step forward a buffer at a time, about ten times a second,
+        // however often this timer ticked. See AuditionClock.
+        long at = _output is { } output
+            ? AuditionClock.SamplesPlayed(output, engine) ?? engine.SamplesProduced
+            : engine.SamplesProduced;
 
-        long seconds = engine.SamplesProduced / SidFilePlaybackEngine.SampleRate;
+        _spectrum.Update(engine, at);
+        foreach (var scope in _scopes)
+            scope.Update(engine, at);
+
+        long seconds = at / SidFilePlaybackEngine.SampleRate;
         _elapsed.Text = $"{seconds / 60}:{seconds % 60:00}";
     }
 
