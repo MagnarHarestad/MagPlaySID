@@ -15,6 +15,7 @@ namespace MagSid.Editor.App.Daw;
 internal sealed class DawView : Panel
 {
     private readonly ArrangeView _arrange = new();
+    private readonly PianoRollView _pianoRoll = new();
     private readonly DawInstrumentView _instrument = new();
     private readonly Panel _placeholder = new();
     private readonly FlowLayoutPanel _tabs = new();
@@ -46,10 +47,14 @@ internal sealed class DawView : Panel
     /// column, so it has to be told.</summary>
     public event Action? OrderEdited;
 
+    /// <summary>A note changed in the piano roll.</summary>
+    public event Action? PatternEdited;
+
     public void LoadSong(Song song)
     {
         _song = song;
         _arrange.LoadSong(song);
+        _pianoRoll.LoadSong(song);
         RefreshInstrumentList();
     }
 
@@ -110,7 +115,7 @@ internal sealed class DawView : Panel
                  {
                      (DawTab.Arrange, "ARRANGE", true),
                      (DawTab.Instrument, "INSTRUMENT", true),
-                     (DawTab.PianoRoll, "PIANO ROLL", false),
+                     (DawTab.PianoRoll, "PIANO ROLL", true),
                  })
         {
             var button = new TabButton(label) { Tag = tab, Enabled = ready };
@@ -131,7 +136,16 @@ internal sealed class DawView : Panel
 
         _arrange.Dock = DockStyle.Fill;
         _arrange.OrderEdited += () => OrderEdited?.Invoke();
-        _arrange.PatternActivated += (_, _) => { /* the piano roll's cue, once it exists */ };
+        // Double-clicking a clip opens that pattern in the roll and switches to it, which is the
+        // one gesture that ties the two halves of the DAW together.
+        _arrange.PatternActivated += (_, patternNumber) =>
+        {
+            _pianoRoll.ShowPattern(patternNumber);
+            Show(DawTab.PianoRoll);
+        };
+
+        _pianoRoll.Dock = DockStyle.Fill;
+        _pianoRoll.Edited += () => PatternEdited?.Invoke();
 
         _instrument.Dock = DockStyle.Fill;
         _instrument.Edited += instrument =>
@@ -152,6 +166,7 @@ internal sealed class DawView : Panel
             Text = "Not built yet — use RETRO for this.",
         });
 
+        Controls.Add(_pianoRoll);
         Controls.Add(_arrange);
         Controls.Add(_instrument);
         Controls.Add(_placeholder);
@@ -170,7 +185,12 @@ internal sealed class DawView : Panel
             return;
         }
 
-        _instrument.LoadInstrument(_song.Instruments[_instrumentList.SelectedIndex]);
+        var selected = _song.Instruments[_instrumentList.SelectedIndex];
+        _instrument.LoadInstrument(selected);
+
+        // A note drawn in the roll gets whatever instrument is selected here, the same way the
+        // tracker's own entry does.
+        _pianoRoll.SetDefaultInstrument(selected.Number);
     }
 
     private void Show(DawTab tab)
@@ -178,7 +198,8 @@ internal sealed class DawView : Panel
         _current = tab;
         _arrange.Visible = tab == DawTab.Arrange;
         _instrument.Visible = tab == DawTab.Instrument;
-        _placeholder.Visible = tab == DawTab.PianoRoll;
+        _pianoRoll.Visible = tab == DawTab.PianoRoll;
+        _placeholder.Visible = false;
 
         // The instrument list belongs to the instrument editor; the arrangement has its own
         // channel headers and would only be narrowed by it.

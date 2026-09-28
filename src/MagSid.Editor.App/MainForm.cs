@@ -344,6 +344,13 @@ public sealed class MainForm : Form
             _instrumentList.SetInstruments(_session.Song.Instruments);
         };
 
+        _dawView.PatternEdited += () =>
+        {
+            _session.MarkDirty();
+            _trackerGrid.SetSong(_session.Song);
+            RefreshSongLength();
+        };
+
         _dawView.OrderEdited += () =>
         {
             _session.MarkDirty();
