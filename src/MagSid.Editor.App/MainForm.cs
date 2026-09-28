@@ -344,6 +344,14 @@ public sealed class MainForm : Form
             _instrumentList.SetInstruments(_session.Song.Instruments);
         };
 
+        _dawView.NotePreviewRequested += PreviewNote;
+
+        // Through the session, the same as the retro list - so an instrument added here is added
+        // the same way, with the same undo behaviour and the same numbering rules.
+        _dawView.InstrumentAddRequested += () => _session.AddInstrument();
+        _dawView.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
+        _dawView.InstrumentDeleteRequested += instrument => _session.DeleteInstrument(instrument);
+
         _dawView.PatternEdited += () =>
         {
             _session.MarkDirty();
@@ -881,6 +889,7 @@ public sealed class MainForm : Form
         _trackerGrid.SetPlaybackActive(false);
         _playStopButton.Text = "▶ Play";
         _instrumentEditorPanel.SetPlaybackCoverage(null);
+        _dawView.ClearPlayback();
     }
 
     private void DrainPlaybackEvents()
@@ -896,6 +905,18 @@ public sealed class MainForm : Form
                 rowEvent.SampleIndex);
         }
 
+        // The DAW's three views follow the same clock the tracker does - the device's play
+        // position, not the sequencer's, which runs a whole output buffer ahead.
+        if (_playbackEngine.PositionAt(LivePlaybackSample()) is { Channels.Count: 3 } position)
+        {
+            _dawView.SetPlayheads(
+                position.Channels[0].OrderPos, position.Channels[1].OrderPos, position.Channels[2].OrderPos);
+            _dawView.SetPlayRow(
+                position.Channels[0].CurrentPatternNumber, position.Channels[0].RowIndex,
+                position.Channels[1].CurrentPatternNumber, position.Channels[1].RowIndex,
+                position.Channels[2].CurrentPatternNumber, position.Channels[2].RowIndex);
+        }
+
         // The engine accumulates this itself, frame by frame, so polling at whatever rate this
         // timer happens to run at cannot miss a step - see ProgramCoverage.
         int selected = _instrumentList.SelectedInstrument?.Number ?? -1;
@@ -906,6 +927,7 @@ public sealed class MainForm : Form
                 out int waveStep, out int arpStep, out int filterStep);
             _instrumentEditorPanel.SetPlaybackCoverage(
                 _playbackEngine.CoverageFor(selected), waveStep, arpStep, filterStep);
+            _dawView.SetProgramPlayheads(waveStep, arpStep, filterStep);
         }
         else
         {

@@ -73,6 +73,10 @@ internal sealed class PianoRollView : Control
     /// snapshot, and refreshes the tracker showing the same pattern.</summary>
     public event Action? Edited;
 
+    /// <summary>Sound a note, so placing one is heard rather than only seen - the same audition the
+    /// tracker gives when a note is typed.</summary>
+    public event Action<NoteName, int>? NotePreviewRequested;
+
     /// <summary>Which ruling the roll is using. The toggle in the header sets it.</summary>
     public RollGrid Grid
     {
@@ -242,12 +246,15 @@ internal sealed class PianoRollView : Control
         if (existing is not null && KeyForNote(existing.Note) == cell.Key)
         {
             _selectedRow = existing.Row;
+            NotePreviewRequested?.Invoke(existing.Note, existing.InstrumentNumber);
             Invalidate();
             return;
         }
 
-        PatternNotes.SetNote(pattern, cell.Row, NoteForKey(cell.Key), _defaultInstrument);
+        var placed = NoteForKey(cell.Key);
+        PatternNotes.SetNote(pattern, cell.Row, placed, _defaultInstrument);
         _selectedRow = cell.Row;
+        NotePreviewRequested?.Invoke(placed, _defaultInstrument);
         Commit();
 
         base.OnMouseDown(e);

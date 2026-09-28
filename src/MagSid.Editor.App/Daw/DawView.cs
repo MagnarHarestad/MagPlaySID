@@ -50,6 +50,18 @@ internal sealed class DawView : Panel
     /// <summary>A note changed in the piano roll.</summary>
     public event Action? PatternEdited;
 
+    /// <summary>Sound a note placed in the roll.</summary>
+    public event Action<MagSid.Core.Model.NoteName, int>? NotePreviewRequested;
+
+    /// <summary>Add, copy or delete an instrument. Handled by the host, which owns the session and
+    /// its undo history - the DAW never touches the instrument collection itself, so both views
+    /// always add instruments the same way.</summary>
+    public event Action? InstrumentAddRequested;
+
+    public event Action<Instrument>? InstrumentCopyRequested;
+
+    public event Action<Instrument>? InstrumentDeleteRequested;
+
     public void LoadSong(Song song)
     {
         _song = song;
@@ -63,6 +75,33 @@ internal sealed class DawView : Panel
     public void SetPlayheads(int channel1, int channel2, int channel3) =>
         _arrange.SetPlayheads(channel1, channel2, channel3);
 
+    /// <summary>Where the roll's own pattern is being played. Only one channel can be playing the
+    /// pattern on screen, so the caller passes which pattern each channel is in and the roll takes
+    /// the row from whichever matches - anything else would draw a playhead from a channel that is
+    /// somewhere else entirely.</summary>
+    public void SetPlayRow(int patternChannel1, int row1, int patternChannel2, int row2, int patternChannel3, int row3)
+    {
+        int showing = _pianoRoll.Pattern?.Number ?? -1;
+        int row =
+            patternChannel1 == showing ? row1 :
+            patternChannel2 == showing ? row2 :
+            patternChannel3 == showing ? row3 : -1;
+
+        _pianoRoll.SetPlayRow(row);
+    }
+
+    /// <summary>Which step of the selected instrument's programs is sounding. Same idea as the
+    /// retro view's tint: a step nothing ever reaches is a step worth deleting.</summary>
+    public void SetProgramPlayheads(int wavetableStep, int arpeggioStep, int filterStep) =>
+        _instrument.SetPlayheads(wavetableStep, arpeggioStep, filterStep);
+
+    public void ClearPlayback()
+    {
+        _arrange.SetPlayheads(-1, -1, -1);
+        _pianoRoll.SetPlayRow(-1);
+        _instrument.SetPlayheads(-1, -1, -1);
+    }
+
     /// <summary>Follows the retro view's own selection, so switching views lands on the instrument
     /// that was already being worked on rather than resetting to the first.</summary>
     public void SelectInstrument(int number)
@@ -74,6 +113,12 @@ internal sealed class DawView : Panel
         if (index >= 0 && index != _instrumentList.SelectedIndex)
             _instrumentList.SelectedIndex = index;
     }
+
+    private Instrument? SelectedInstrument =>
+        _song is { } song && _instrumentList.SelectedIndex >= 0
+        && _instrumentList.SelectedIndex < song.Instruments.Count
+            ? song.Instruments[_instrumentList.SelectedIndex]
+            : null;
 
     public int? SelectedInstrumentNumber =>
         _instrumentList.SelectedIndex >= 0 && _song is { } song
@@ -134,6 +179,24 @@ internal sealed class DawView : Panel
         _instrumentList.ItemHeight = 22;
         _instrumentList.SelectedIndexChanged += (_, _) => ShowSelectedInstrument();
 
+        var menu = new ContextMenuStrip();
+        var copyItem = new ToolStripMenuItem("&Copy", null, (_, _) =>
+        {
+            if (SelectedInstrument is { } instrument)
+                InstrumentCopyRequested?.Invoke(instrument);
+        });
+        var deleteItem = new ToolStripMenuItem("&Delete", null, (_, _) =>
+        {
+            if (SelectedInstrument is { } instrument)
+                InstrumentDeleteRequested?.Invoke(instrument);
+        });
+        menu.Items.Add(new ToolStripMenuItem("&Add", null, (_, _) => InstrumentAddRequested?.Invoke()));
+        menu.Items.Add(copyItem);
+        menu.Items.Add(deleteItem);
+        menu.Opening += (_, _) => copyItem.Enabled = deleteItem.Enabled = SelectedInstrument is not null;
+        DarkTheme.Apply(menu);
+        _instrumentList.ContextMenuStrip = menu;
+
         _arrange.Dock = DockStyle.Fill;
         _arrange.OrderEdited += () => OrderEdited?.Invoke();
         // Double-clicking a clip opens that pattern in the roll and switches to it, which is the
@@ -146,6 +209,7 @@ internal sealed class DawView : Panel
 
         _pianoRoll.Dock = DockStyle.Fill;
         _pianoRoll.Edited += () => PatternEdited?.Invoke();
+        _pianoRoll.NotePreviewRequested += (note, instrument) => NotePreviewRequested?.Invoke(note, instrument);
 
         _instrument.Dock = DockStyle.Fill;
         _instrument.Edited += instrument =>

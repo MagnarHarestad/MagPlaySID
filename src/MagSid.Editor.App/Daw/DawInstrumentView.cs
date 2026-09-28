@@ -184,6 +184,110 @@ internal sealed class DawInstrumentView : Panel
         _noHardRestart.CheckedChanged += on => Commit(i => i.NoHardRestart = on);
 
         _waveform.WaveformChanged += w => Commit(i => i.Waveform = w);
+
+        WireProgram(
+            _wavetable,
+            nudge: (i, step, by) =>
+            {
+                var program = Wavetable(i);
+                if (step < program.Count)
+                {
+                    // Up the waveform bits, not the whole byte: the low nibble is the gate and the
+                    // test bit, and walking through those one value at a time would be a tour of
+                    // states nobody wants.
+                    int waveform = Math.Clamp((program[step] >> 4) + by, 0, 15);
+                    program[step] = (byte)((waveform << 4) | (program[step] & 0x0F));
+                    Apply(i, program);
+                }
+            },
+            append: i =>
+            {
+                var program = Wavetable(i);
+                program.Add(program.Count > 0 ? program[^1] : (byte)(i.Waveform | 0x01));
+                Apply(i, program);
+            },
+            remove: (i, step) =>
+            {
+                var program = Wavetable(i);
+                if (step < program.Count)
+                {
+                    program.RemoveAt(step);
+                    Apply(i, program);
+                }
+            });
+
+        WireProgram(
+            _noteProgram,
+            nudge: (i, step, by) =>
+            {
+                if (step < i.Arpeggio.Count)
+                    i.Arpeggio[step] = Transpose(i.Arpeggio[step], by);
+            },
+            append: i => i.Arpeggio.Add(i.Arpeggio.Count > 0 ? i.Arpeggio[^1] : NoteName.Parse("C-4")),
+            remove: (i, step) =>
+            {
+                if (step < i.Arpeggio.Count)
+                    i.Arpeggio.RemoveAt(step);
+            });
+
+        WireProgram(
+            _filter,
+            nudge: (i, step, by) =>
+            {
+                if (step < i.Filter.Count)
+                    i.Filter[step] = WithCutoff(i.Filter[step], by);
+            },
+            append: i => i.Filter.Add(i.Filter.Count > 0
+                ? FilterStep.Sweep(i.Filter[^1].Cutoff)
+                : FilterStep.Sweep(0x40)),
+            remove: (i, step) =>
+            {
+                if (step < i.Filter.Count)
+                    i.Filter.RemoveAt(step);
+            });
+    }
+
+    /// <summary>The wavetable as an editable list, standing in the implied one-step program when
+    /// the instrument has no WAVE section - editing it is what turns the implied program into a
+    /// real one.</summary>
+    private static List<byte> Wavetable(Instrument instrument) =>
+        instrument.Wavetable.Count > 0
+            ? [.. instrument.Wavetable]
+            : [(byte)(instrument.Waveform | 0x01)];
+
+    private static void Apply(Instrument instrument, List<byte> program)
+    {
+        instrument.Wavetable.Clear();
+        instrument.Wavetable.AddRange(program);
+    }
+
+    /// <summary>Moves a note by semitones, staying inside the frequency table's C-0..B-7.</summary>
+    private static NoteName Transpose(NoteName note, int semitones)
+    {
+        int index = Math.Clamp(note.TableIndex + semitones, 0, 95);
+        return NoteName.AllNotes[index];
+    }
+
+    /// <summary>Nudges a filter step's cutoff, keeping it inside $01..$FE - $00 ends a program and
+    /// $FF opens a setup record, so neither is a cutoff.</summary>
+    private static FilterStep WithCutoff(FilterStep step, int by)
+    {
+        byte cutoff = (byte)Math.Clamp(step.Cutoff + by, FilterStep.MinCutoff, FilterStep.MaxCutoff);
+
+        return step.IsSetup
+            ? FilterStep.Setup(step.ModeVolume!.Value, step.ResonanceRouting!.Value, cutoff, step.SweepRate)
+            : FilterStep.Sweep(cutoff);
+    }
+
+    private void WireProgram(
+        ProgramLaneControl lane,
+        Action<Instrument, int, int> nudge,
+        Action<Instrument> append,
+        Action<Instrument, int> remove)
+    {
+        lane.StepNudged += (step, by) => Commit(i => nudge(i, step, by));
+        lane.StepAppended += () => Commit(append);
+        lane.StepRemoved += step => Commit(i => remove(i, step));
     }
 
     private void BuildLayout()

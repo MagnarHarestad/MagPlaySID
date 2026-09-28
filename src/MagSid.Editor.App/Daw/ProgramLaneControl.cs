@@ -48,10 +48,20 @@ internal sealed class ProgramLaneControl : Control
             ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         BackColor = DawPalette.Panel;
         Cursor = Cursors.Hand;
+        TabStop = true;
     }
 
     /// <summary>The step clicked, or -1 for the trailing add cell.</summary>
     public event Action<int>? StepSelected;
+
+    /// <summary>Nudge a step's value. Arrow keys and the wheel, never typing - the same choice the
+    /// knobs make, so the whole view is edited one way.</summary>
+    public event Action<int, int>? StepNudged;
+
+    /// <summary>The trailing "+" was used.</summary>
+    public event Action? StepAppended;
+
+    public event Action<int>? StepRemoved;
 
     public Color Accent { get; set; } = DawPalette.Envelope;
 
@@ -108,14 +118,89 @@ internal sealed class ProgramLaneControl : Control
     protected override void OnMouseClick(MouseEventArgs e)
     {
         int at = CellAt(e.X, e.Y);
-        if (at >= -1)
+        if (at < -1)
+            return;
+
+        Focus();
+
+        if (at == -1)
         {
-            _selected = at;
-            Invalidate();
-            StepSelected?.Invoke(at);
+            StepAppended?.Invoke();
+            return;
         }
 
+        if (e.Button == MouseButtons.Right)
+        {
+            StepRemoved?.Invoke(at);
+            return;
+        }
+
+        _selected = at;
+        Invalidate();
+        StepSelected?.Invoke(at);
+
         base.OnMouseClick(e);
+    }
+
+    protected override bool IsInputKey(Keys keyData) => keyData is
+        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Insert;
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        switch (e.KeyCode)
+        {
+            case Keys.Left:
+                _selected = Math.Max(0, _selected - 1);
+                Invalidate();
+                e.Handled = true;
+                break;
+
+            case Keys.Right:
+                _selected = Math.Min(_steps.Count - 1, _selected + 1);
+                Invalidate();
+                e.Handled = true;
+                break;
+
+            case Keys.Up when _selected >= 0:
+                StepNudged?.Invoke(_selected, e.Shift ? 16 : 1);
+                e.Handled = true;
+                break;
+
+            case Keys.Down when _selected >= 0:
+                StepNudged?.Invoke(_selected, e.Shift ? -16 : -1);
+                e.Handled = true;
+                break;
+
+            case Keys.Delete when _selected >= 0:
+                StepRemoved?.Invoke(_selected);
+                e.Handled = true;
+                break;
+
+            case Keys.Insert:
+                StepAppended?.Invoke();
+                e.Handled = true;
+                break;
+        }
+
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if (_selected >= 0)
+            StepNudged?.Invoke(_selected, Math.Sign(e.Delta) * (ModifierKeys.HasFlag(Keys.Shift) ? 16 : 1));
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnLostFocus(e);
     }
 
     /// <summary>The step under a point, -1 for the add cell, -2 for neither.</summary>
@@ -152,7 +237,9 @@ internal sealed class ProgramLaneControl : Control
             float titleWidth = g.MeasureString(Title, titleFont).Width;
             g.DrawString(Hint, hintFont, hintInk, 14 + titleWidth, 7);
 
-            string count = _steps.Count == 1 ? "1 step" : $"{_steps.Count} steps";
+            string count = Focused
+                ? "↑↓ value  ·  Del removes  ·  Ins adds"
+                : _steps.Count == 1 ? "1 step" : $"{_steps.Count} steps";
             var far = new StringFormat { Alignment = StringAlignment.Far };
             g.DrawString(count, hintFont, hintInk, new RectangleF(0, 7, Width - 10, 14), far);
         }
