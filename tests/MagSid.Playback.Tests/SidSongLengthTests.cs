@@ -119,14 +119,14 @@ public class SidSongLengthTests
         string path = Path.Combine(Path.GetTempPath(), $"magsid-export-{Guid.NewGuid():N}.wav");
         try
         {
-            const int frames = 100;   // two seconds
-            SidAudioExport.Render(Load("BellaCiao.s"), path, SidAudioExport.Format.Wav, frames);
+            var duration = TimeSpan.FromSeconds(2);
+            SidAudioExport.Render(Load("BellaCiao.s"), path, SidAudioExport.Format.Wav, duration);
 
             var written = new FileInfo(path);
             Assert.True(written.Exists);
 
             // 44 bytes of header plus two seconds of 16-bit mono, within a buffer's slack.
-            long expected = (long)(frames / 50.0 * SidFilePlaybackEngine.SampleRate) * 2;
+            long expected = (long)(duration.TotalSeconds * SidFilePlaybackEngine.SampleRate) * 2;
             Assert.InRange(written.Length, expected, expected + 44 + 8820);
         }
         finally
@@ -142,15 +142,32 @@ public class SidSongLengthTests
     /// empty file, which would look like the export had failed for some other reason.
     /// </summary>
     [Theory]
+    [InlineData("02:35:01", 155.01)]
+    [InlineData("3:30:00", 210)]
+    [InlineData("0:00:99", 0.99)]
     [InlineData("3:30", 210)]
     [InlineData("0:45", 45)]
     [InlineData("14:20", 860)]
     [InlineData("210", 210)]
     [InlineData("  3:30  ", 210)]
     [InlineData("0:01", 1)]
-    public void A_typed_length_is_read_as_minutes_and_seconds(string typed, int seconds)
+    public void A_typed_length_is_read_as_minutes_seconds_and_hundredths(string typed, double seconds)
     {
         Assert.Equal(TimeSpan.FromSeconds(seconds), SidAudioExport.ParseLength(typed));
+    }
+
+    /// <summary>What comes out reads back as the same length, or the field would drift every time
+    /// the measurement filled it in.</summary>
+    [Theory]
+    [InlineData(155.01)]
+    [InlineData(860)]
+    [InlineData(0.99)]
+    [InlineData(3600)]
+    public void Formatting_and_parsing_are_inverses(double seconds)
+    {
+        var length = TimeSpan.FromSeconds(seconds);
+
+        Assert.Equal(length, SidAudioExport.ParseLength(SidAudioExport.FormatLength(length)));
     }
 
     [Theory]
@@ -161,7 +178,8 @@ public class SidSongLengthTests
     [InlineData("0:00")]
     [InlineData("-5")]
     [InlineData("3:60")]      // sixty seconds is a minute, and writing it that way is a mistake
-    [InlineData("1:2:3")]
+    [InlineData("1:2:3:4")]
+    [InlineData("3:30:100")]   // a hundredth field only goes to 99
     [InlineData("abc")]
     [InlineData("3,30")]
     public void Something_that_is_not_a_length_is_refused(string? typed)

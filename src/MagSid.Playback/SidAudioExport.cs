@@ -42,9 +42,15 @@ public static class SidAudioExport
     }
 
     /// <summary>
-    /// Reads a length a person typed: "3:30", or plain seconds as "210".
+    /// Reads a length a person typed: "02:35:01" as minutes, seconds and hundredths, "3:30"
+    /// without them, or plain seconds as "210".
     ///
-    /// Null for anything that is not a length, zero and negatives included - a render of no length
+    /// Hundredths rather than thousandths, because two digits can only mean one thing - "02:35:01"
+    /// is unambiguous where "3:30:5" would sit between two answers a hundred-fold apart. A
+    /// hundredth is 10ms, still finer than the 20ms frame the player runs on, so the precision is
+    /// real rather than decorative.
+    ///
+    /// Null for anything that is not a length, zero and negatives included: a render of no length
     /// is not a smaller export, it is an empty file, and silently making one would look like the
     /// export had failed for some other reason.
     /// </summary>
@@ -55,7 +61,7 @@ public static class SidAudioExport
             return null;
 
         string[] parts = trimmed.Split(':');
-        if (parts.Length > 2)
+        if (parts.Length > 3)
             return null;
 
         if (!int.TryParse(parts[0], out int first) || first < 0)
@@ -67,22 +73,37 @@ public static class SidAudioExport
         if (!int.TryParse(parts[1], out int seconds) || seconds is < 0 or > 59)
             return null;
 
-        var length = new TimeSpan(0, first, seconds);
+        int hundredths = 0;
+        if (parts.Length == 3
+            && (!int.TryParse(parts[2], out hundredths) || hundredths is < 0 or > 99))
+        {
+            return null;
+        }
+
+        var length = new TimeSpan(0, 0, first, seconds, hundredths * 10);
         return length > TimeSpan.Zero ? length : null;
     }
 
-    /// <param name="frames">How many 50Hz frames to render. A tune loops forever, so the length is
-    /// the caller's decision - normally what SidSongLength found.</param>
+    /// <summary>The spelling <see cref="ParseLength"/> reads back: mm:ss:cc.</summary>
+    public static string FormatLength(TimeSpan length) =>
+        $"{(int)length.TotalMinutes:00}:{length.Seconds:00}:{length.Milliseconds / 10:00}";
+
+    /// <param name="duration">How much to render. A tune loops forever, so the length is the
+    /// caller's decision - normally what SidSongLength found. Taken as a duration rather than a
+    /// frame count so a typed millisecond reaches the file: a frame is 20ms, and rounding to one
+    /// would make the precision on screen a fiction.</param>
     /// <param name="progress">Fraction rendered, 0 to 1, for a caller showing progress.</param>
     public static void Render(
-        SidFile file, string path, Format format, int frames,
+        SidFile file, string path, Format format, TimeSpan duration,
         ChipModel? chipModel = null, Action<double>? progress = null,
         CancellationToken cancellation = default)
     {
-        if (frames <= 0)
-            throw new ArgumentOutOfRangeException(nameof(frames), "A render needs at least one frame.");
+        if (duration <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(duration), "A render needs a length above zero.");
 
-        long totalSamples = (long)Math.Round(frames / 50.0 * SidFilePlaybackEngine.SampleRate);
+        long totalSamples = (long)Math.Round(duration.TotalSeconds * SidFilePlaybackEngine.SampleRate);
+        if (totalSamples <= 0)
+            throw new ArgumentOutOfRangeException(nameof(duration), "That length is shorter than one sample.");
 
         if (format == Format.Wav)
         {

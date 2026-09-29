@@ -33,7 +33,7 @@ public sealed class SidPlayerForm : Form
     private readonly Label _elapsed = new();
     private readonly Button _export = new();
     private readonly TextBox _exportLength = new();
-    private readonly Label _exportLengthCaption = new();
+    private readonly ToolTip _exportHint = new();
 
     /// <summary>True once the length field has been typed into, so the measurement arriving a
     /// second later does not overwrite what was asked for.</summary>
@@ -135,7 +135,6 @@ public sealed class SidPlayerForm : Form
         header.Controls.Add(titleBlock);
         header.Controls.Add(_export);
         header.Controls.Add(_exportLength);
-        header.Controls.Add(_exportLengthCaption);
 
         var scopes = new TableLayoutPanel
         {
@@ -212,34 +211,42 @@ public sealed class SidPlayerForm : Form
         Controls.Add(transport);
         Controls.Add(header);
 
-        _export.Text = "Export audio...";
-        // Pinned to the header's top-right corner, at a size it does not get to choose - a button
-        // that sizes itself can grow taller than the strip holding it and be clipped away.
+        // The button and the length are one control in two halves: the button on the left, how much
+        // to write immediately on its right, edges touching. Both right-anchored so the pair stays a
+        // pair however wide the window gets, and neither sizes itself - that is what once let the
+        // button grow past its strip and be clipped away by the window's edge.
+        const int ExportWidth = 126;
+        const int LengthWidth = 88;
+        const int GroupHeight = 30;
+
+        _export.Text = "Export audio";
         _export.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _export.AutoSize = false;
-        _export.Size = new Size(126, 30);
-        _export.Location = new Point(header.ClientSize.Width - 126 - 18, 12);
+        _export.Size = new Size(ExportWidth, GroupHeight);
+        _export.Location = new Point(header.ClientSize.Width - 18 - LengthWidth - ExportWidth, 12);
 
-        // How much to write. A tune loops forever, so something has to decide where to stop - and
-        // showing that decision as an editable field is better than a constant nobody can see. It
+        // How much to write. A tune loops forever, so something has to decide where to stop, and
+        // showing that decision beside the button is better than a constant nobody can see. It
         // fills itself in from the measured length when that arrives, unless it has been typed in.
-        _exportLength.Text = Clock(TimeSpan.FromMinutes(3));
-        _exportLength.Width = 58;
-        _exportLength.Height = 30;
+        _exportLength.Text = SidAudioExport.FormatLength(TimeSpan.FromMinutes(3));
+        _exportLength.Width = LengthWidth;
         _exportLength.Font = new Font("Consolas", 9.5f);
         _exportLength.TextAlign = HorizontalAlignment.Center;
+        _exportLength.BorderStyle = BorderStyle.FixedSingle;
         _exportLength.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _exportLength.Location = new Point(_export.Left - 8 - 58, 12);
         _exportLength.TextChanged += (_, _) => _exportLengthEdited = true;
         DarkTheme.Apply(_exportLength);
         _exportLength.ForeColor = SidPlayerPalette.Title;
 
-        _exportLengthCaption.Text = "Length";
-        _exportLengthCaption.Font = new Font("Segoe UI", 8f);
-        _exportLengthCaption.ForeColor = SidPlayerPalette.Subtitle;
-        _exportLengthCaption.AutoSize = true;
-        _exportLengthCaption.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _exportLengthCaption.Location = new Point(_exportLength.Left - 8 - 46, 18);
+        // A TextBox takes its height from its font whatever it is told, so it is centred against
+        // the button's rather than the two being set to a number only one of them keeps.
+        _exportLength.Location = new Point(
+            header.ClientSize.Width - 18 - LengthWidth,
+            12 + ((GroupHeight - _exportLength.Height) / 2));
+
+        _exportHint.SetToolTip(_exportLength, "How much audio to write — mm:ss:cc, as 02:35:01");
+        _exportHint.SetToolTip(_export, "Render this tune to a .wav or .mp3");
+
         _export.Click += (_, _) => DoExport();
         DarkTheme.Apply(_export);
 
@@ -267,7 +274,7 @@ public sealed class SidPlayerForm : Form
                         // Only if nobody has typed a length of their own in the meantime.
                         if (_length is { } found && !_exportLengthEdited)
                         {
-                            _exportLength.Text = Clock(found.Total);
+                            _exportLength.Text = SidAudioExport.FormatLength(found.Total);
                             _exportLengthEdited = false;
                         }
                     });
@@ -444,15 +451,13 @@ public sealed class SidPlayerForm : Form
         if (SidAudioExport.ParseLength(_exportLength.Text) is not { } duration)
         {
             MessageBox.Show(this,
-                $"\"{_exportLength.Text}\" is not a length. Write it as minutes and seconds, 3:30, "
-                + "or as plain seconds.",
+                $"\"{_exportLength.Text}\" is not a length. Write it as minutes, seconds and "
+                + "hundredths - 02:35:01 - or leave the hundredths off, or give plain seconds.",
                 "Export audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             _exportLength.Focus();
             _exportLength.SelectAll();
             return;
         }
-
-        int frames = (int)Math.Round(duration.TotalSeconds * 50);
 
         string previous = _export.Text;
         _export.Enabled = false;
@@ -461,7 +466,7 @@ public sealed class SidPlayerForm : Form
         var file = _file;
         string path = save.FileName;
 
-        Task.Run(() => SidAudioExport.Render(file, path, format, frames)).ContinueWith(task =>
+        Task.Run(() => SidAudioExport.Render(file, path, format, duration)).ContinueWith(task =>
         {
             if (IsDisposed)
                 return;
