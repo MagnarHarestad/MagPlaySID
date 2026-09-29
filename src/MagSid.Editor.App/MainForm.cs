@@ -344,7 +344,11 @@ public sealed class MainForm : Form
             _instrumentList.SetInstruments(_session.Song.Instruments);
         };
 
-        _dawView.NotePreviewRequested += PreviewNote;
+        // A click in the piano roll is a short tap, not a held key: gate on at mouse-down, gate
+        // off at mouse-up, with a fixed release so the tail is the same whatever the instrument's
+        // own release is - see RollPreviewRelease.
+        _dawView.NotePreviewRequested += (note, instrument) => PreviewNote(note, instrument, RollPreviewRelease);
+        _dawView.NotePreviewReleased += ReleaseJamNote;
 
         // Through the session, the same as the retro list - so an instrument added here is added
         // the same way, with the same undo behaviour and the same numbering rules.
@@ -1155,7 +1159,16 @@ public sealed class MainForm : Form
     /// to hear the release's own shape, short enough that it doesn't.</summary>
     private const int MaxEditPreviewRelease = 0xA;
 
-    private void PreviewNote(NoteName note, int instrumentNumber)
+    /// <summary>Release nibble a note placed in the DAW piano roll is auditioned with - always,
+    /// not only as a cap. A click is a tap, and $9 (~750ms on a 6581) gives every instrument the
+    /// same short, audible tail instead of whatever its own release happens to be.</summary>
+    private const int RollPreviewRelease = 0x9;
+
+    private void PreviewNote(NoteName note, int instrumentNumber) => PreviewNote(note, instrumentNumber, null);
+
+    /// <param name="forcedRelease">A release nibble to audition with in place of the
+    /// instrument's own, or null for the usual behaviour (capped in Edit mode only).</param>
+    private void PreviewNote(NoteName note, int instrumentNumber, int? forcedRelease)
     {
         var instrument = _session.Song.Instruments.FirstOrDefault(i => i.Number == instrumentNumber);
         if (instrument is null)
@@ -1165,7 +1178,11 @@ public sealed class MainForm : Form
 
         StopPatternPreview(); // F3's own device, not guarded by _isPlaybackActive - hand it back
 
-        if (_trackerGrid.EditMode)
+        if (forcedRelease is { } release)
+        {
+            instrument = WithRelease(instrument, release);
+        }
+        else if (_trackerGrid.EditMode)
         {
             instrument = CapReleaseForPreview(instrument);
         }
@@ -1193,10 +1210,16 @@ public sealed class MainForm : Form
     /// shared: VoiceEngine only ever reads them, so sharing the same lists would have been safe
     /// too, but a copy costs nothing here and can't be made to alias the real instrument by a
     /// later change to either method.</summary>
-    private static Instrument CapReleaseForPreview(Instrument instrument)
+    private static Instrument CapReleaseForPreview(Instrument instrument) =>
+        (instrument.SustainRelease & 0x0F) <= MaxEditPreviewRelease
+            ? instrument
+            : WithRelease(instrument, MaxEditPreviewRelease);
+
+    /// <summary>A copy with the release nibble replaced - the song's own instrument is never
+    /// touched, for the reasons <see cref="CapReleaseForPreview"/> gives.</summary>
+    private static Instrument WithRelease(Instrument instrument, int release)
     {
-        int release = instrument.SustainRelease & 0x0F;
-        if (release <= MaxEditPreviewRelease)
+        if ((instrument.SustainRelease & 0x0F) == release)
         {
             return instrument;
         }
@@ -1207,7 +1230,7 @@ public sealed class MainForm : Form
             Name = instrument.Name,
             Waveform = instrument.Waveform,
             AttackDecay = instrument.AttackDecay,
-            SustainRelease = (byte)((instrument.SustainRelease & 0xF0) | MaxEditPreviewRelease),
+            SustainRelease = (byte)((instrument.SustainRelease & 0xF0) | (release & 0x0F)),
             ArpeggioEnding = instrument.ArpeggioEnding,
             ArpeggioLoopPoint = instrument.ArpeggioLoopPoint,
             PulseWidth = instrument.PulseWidth,

@@ -44,6 +44,7 @@ internal sealed class PianoRollView : Control
 
     private Song? _song;
     private Pattern? _pattern;
+    private int _channel = -1;
     private int _defaultInstrument = 1;
     private RollGrid _grid = RollGrid.Beats;
 
@@ -77,6 +78,44 @@ internal sealed class PianoRollView : Control
     /// tracker gives when a note is typed.</summary>
     public event Action<NoteName, int>? NotePreviewRequested;
 
+    /// <summary>The mouse came up on an auditioned note - gate off, so it releases instead of
+    /// sustaining until the next one.</summary>
+    public event Action<NoteName>? NotePreviewReleased;
+
+    private NoteName? _sounding;
+
+    private void Audition(NoteName note, int instrument)
+    {
+        ReleaseAudition();
+        _sounding = note;
+        NotePreviewRequested?.Invoke(note, instrument);
+    }
+
+    private void ReleaseAudition()
+    {
+        if (_sounding is not { } note)
+            return;
+
+        _sounding = null;
+        NotePreviewReleased?.Invoke(note);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        ReleaseAudition();
+        base.OnMouseUp(e);
+    }
+
+    /// <summary>Capture lost without a mouse-up - alt-tab mid-click, a dialog popping up. The note
+    /// would otherwise hang until the next click.</summary>
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        if (!Capture)
+            ReleaseAudition();
+
+        base.OnMouseCaptureChanged(e);
+    }
+
     /// <summary>Which ruling the roll is using. The toggle in the header sets it.</summary>
     public RollGrid Grid
     {
@@ -103,6 +142,14 @@ internal sealed class PianoRollView : Control
         ShowPattern(wanted);
     }
 
+    /// <summary>Shows a pattern. <paramref name="channel"/> is the arrangement lane it was picked
+    /// from, for the header only - the same pattern can sit on all three.</summary>
+    public void ShowPattern(int patternNumber, int channel)
+    {
+        _channel = channel;
+        ShowPattern(patternNumber);
+    }
+
     public void ShowPattern(int patternNumber)
     {
         _pattern = _song?.Patterns.FirstOrDefault(p => p.Number == patternNumber)
@@ -115,14 +162,101 @@ internal sealed class PianoRollView : Control
 
     public void SetDefaultInstrument(int instrumentNumber) => _defaultInstrument = instrumentNumber;
 
+    /// <summary>Re-voices the selected note with another instrument, keeping its pitch and length,
+    /// and auditions it so the change is heard. Nothing selected, nothing happens.</summary>
+    public void SetSelectedNoteInstrument(int instrumentNumber)
+    {
+        if (_pattern is not { } pattern || _selectedRow < 0 || _selectedRow >= pattern.Rows.Count
+            || pattern.Rows[_selectedRow] is not NoteRow note || note.InstrumentNumber == instrumentNumber)
+            return;
+
+        pattern.Rows[_selectedRow] = note with { InstrumentNumber = instrumentNumber };
+        Commit();
+
+        // A click in a list has no mouse-up here to end the audition, so it is released straight
+        // away - JamEngine still lets the WAVE program play through once before the gate closes.
+        Audition(note.Note, instrumentNumber);
+        ReleaseAudition();
+    }
+
+    /// <summary>Keep the playhead in view while the song plays. Turning it off leaves the roll
+    /// wherever it is, so a pattern can be edited while the tune carries on.</summary>
+    public bool AutoScroll { get; set; } = true;
+
     /// <summary>Which row is sounding, or -1.</summary>
     public void SetPlayRow(int row)
     {
-        if (_playRow == row)
-            return;
-
+        // Every poll, not only when the row changes: the vertical centring eases toward its target
+        // over several frames and needs the ticks in between to get there.
+        int previous = _playRow;
         _playRow = row;
-        Invalidate();
+
+        bool scrolled = AutoScroll && row >= 0 && (FollowPlayRow() | CenterOnNotes());
+
+        if (previous != row || scrolled)
+            Invalidate();
+    }
+
+    /// <summary>
+    /// Autoscroll's vertical half: keeps the notes on screen in the middle of the roll. The target
+    /// is the middle of their range when that range fits, so the highest and lowest notes sit an
+    /// equal distance from the edges; a range too tall to fit centres on the duration-weighted
+    /// average instead, which is where the melody actually spends its time. Only notes in the
+    /// visible columns count, so a pattern that climbs is followed page by page rather than
+    /// averaged into one fixed position. The scroll eases a third of the way there per tick -
+    /// a jump every page turn would make the keyboard hard to read.
+    /// </summary>
+    private bool CenterOnNotes()
+    {
+        if (!_scrollY.Enabled || _notes.Count == 0)
+            return false;
+
+        int firstRow = _scrollX.Value / RowWidth;
+        int lastRow = (_scrollX.Value + Math.Max(1, Width - KeyboardWidth - _scrollY.Width)) / RowWidth;
+
+        var visible = _notes.Where(n => n.Row <= lastRow && n.Row + n.Length > firstRow && KeyForNote(n.Note) >= 0).ToList();
+        if (visible.Count == 0)
+            visible = _notes.Where(n => KeyForNote(n.Note) >= 0).ToList();
+        if (visible.Count == 0)
+            return false;
+
+        int top = visible.Min(n => KeyForNote(n.Note));
+        int bottom = visible.Max(n => KeyForNote(n.Note));
+        int visibleHeight = Math.Max(1, Height - GridTop - _scrollX.Height);
+
+        double centreKey = (bottom - top + 1) * KeyHeight <= visibleHeight
+            ? (top + bottom) / 2.0
+            : visible.Sum(n => (double)KeyForNote(n.Note) * n.Length) / visible.Sum(n => n.Length);
+
+        int max = Math.Max(0, _scrollY.Maximum - _scrollY.LargeChange + 1);
+        int target = Math.Clamp((int)(((centreKey + 0.5) * KeyHeight) - (visibleHeight / 2.0)), 0, max);
+
+        int distance = target - _scrollY.Value;
+        if (distance == 0)
+            return false;
+
+        int step = Math.Abs(distance) <= 2 ? distance : (int)Math.Round(distance / 3.0);
+        _scrollY.Value = Math.Clamp(_scrollY.Value + step, 0, max);
+        return true;
+    }
+
+    /// <summary>Turns a page rather than sliding every row: the notes hold still to be read and
+    /// the view jumps once the playhead reaches the right edge - or has fallen off the left one,
+    /// as it does when the next pattern starts.</summary>
+    private bool FollowPlayRow()
+    {
+        if (!_scrollX.Enabled)
+            return false;
+
+        int x = _playRow * RowWidth;
+        int visible = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
+        int max = Math.Max(0, _scrollX.Maximum - _scrollX.LargeChange + 1);
+
+        if (x >= _scrollX.Value && x <= _scrollX.Value + visible - (RowWidth * 2))
+            return false;
+
+        _scrollX.Value = Math.Clamp(x - (RowWidth * 2), 0, max);
+        return true;
     }
 
     private void Reread()
@@ -246,7 +380,7 @@ internal sealed class PianoRollView : Control
         if (existing is not null && KeyForNote(existing.Note) == cell.Key)
         {
             _selectedRow = existing.Row;
-            NotePreviewRequested?.Invoke(existing.Note, existing.InstrumentNumber);
+            Audition(existing.Note, existing.InstrumentNumber);
             Invalidate();
             return;
         }
@@ -254,7 +388,7 @@ internal sealed class PianoRollView : Control
         var placed = NoteForKey(cell.Key);
         PatternNotes.SetNote(pattern, cell.Row, placed, _defaultInstrument);
         _selectedRow = cell.Row;
-        NotePreviewRequested?.Invoke(placed, _defaultInstrument);
+        Audition(placed, _defaultInstrument);
         Commit();
 
         base.OnMouseDown(e);
@@ -389,7 +523,8 @@ internal sealed class PianoRollView : Control
         {
             using var metaFont = new Font("Consolas", 7.5f);
             using var metaInk = new SolidBrush(DawPalette.TextFaint);
-            g.DrawString($"{pattern.Rows.Count} rows · {_notes.Count} notes", metaFont, metaInk, 80, 6);
+            string channel = _channel >= 0 ? $"CH {_channel + 1} · " : string.Empty;
+            g.DrawString($"{channel}{pattern.Rows.Count} rows · {_notes.Count} notes", metaFont, metaInk, 80, 6);
         }
 
         DrawGridToggle(g);

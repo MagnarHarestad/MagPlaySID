@@ -21,12 +21,19 @@ internal sealed class ArrangeView : Control
     private const int LaneHeight = 78;
     private const int LaneGap = 4;
     private const int PixelsPerRow = 5;
+    private const int HintHeight = 26;
+    private const int ScrollHeight = 16;
 
-    private readonly HScrollBar _scroll = new() { Dock = DockStyle.Bottom, Height = 16 };
+    /// <summary>Tall enough for the ruler, the three lanes, the hint and the scroll bar - and no
+    /// taller, because the piano roll below wants every pixel it can get.</summary>
+    public const int PreferredHeight = RulerHeight + (3 * (LaneHeight + LaneGap)) + HintHeight + ScrollHeight;
+
+    private readonly HScrollBar _scroll = new() { Dock = DockStyle.Bottom, Height = ScrollHeight };
 
     private Song? _song;
     private int _selectedChannel;
     private int _selectedIndex = -1;
+    private (int Channel, int Pattern) _announced = (-1, -1);
     private (int Channel, int Index) _hovered = (-1, -1);
     private readonly int[] _playheads = [-1, -1, -1];
 
@@ -43,8 +50,10 @@ internal sealed class ArrangeView : Control
         Controls.Add(_scroll);
     }
 
-    /// <summary>A clip was double-clicked - the piano roll's cue to open that pattern.</summary>
-    public event Action<int, int>? PatternActivated;
+    /// <summary>The selected clip now points at a different pattern (channel, pattern number) - the
+    /// piano roll below the lanes follows it. Raised only on a real change, so moving between two
+    /// clips of the same pattern on the same channel leaves the roll's scroll and selection alone.</summary>
+    public event Action<int, int>? SelectedPatternChanged;
 
     /// <summary>The order changed. The host marks the song dirty and refreshes the tracker, which is
     /// showing the same list in its own column.</summary>
@@ -71,6 +80,25 @@ internal sealed class ArrangeView : Control
 
         UpdateScrollRange();
         Invalidate();
+        AnnounceSelection();
+    }
+
+    /// <summary>The pattern under the selection, or -1.</summary>
+    public int SelectedPatternNumber =>
+        _song is { } song && _selectedIndex >= 0
+        && _selectedIndex < song.ChannelOrders[_selectedChannel].Tokens.Count
+        && song.ChannelOrders[_selectedChannel].Tokens[_selectedIndex] is PatternRefToken token
+            ? token.PatternNumber
+            : -1;
+
+    private void AnnounceSelection()
+    {
+        var now = (_selectedChannel, SelectedPatternNumber);
+        if (now == _announced || now.Item2 < 0)
+            return;
+
+        _announced = now;
+        SelectedPatternChanged?.Invoke(now.Item1, now.Item2);
     }
 
     /// <summary>Which order entry each channel is playing, or -1. Three separate numbers, because
@@ -84,6 +112,38 @@ internal sealed class ArrangeView : Control
         _playheads[1] = channel2;
         _playheads[2] = channel3;
         Invalidate();
+    }
+
+    /// <summary>Autoscroll: moves the selection to whatever the selected channel is playing, which
+    /// takes the roll below along with it, and scrolls the lanes so that clip is in view.</summary>
+    public void FollowPlayhead()
+    {
+        if (_song is not { } song)
+            return;
+
+        int playing = _playheads[_selectedChannel];
+        if (playing < 0 || playing == _selectedIndex
+            || playing >= song.ChannelOrders[_selectedChannel].Tokens.Count)
+            return;
+
+        _selectedIndex = playing;
+        ScrollIntoView(song.ChannelOrders[_selectedChannel], playing);
+        Invalidate();
+        AnnounceSelection();
+    }
+
+    private void ScrollIntoView(ChannelOrder order, int index)
+    {
+        if (!_scroll.Enabled)
+            return;
+
+        int start = OffsetOf(order, index);
+        int end = OffsetOf(order, index + 1);
+        int visible = Math.Max(1, Width - GutterWidth);
+        int max = Math.Max(0, _scroll.Maximum - _scroll.LargeChange + 1);
+
+        if (start < _scroll.Value || end > _scroll.Value + visible)
+            _scroll.Value = Math.Clamp(start - 20, 0, max);
     }
 
     public (int Channel, int Index)? Selection =>
@@ -195,20 +255,10 @@ internal sealed class ArrangeView : Control
             _selectedChannel = at.Channel;
             _selectedIndex = at.Index;
             Invalidate();
+            AnnounceSelection();
         }
 
         base.OnMouseDown(e);
-    }
-
-    protected override void OnMouseDoubleClick(MouseEventArgs e)
-    {
-        if (ClipAt(e.Location) is { } at && _song is { } song
-            && song.ChannelOrders[at.Channel].Tokens[at.Index] is PatternRefToken token)
-        {
-            PatternActivated?.Invoke(at.Channel, token.PatternNumber);
-        }
-
-        base.OnMouseDoubleClick(e);
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -300,6 +350,7 @@ internal sealed class ArrangeView : Control
                 break;
         }
 
+        AnnounceSelection();
         base.OnKeyDown(e);
     }
 
@@ -472,7 +523,7 @@ internal sealed class ArrangeView : Control
         using var font = new Font("Segoe UI", 7.5f);
         using var ink = new SolidBrush(DawPalette.TextFaint);
         g.DrawString(
-            "Click a clip to select  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  "
+            "Click a clip to edit it in the roll below  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  "
             + "↻ marks where the channel restarts",
             font, ink, 12, y);
     }
