@@ -41,6 +41,36 @@ public static class SidAudioExport
         }
     }
 
+    /// <summary>
+    /// Reads a length a person typed: "3:30", or plain seconds as "210".
+    ///
+    /// Null for anything that is not a length, zero and negatives included - a render of no length
+    /// is not a smaller export, it is an empty file, and silently making one would look like the
+    /// export had failed for some other reason.
+    /// </summary>
+    public static TimeSpan? ParseLength(string? text)
+    {
+        string trimmed = (text ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+            return null;
+
+        string[] parts = trimmed.Split(':');
+        if (parts.Length > 2)
+            return null;
+
+        if (!int.TryParse(parts[0], out int first) || first < 0)
+            return null;
+
+        if (parts.Length == 1)
+            return first > 0 ? TimeSpan.FromSeconds(first) : null;
+
+        if (!int.TryParse(parts[1], out int seconds) || seconds is < 0 or > 59)
+            return null;
+
+        var length = new TimeSpan(0, first, seconds);
+        return length > TimeSpan.Zero ? length : null;
+    }
+
     /// <param name="frames">How many 50Hz frames to render. A tune loops forever, so the length is
     /// the caller's decision - normally what SidSongLength found.</param>
     /// <param name="progress">Fraction rendered, 0 to 1, for a caller showing progress.</param>

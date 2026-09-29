@@ -136,6 +136,39 @@ public class SidSongLengthTests
         }
     }
 
+    /// <summary>
+    /// What a person types into the length field decides how much audio gets written, so it is
+    /// worth being exact about. Zero and negatives are refused rather than quietly producing an
+    /// empty file, which would look like the export had failed for some other reason.
+    /// </summary>
+    [Theory]
+    [InlineData("3:30", 210)]
+    [InlineData("0:45", 45)]
+    [InlineData("14:20", 860)]
+    [InlineData("210", 210)]
+    [InlineData("  3:30  ", 210)]
+    [InlineData("0:01", 1)]
+    public void A_typed_length_is_read_as_minutes_and_seconds(string typed, int seconds)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(seconds), SidAudioExport.ParseLength(typed));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    [InlineData("0")]
+    [InlineData("0:00")]
+    [InlineData("-5")]
+    [InlineData("3:60")]      // sixty seconds is a minute, and writing it that way is a mistake
+    [InlineData("1:2:3")]
+    [InlineData("abc")]
+    [InlineData("3,30")]
+    public void Something_that_is_not_a_length_is_refused(string? typed)
+    {
+        Assert.Null(SidAudioExport.ParseLength(typed));
+    }
+
     /// <summary>MP3 goes through Windows' own encoder, which N editions leave out. Whichever this
     /// machine is, the answer has to be a straight yes or no rather than a throw from deep inside
     /// Media Foundation.</summary>

@@ -32,6 +32,12 @@ public sealed class SidPlayerForm : Form
     private readonly Label _details = new();
     private readonly Label _elapsed = new();
     private readonly Button _export = new();
+    private readonly TextBox _exportLength = new();
+    private readonly Label _exportLengthCaption = new();
+
+    /// <summary>True once the length field has been typed into, so the measurement arriving a
+    /// second later does not overwrite what was asked for.</summary>
+    private bool _exportLengthEdited;
 
     /// <summary>How long the tune runs before it repeats, found by running it. Null while the
     /// search is still going, or when the tune shows no repeating state at all.</summary>
@@ -128,6 +134,8 @@ public sealed class SidPlayerForm : Form
         };
         header.Controls.Add(titleBlock);
         header.Controls.Add(_export);
+        header.Controls.Add(_exportLength);
+        header.Controls.Add(_exportLengthCaption);
 
         var scopes = new TableLayoutPanel
         {
@@ -211,6 +219,27 @@ public sealed class SidPlayerForm : Form
         _export.AutoSize = false;
         _export.Size = new Size(126, 30);
         _export.Location = new Point(header.ClientSize.Width - 126 - 18, 12);
+
+        // How much to write. A tune loops forever, so something has to decide where to stop - and
+        // showing that decision as an editable field is better than a constant nobody can see. It
+        // fills itself in from the measured length when that arrives, unless it has been typed in.
+        _exportLength.Text = Clock(TimeSpan.FromMinutes(3));
+        _exportLength.Width = 58;
+        _exportLength.Height = 30;
+        _exportLength.Font = new Font("Consolas", 9.5f);
+        _exportLength.TextAlign = HorizontalAlignment.Center;
+        _exportLength.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _exportLength.Location = new Point(_export.Left - 8 - 58, 12);
+        _exportLength.TextChanged += (_, _) => _exportLengthEdited = true;
+        DarkTheme.Apply(_exportLength);
+        _exportLength.ForeColor = SidPlayerPalette.Title;
+
+        _exportLengthCaption.Text = "Length";
+        _exportLengthCaption.Font = new Font("Segoe UI", 8f);
+        _exportLengthCaption.ForeColor = SidPlayerPalette.Subtitle;
+        _exportLengthCaption.AutoSize = true;
+        _exportLengthCaption.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _exportLengthCaption.Location = new Point(_exportLength.Left - 8 - 46, 18);
         _export.Click += (_, _) => DoExport();
         DarkTheme.Apply(_export);
 
@@ -230,7 +259,19 @@ public sealed class SidPlayerForm : Form
             task =>
             {
                 if (!IsDisposed && task.IsCompletedSuccessfully)
-                    BeginInvoke(() => _length = task.Result);
+                {
+                    BeginInvoke(() =>
+                    {
+                        _length = task.Result;
+
+                        // Only if nobody has typed a length of their own in the meantime.
+                        if (_length is { } found && !_exportLengthEdited)
+                        {
+                            _exportLength.Text = Clock(found.Total);
+                            _exportLengthEdited = false;
+                        }
+                    });
+                }
             },
             TaskScheduler.Default);
 
@@ -374,9 +415,9 @@ public sealed class SidPlayerForm : Form
     /// <summary>
     /// Writes the tune to a file by rendering it, faster than real time.
     ///
-    /// One pass through the song by default - the length that was found - because a tune loops
-    /// forever and something has to decide where to stop. A tune with no findable length gets three
-    /// minutes, which is a guess, and the dialog says so by opening on that number.
+    /// How much is the field beside the button, which starts at the measured length once that is
+    /// known - a tune loops forever, so something has to decide where to stop, and that decision is
+    /// better shown than buried.
     /// </summary>
     private void DoExport()
     {
@@ -400,7 +441,18 @@ public sealed class SidPlayerForm : Form
             ? SidAudioExport.Format.Mp3
             : SidAudioExport.Format.Wav;
 
-        int frames = _length?.TotalFrames ?? (50 * 60 * 3);
+        if (SidAudioExport.ParseLength(_exportLength.Text) is not { } duration)
+        {
+            MessageBox.Show(this,
+                $"\"{_exportLength.Text}\" is not a length. Write it as minutes and seconds, 3:30, "
+                + "or as plain seconds.",
+                "Export audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _exportLength.Focus();
+            _exportLength.SelectAll();
+            return;
+        }
+
+        int frames = (int)Math.Round(duration.TotalSeconds * 50);
 
         string previous = _export.Text;
         _export.Enabled = false;
