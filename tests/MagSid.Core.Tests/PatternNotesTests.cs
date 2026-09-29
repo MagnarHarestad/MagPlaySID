@@ -189,6 +189,82 @@ public class PatternNotesTests
         Assert.Equal(5, pattern.Rows.Count);
     }
 
+    [Fact]
+    public void Markers_are_reported_in_row_order_with_their_counts()
+    {
+        var pattern = PatternOf(
+            new HoldRow(), new LoopStartRow(), new HoldRow(),
+            new LoopEndRow(4), new LoopEndRow());
+
+        var markers = PatternNotes.Markers(pattern);
+
+        Assert.Equal(3, markers.Count);
+        Assert.Equal(new LoopMarker(1, true, null), markers[0]);
+        Assert.Equal(new LoopMarker(3, false, 4), markers[1]);
+        Assert.Equal(new LoopMarker(4, false, null), markers[2]);
+    }
+
+    /// <summary>Holds beyond a marker only play on the pass that reaches them, so dropping a marker
+    /// into the middle of a note has to cut it short there - the same rule the byte emitter
+    /// follows.</summary>
+    [Fact]
+    public void A_marker_cuts_a_note_that_reached_past_it()
+    {
+        var pattern = PatternOf(
+            new NoteRow(Note("C-4"), 1), new HoldRow(), new HoldRow(), new HoldRow());
+        Assert.Equal(4, PatternNotes.Read(pattern)[0].Length);
+
+        PatternNotes.SetLoopEnd(pattern, 2, repeatCount: 2);
+
+        Assert.Equal(2, PatternNotes.Read(pattern)[0].Length);
+        Assert.Equal(new LoopMarker(2, false, 2), Assert.Single(PatternNotes.Markers(pattern)));
+    }
+
+    /// <summary>A repeat count of 0 is already "forever" in the assembled byte, which null spells
+    /// here - so asking for 0 gets the bare LE it must have meant rather than a loop that plays
+    /// zero times.</summary>
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(-3, null)]
+    [InlineData(1, 1)]
+    [InlineData(255, 255)]
+    [InlineData(900, 255)]
+    public void A_repeat_count_outside_the_byte_becomes_something_playable(int asked, int? stored)
+    {
+        var pattern = PatternOf(new HoldRow(), new HoldRow());
+
+        PatternNotes.SetLoopEnd(pattern, 1, asked);
+
+        Assert.Equal(stored, Assert.Single(PatternNotes.Markers(pattern)).RepeatCount);
+    }
+
+    [Fact]
+    public void Removing_a_marker_leaves_a_hold_and_says_whether_it_did()
+    {
+        var pattern = PatternOf(new NoteRow(Note("C-4"), 1), new LoopStartRow(), new HoldRow());
+
+        Assert.True(PatternNotes.RemoveMarker(pattern, 1));
+        Assert.Empty(PatternNotes.Markers(pattern));
+
+        // The note can now reach the rows the marker was blocking.
+        Assert.Equal(3, PatternNotes.Read(pattern)[0].Length);
+
+        // And a row that never held one says so rather than quietly clearing a note.
+        Assert.False(PatternNotes.RemoveMarker(pattern, 0));
+        Assert.Single(PatternNotes.Read(pattern));
+    }
+
+    [Fact]
+    public void A_marker_replaces_whatever_was_on_its_row()
+    {
+        var pattern = PatternOf(new NoteRow(Note("C-4"), 1), new HoldRow());
+
+        PatternNotes.SetLoopStart(pattern, 0);
+
+        Assert.Empty(PatternNotes.Read(pattern));
+        Assert.Equal(2, pattern.Rows.Count);
+    }
+
     /// <summary>Reading, writing back unchanged and reading again has to give the same blocks, or
     /// simply opening a pattern in the roll would alter it.</summary>
     [Theory]

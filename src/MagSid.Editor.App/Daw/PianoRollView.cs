@@ -376,6 +376,15 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        // A marker owns its row, so a click there selects it instead of writing a note over
+        // something that took a deliberate keystroke to place.
+        if (pattern.Rows[cell.Row] is LoopStartRow or LoopEndRow)
+        {
+            _selectedRow = cell.Row;
+            Invalidate();
+            return;
+        }
+
         var existing = _notes.FirstOrDefault(n => cell.Row >= n.Row && cell.Row < n.Row + n.Length);
         if (existing is not null && KeyForNote(existing.Note) == cell.Key)
         {
@@ -408,11 +417,17 @@ internal sealed class PianoRollView : Control
     }
 
     protected override bool IsInputKey(Keys keyData) => keyData is
-        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete;
+        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.S or Keys.E;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (_pattern is not { } pattern || _selectedRow < 0)
+        {
+            base.OnKeyDown(e);
+            return;
+        }
+
+        if (HandleMarkerKey(e, pattern))
         {
             base.OnKeyDown(e);
             return;
@@ -472,6 +487,54 @@ internal sealed class PianoRollView : Control
         }
 
         base.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// The loop markers: S puts an LS on the selected row, E an LE. On a row that already carries
+    /// one, the arrows change an LE's repeat count and Delete takes the marker away.
+    ///
+    /// Handled before the note keys because a marker owns its row outright - there is no note there
+    /// to move or shorten, and falling through would leave the row unreachable from the keyboard.
+    /// Returns true when the key belonged here.
+    /// </summary>
+    private bool HandleMarkerKey(KeyEventArgs e, Pattern pattern)
+    {
+        var marker = PatternNotes.Markers(pattern).FirstOrDefault(m => m.Row == _selectedRow);
+
+        switch (e.KeyCode)
+        {
+            case Keys.S:
+                PatternNotes.SetLoopStart(pattern, _selectedRow);
+                Commit();
+                e.Handled = true;
+                return true;
+
+            case Keys.E:
+                PatternNotes.SetLoopEnd(pattern, _selectedRow, null);
+                Commit();
+                e.Handled = true;
+                return true;
+
+            case Keys.Delete when marker is not null:
+                PatternNotes.RemoveMarker(pattern, _selectedRow);
+                Commit();
+                e.Handled = true;
+                return true;
+
+            // A bare LE loops forever, which is repeat count 0 in the byte - so counting up from
+            // nothing lands on 1 and counting down off 1 goes back to bare.
+            case Keys.Up or Keys.Down when marker is { IsStart: false }:
+            {
+                int next = (marker.RepeatCount ?? 0) + (e.KeyCode == Keys.Up ? 1 : -1);
+                PatternNotes.SetLoopEnd(pattern, _selectedRow, next);
+                Commit();
+                e.Handled = true;
+                return true;
+            }
+
+            default:
+                return marker is not null && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down;
+        }
     }
 
     private void Commit()
@@ -648,15 +711,29 @@ internal sealed class PianoRollView : Control
                 continue;
 
             bool start = pattern.Rows[row] is LoopStartRow;
-            using var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 30));
-            g.FillRectangle(fill, x, top, RowWidth, bottom - top);
+            bool selected = row == _selectedRow;
 
-            using var pen = new Pen(DawPalette.Effect);
-            g.DrawLine(pen, x, top, x, bottom);
+            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, selected ? 70 : 30)))
+                g.FillRectangle(fill, x, top, RowWidth, bottom - top);
+
+            using (var pen = new Pen(DawPalette.Effect, selected ? 2f : 1f))
+                g.DrawLine(pen, x, top, x, bottom);
+
+            if (selected)
+            {
+                using var edge = new Pen(DawPalette.Effect);
+                g.DrawRectangle(edge, x, top, RowWidth, bottom - top - 1);
+            }
+
+            // The repeat count rides with the label: a bare LE loops forever and a numbered one
+            // plays the section that many times in total, which is too different to leave unsaid.
+            string label = start
+                ? "LS"
+                : pattern.Rows[row] is LoopEndRow { RepeatCount: { } count } ? $"LE{count}" : "LE";
 
             using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
             using var ink = new SolidBrush(DawPalette.Effect);
-            g.DrawString(start ? "LS" : "LE", font, ink, x + 2, top + 3);
+            g.DrawString(label, font, ink, x + 2, top + 3);
         }
     }
 

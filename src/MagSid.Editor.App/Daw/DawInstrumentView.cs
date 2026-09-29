@@ -39,6 +39,7 @@ internal sealed class DawInstrumentView : Panel
     private readonly ProgramLaneControl _wavetable = new();
     private readonly ProgramLaneControl _noteProgram = new();
     private readonly ProgramLaneControl _filter = new();
+    private readonly FilterStepEditor _filterStep = new();
 
     private Instrument? _instrument;
 
@@ -105,6 +106,7 @@ internal sealed class DawInstrumentView : Panel
             _noHardRestart.Checked = instrument.NoHardRestart;
 
             RefreshDerived(instrument);
+            _filterStep.ShowStep(instrument, _filter.SelectedStep);
         }
         finally
         {
@@ -146,6 +148,12 @@ internal sealed class DawInstrumentView : Panel
         edit(instrument);
         RefreshDerived(instrument);
         _subtitle.Text = Describe(instrument);
+
+        // Not while the editor itself is the one committing, or showing the step would reload the
+        // controls out from under the knob being turned.
+        if (!_filterStep.ContainsFocus)
+            _filterStep.ShowStep(instrument, _filter.SelectedStep);
+
         Edited?.Invoke(instrument);
     }
 
@@ -396,6 +404,13 @@ internal sealed class DawInstrumentView : Panel
         _noteProgram.Hint = "absolute notes · ROOT returns to the row's own note";
         _noteProgram.Accent = DawPalette.Oscillator;
 
+        // The lane picks a step; the editor below shows everything that step carries. Mode,
+        // volume, resonance and routing live in a setup record and nowhere else, which is why the
+        // lane alone could never edit them.
+        _filter.StepSelected += step => _filterStep.ShowStep(_instrument, step);
+        _filterStep.Edited += () => Commit(_ => { });
+        _filterStep.Dock = DockStyle.Bottom;
+
         _filter.Title = "FILTER PROGRAM";
         _filter.Hint = "a setup record opens with $FF · $00 ends and holds the cutoff";
         _filter.Accent = DawPalette.Filter;
@@ -419,6 +434,7 @@ internal sealed class DawInstrumentView : Panel
         }
 
         Controls.Add(programs);
+        Controls.Add(_filterStep);
         Controls.Add(top);
         Controls.Add(header);
     }

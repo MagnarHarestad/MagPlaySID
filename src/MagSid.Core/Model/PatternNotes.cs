@@ -7,6 +7,10 @@ public sealed record NoteBlock(int Row, int Length, NoteName Note, int Instrumen
 /// <summary>A "---" and the rows it holds for - the voice releasing rather than sounding.</summary>
 public sealed record ReleaseBlock(int Row, int Length);
 
+/// <summary>An LS or LE on a row of its own. <paramref name="RepeatCount"/> is null on an LS and on
+/// a bare LE, which loops forever.</summary>
+public sealed record LoopMarker(int Row, bool IsStart, int? RepeatCount);
+
 /// <summary>
 /// Reads a pattern as blocks and writes blocks back as rows.
 ///
@@ -67,6 +71,70 @@ public static class PatternNotes
             length++;
 
         return length;
+    }
+
+    /// <summary>Every LS and LE in the pattern, in row order.</summary>
+    public static IReadOnlyList<LoopMarker> Markers(Pattern pattern)
+    {
+        var markers = new List<LoopMarker>();
+
+        for (int row = 0; row < pattern.Rows.Count; row++)
+        {
+            markers.Add(pattern.Rows[row] switch
+            {
+                LoopStartRow => new LoopMarker(row, true, null),
+                LoopEndRow end => new LoopMarker(row, false, end.RepeatCount),
+                _ => null!,
+            });
+        }
+
+        markers.RemoveAll(marker => marker is null);
+        return markers;
+    }
+
+    /// <summary>
+    /// Puts an LS on a row, moving the loop anchor there.
+    ///
+    /// A marker takes a row of its own, so whatever was there is gone - and a note before it can no
+    /// longer reach past, because holds on the far side only play on the pass that gets to them.
+    /// Both are what putting a marker in the middle of a phrase means.
+    /// </summary>
+    public static void SetLoopStart(Pattern pattern, int row)
+    {
+        if (row < 0 || row >= pattern.Rows.Count)
+            return;
+
+        pattern.Rows[row] = new LoopStartRow();
+    }
+
+    /// <summary>
+    /// Puts an LE on a row.
+    ///
+    /// <paramref name="repeatCount"/> null is a bare LE, which loops forever; a number plays the
+    /// marked section that many times in total and then falls through. Loops do not nest, so an LE
+    /// always pairs with the nearest LS before it - or with the start of the pattern when there is
+    /// none, which is a whole-pattern loop and perfectly ordinary.
+    /// </summary>
+    public static void SetLoopEnd(Pattern pattern, int row, int? repeatCount)
+    {
+        if (row < 0 || row >= pattern.Rows.Count)
+            return;
+
+        // The count is one byte in the stream and 0 there already means "forever", which null
+        // spells here - so a caller asking for 0 gets the bare LE it must have meant.
+        int? clamped = repeatCount is null or <= 0 ? null : Math.Min(repeatCount.Value, 255);
+        pattern.Rows[row] = new LoopEndRow(clamped);
+    }
+
+    /// <summary>Takes a marker away, leaving a hold - the same nothing a removed note leaves, since
+    /// this format has no blank row. Returns false when that row held no marker.</summary>
+    public static bool RemoveMarker(Pattern pattern, int row)
+    {
+        if (row < 0 || row >= pattern.Rows.Count || pattern.Rows[row] is not (LoopStartRow or LoopEndRow))
+            return false;
+
+        pattern.Rows[row] = new HoldRow();
+        return true;
     }
 
     /// <summary>The furthest a note starting at <paramref name="row"/> may reach: up to the next
