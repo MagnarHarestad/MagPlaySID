@@ -6,6 +6,11 @@ obj/
 # Sound Forge peak caches, regenerated on demand from the .wav beside them.
 *.sfk
 
+# Audio the player exports. Rendered from a .sid on demand, so committing one stores a
+# large file whose source is already here - and the save dialog opens on SongData.
+*.mp3
+*.wav
+
 # OS
 Thumbs.db
 desktop.ini
