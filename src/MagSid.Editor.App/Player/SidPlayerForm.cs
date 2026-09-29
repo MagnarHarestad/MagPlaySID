@@ -31,6 +31,11 @@ public sealed class SidPlayerForm : Form
     private readonly Label _title = new();
     private readonly Label _details = new();
     private readonly Label _elapsed = new();
+    private readonly Button _export = new();
+
+    /// <summary>How long the tune runs before it repeats, found by running it. Null while the
+    /// search is still going, or when the tune shows no repeating state at all.</summary>
+    private SidSongLength.Result? _length;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = RefreshMilliseconds };
 
     private readonly bool[] _muted = new bool[3];
@@ -87,12 +92,15 @@ public sealed class SidPlayerForm : Form
         _details.AutoSize = true;
         _details.Margin = new Padding(4, 2, 0, 0);
 
-        _elapsed.Text = "0:00";
-        _elapsed.Font = new Font("Consolas", 10.5f);
-        _elapsed.ForeColor = SidPlayerPalette.Subtitle;
+        // Played and total, in the title's own white - it is the one number a listener keeps
+        // glancing at, and a dim one beside bright transport glyphs reads as disabled.
+        _elapsed.Text = "00:00 - --:--";
+        _elapsed.Font = new Font("Consolas", 12f);
+        _elapsed.ForeColor = SidPlayerPalette.Title;
         _elapsed.AutoSize = true;
-        _elapsed.Anchor = AnchorStyles.Right;
-        _elapsed.TextAlign = ContentAlignment.MiddleRight;
+        _elapsed.Anchor = AnchorStyles.None;
+        _elapsed.TextAlign = ContentAlignment.MiddleCenter;
+        _elapsed.Margin = new Padding(14, 8, 14, 0);
 
         var header = new FlowLayoutPanel
         {
@@ -138,10 +146,12 @@ public sealed class SidPlayerForm : Form
             BackColor = SidPlayerPalette.Background,
             Margin = Padding.Empty,
         };
-        buttons.Controls.AddRange([_previous, _playPause, _next]);
+        // The time is the centred element and the restart button sits immediately left of it, as
+        // asked; pause and next keep their order on the other side.
+        buttons.Controls.AddRange([_previous, _elapsed, _playPause, _next]);
 
-        // A three-column strip with the buttons in the middle one, so they stay centred on the
-        // window however wide the elapsed time on the right gets.
+        // A three-column strip with the transport in the middle one, so the time stays centred on
+        // the window however wide the export button on the right gets.
         var transport = new TableLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -156,7 +166,7 @@ public sealed class SidPlayerForm : Form
         transport.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
         transport.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = SidPlayerPalette.Background }, 0, 0);
         transport.Controls.Add(buttons, 1, 0);
-        transport.Controls.Add(_elapsed, 2, 0);
+        transport.Controls.Add(_export, 2, 0);
 
         var spectrumHost = new Panel
         {
@@ -171,8 +181,25 @@ public sealed class SidPlayerForm : Form
         Controls.Add(transport);
         Controls.Add(header);
 
+        _export.Text = "Export audio...";
+        _export.Anchor = AnchorStyles.Right;
+        _export.AutoSize = true;
+        _export.Click += (_, _) => DoExport();
+        DarkTheme.Apply(_export);
+
         _timer.Tick += (_, _) => Refresh_();
         _timer.Start();
+
+        // Finding the length means running the whole tune, which takes a second or two - off the
+        // UI thread, so the window opens and plays at once and the number appears when it is known.
+        var file = _file;
+        Task.Run(() => SidSongLength.Measure(file)).ContinueWith(
+            task =>
+            {
+                if (!IsDisposed && task.IsCompletedSuccessfully)
+                    BeginInvoke(() => _length = task.Result);
+            },
+            TaskScheduler.Default);
 
         KeyDown += (_, e) =>
         {
@@ -288,8 +315,84 @@ public sealed class SidPlayerForm : Form
         foreach (var scope in _scopes)
             scope.Update(engine, at);
 
-        long seconds = at / SidFilePlaybackEngine.SampleRate;
-        _elapsed.Text = $"{seconds / 60}:{seconds % 60:00}";
+        _elapsed.Text = $"{Clock(PositionWithinSong(at))} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
+    }
+
+    /// <summary>
+    /// Where the listener is inside the song rather than how long they have sat there.
+    ///
+    /// A tune loops forever, so once playback passes the end it folds back into the repeating part
+    /// - otherwise the played time would climb past the total and read as nonsense. Before the
+    /// length is known, or for a tune that never repeats, it simply counts up.
+    /// </summary>
+    private TimeSpan PositionWithinSong(long samples)
+    {
+        var elapsed = TimeSpan.FromSeconds(samples / (double)SidFilePlaybackEngine.SampleRate);
+
+        if (_length is not { } length || length.LoopFrames <= 0 || elapsed <= length.Total)
+            return elapsed;
+
+        double intoLoop = (elapsed - length.LoopStart).TotalSeconds % (length.LoopFrames / 50.0);
+        return length.LoopStart + TimeSpan.FromSeconds(intoLoop);
+    }
+
+    private static string Clock(TimeSpan time) => $"{(int)time.TotalMinutes:00}:{time.Seconds:00}";
+
+    /// <summary>
+    /// Writes the tune to a file by rendering it, faster than real time.
+    ///
+    /// One pass through the song by default - the length that was found - because a tune loops
+    /// forever and something has to decide where to stop. A tune with no findable length gets three
+    /// minutes, which is a guess, and the dialog says so by opening on that number.
+    /// </summary>
+    private void DoExport()
+    {
+        bool mp3 = SidAudioExport.IsMp3Available();
+
+        using var save = new SaveFileDialog
+        {
+            Title = "Export audio",
+            Filter = mp3
+                ? "WAV audio (*.wav)|*.wav|MP3 audio (*.mp3)|*.mp3"
+                : "WAV audio (*.wav)|*.wav",
+            FileName = (string.IsNullOrWhiteSpace(_file.Name)
+                ? Path.GetFileNameWithoutExtension(_path)
+                : _file.Name.Trim()) + ".wav",
+        };
+
+        if (save.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var format = Path.GetExtension(save.FileName).Equals(".mp3", StringComparison.OrdinalIgnoreCase)
+            ? SidAudioExport.Format.Mp3
+            : SidAudioExport.Format.Wav;
+
+        int frames = _length?.TotalFrames ?? (50 * 60 * 3);
+
+        string previous = _export.Text;
+        _export.Enabled = false;
+        _export.Text = "Rendering...";
+
+        var file = _file;
+        string path = save.FileName;
+
+        Task.Run(() => SidAudioExport.Render(file, path, format, frames)).ContinueWith(task =>
+        {
+            if (IsDisposed)
+                return;
+
+            BeginInvoke(() =>
+            {
+                _export.Enabled = true;
+                _export.Text = previous;
+
+                if (task.Exception?.GetBaseException() is { } error)
+                {
+                    MessageBox.Show(this, error.Message, "Cannot export audio",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            });
+        }, TaskScheduler.Default);
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

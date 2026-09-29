@@ -7,6 +7,9 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- MediaFoundationEncoder lives here, and is what writes MP3 through
+         Windows' own encoder rather than a native library shipped with us. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
   </ItemGroup>
 
   <PropertyGroup>
