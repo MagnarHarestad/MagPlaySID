@@ -99,20 +99,35 @@ public sealed class SidPlayerForm : Form
         _elapsed.ForeColor = SidPlayerPalette.Title;
         _elapsed.AutoSize = true;
         _elapsed.Anchor = AnchorStyles.None;
+        _elapsed.AutoSize = true;
         _elapsed.TextAlign = ContentAlignment.MiddleCenter;
         _elapsed.Margin = new Padding(14, 8, 14, 0);
 
-        var header = new FlowLayoutPanel
+        var titleBlock = new FlowLayoutPanel
         {
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Left,
             FlowDirection = FlowDirection.TopDown,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(18, 14, 18, 10),
+            BackColor = SidPlayerPalette.Background,
+            Margin = Padding.Empty,
+        };
+        titleBlock.Controls.Add(_title);
+        titleBlock.Controls.Add(_details);
+
+        // The export button lives in the top right, opposite the title. A fixed-height strip with
+        // the button anchored to its corner, rather than anything that sizes itself - the previous
+        // attempt let the button decide its own height inside a shorter strip and the window's edge
+        // cut it in half.
+        var header = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 62,
+            Padding = new Padding(18, 12, 18, 10),
             BackColor = SidPlayerPalette.Background,
         };
-        header.Controls.Add(_title);
-        header.Controls.Add(_details);
+        header.Controls.Add(titleBlock);
+        header.Controls.Add(_export);
 
         var scopes = new TableLayoutPanel
         {
@@ -138,35 +153,43 @@ public sealed class SidPlayerForm : Form
         _next.Enabled = _file.Songs > 1;
         _previous.Enabled = true;
 
-        var buttons = new FlowLayoutPanel
+        // A table rather than a FlowLayoutPanel. A flow panel wraps by default, and this one sits
+        // in an auto-sized column squeezed between two half-width ones - so it wrapped, and every
+        // row after the first fell outside the strip's height and simply vanished. Only the restart
+        // button was ever visible. A table does not wrap.
+        var group = new TableLayoutPanel
         {
             Anchor = AnchorStyles.None,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 4,
+            RowCount = 1,
             BackColor = SidPlayerPalette.Background,
             Margin = Padding.Empty,
         };
+        for (int i = 0; i < 4; i++)
+            group.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
         // The time is the centred element and the restart button sits immediately left of it, as
         // asked; pause and next keep their order on the other side.
-        buttons.Controls.AddRange([_previous, _elapsed, _playPause, _next]);
+        group.Controls.Add(_previous, 0, 0);
+        group.Controls.Add(_elapsed, 1, 0);
+        group.Controls.Add(_playPause, 2, 0);
+        group.Controls.Add(_next, 3, 0);
 
-        // A three-column strip with the transport in the middle one, so the time stays centred on
-        // the window however wide the export button on the right gets.
+        // One centred cell now that the export button has moved to the header, so the transport
+        // sits in the middle of the window rather than the middle of a column.
         var transport = new TableLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 62,
-            ColumnCount = 3,
+            Height = 64,
+            ColumnCount = 1,
             RowCount = 1,
             BackColor = SidPlayerPalette.Background,
-            Padding = new Padding(18, 4, 18, 10),
+            Padding = new Padding(18, 6, 18, 8),
         };
-        transport.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-        transport.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        transport.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-        transport.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = SidPlayerPalette.Background }, 0, 0);
-        transport.Controls.Add(buttons, 1, 0);
-        transport.Controls.Add(_export, 2, 0);
+        transport.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        transport.Controls.Add(group, 0, 0);
 
         var spectrumHost = new Panel
         {
@@ -182,10 +205,20 @@ public sealed class SidPlayerForm : Form
         Controls.Add(header);
 
         _export.Text = "Export audio...";
-        _export.Anchor = AnchorStyles.Right;
-        _export.AutoSize = true;
+        // Pinned to the header's top-right corner, at a size it does not get to choose - a button
+        // that sizes itself can grow taller than the strip holding it and be clipped away.
+        _export.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _export.AutoSize = false;
+        _export.Size = new Size(126, 30);
+        _export.Location = new Point(header.ClientSize.Width - 126 - 18, 12);
         _export.Click += (_, _) => DoExport();
         DarkTheme.Apply(_export);
+
+        // After the theme, not before: it sets its own colours, and this window wants the title's
+        // white so the button reads as part of the same header rather than as editor chrome.
+        _export.ForeColor = SidPlayerPalette.Title;
+        _export.FlatAppearance.BorderColor = SidPlayerPalette.PanelBorder;
+        _export.BackColor = SidPlayerPalette.PanelBackground;
 
         _timer.Tick += (_, _) => Refresh_();
         _timer.Start();
