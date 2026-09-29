@@ -20,6 +20,8 @@ public static class EditorSettings
     private static bool _showHighHex;
     private static string _sidAuthor = string.Empty;
     private static int _sidLoadAddress = MagSid.Core.SidLoadAddress.Default;
+    private static string _sidOpenDirectory = string.Empty;
+    private static string _audioExportDirectory = string.Empty;
     private static bool _loaded;
 
     public static bool ShowHighHex
@@ -81,6 +83,45 @@ public static class EditorSettings
         }
     }
 
+    /// <summary>Where a .sid was last opened from, for the player's own file dialog.</summary>
+    public static string SidOpenDirectory
+    {
+        get => ExistingDirectory(ref _sidOpenDirectory);
+        set => SetDirectory(ref _sidOpenDirectory, value);
+    }
+
+    /// <summary>
+    /// Where audio was last written, kept apart from <see cref="SidOpenDirectory"/> on purpose.
+    ///
+    /// A save dialog with no directory of its own inherits whichever one the process used last, so
+    /// exporting after opening a tune offered to write the audio straight back into the folder the
+    /// tunes live in. That is how a three-megabyte render ended up committed to this repository.
+    /// </summary>
+    public static string AudioExportDirectory
+    {
+        get => ExistingDirectory(ref _audioExportDirectory);
+        set => SetDirectory(ref _audioExportDirectory, value);
+    }
+
+    /// <summary>Empty for a folder that has since been deleted or moved - a dialog pointed at one
+    /// that no longer exists opens somewhere arbitrary rather than where it was told.</summary>
+    private static string ExistingDirectory(ref string field)
+    {
+        EnsureLoaded();
+        return field.Length > 0 && Directory.Exists(field) ? field : string.Empty;
+    }
+
+    private static void SetDirectory(ref string field, string? value)
+    {
+        EnsureLoaded();
+        string trimmed = value?.Trim() ?? string.Empty;
+        if (field == trimmed)
+            return;
+
+        field = trimmed;
+        Save();
+    }
+
     private static void EnsureLoaded()
     {
         if (_loaded)
@@ -98,6 +139,9 @@ public static class EditorSettings
                 // "never chosen" rather than "load at $0000".
                 if (stored.SidLoadAddress is > 0)
                     _sidLoadAddress = stored.SidLoadAddress.Value;
+
+                _sidOpenDirectory = stored.SidOpenDirectory ?? string.Empty;
+                _audioExportDirectory = stored.AudioExportDirectory ?? string.Empty;
             }
         }
         catch
@@ -116,6 +160,8 @@ public static class EditorSettings
                 ShowHighHex = _showHighHex,
                 SidAuthor = _sidAuthor,
                 SidLoadAddress = _sidLoadAddress,
+                SidOpenDirectory = _sidOpenDirectory,
+                AudioExportDirectory = _audioExportDirectory,
             }));
         }
         catch
@@ -129,5 +175,7 @@ public static class EditorSettings
         public bool ShowHighHex { get; set; }
         public string? SidAuthor { get; set; }
         public int? SidLoadAddress { get; set; }
+        public string? SidOpenDirectory { get; set; }
+        public string? AudioExportDirectory { get; set; }
     }
 }

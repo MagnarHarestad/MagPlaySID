@@ -1350,7 +1350,13 @@ public sealed class MainForm : Form
             Title = "Load and play a .sid",
         };
 
-        if (_lastExportedSidPath is not null && File.Exists(_lastExportedSidPath))
+        // Wherever a .sid was last opened from, falling back to where one was last exported to -
+        // which is usually the same folder the first time anyone does this.
+        if (EditorSettings.SidOpenDirectory is { Length: > 0 } remembered)
+        {
+            open.InitialDirectory = remembered;
+        }
+        else if (_lastExportedSidPath is not null && File.Exists(_lastExportedSidPath))
         {
             open.InitialDirectory = Path.GetDirectoryName(_lastExportedSidPath);
             open.FileName = Path.GetFileName(_lastExportedSidPath);
@@ -1358,6 +1364,9 @@ public sealed class MainForm : Form
 
         if (open.ShowDialog(this) != DialogResult.OK)
             return;
+
+        if (Path.GetDirectoryName(open.FileName) is { Length: > 0 } opened)
+            EditorSettings.SidOpenDirectory = opened;
 
         // The editor's own playback owns a SidChip too, and two of them mixing into one device is
         // not something anyone wants to hear.

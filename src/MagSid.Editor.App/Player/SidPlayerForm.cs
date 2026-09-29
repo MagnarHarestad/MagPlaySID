@@ -447,10 +447,18 @@ public sealed class SidPlayerForm : Form
             FileName = (string.IsNullOrWhiteSpace(_file.Name)
                 ? Path.GetFileNameWithoutExtension(_path)
                 : _file.Name.Trim()) + ".wav",
+
+            // Its own remembered folder, deliberately not the one the tune came from. A dialog
+            // with no directory of its own inherits whichever the process used last, which meant
+            // exporting offered to write the audio back into the folder the tunes live in.
+            InitialDirectory = EditorSettings.AudioExportDirectory,
         };
 
         if (save.ShowDialog(this) != DialogResult.OK)
             return;
+
+        if (Path.GetDirectoryName(save.FileName) is { Length: > 0 } chosen)
+            EditorSettings.AudioExportDirectory = chosen;
 
         var format = Path.GetExtension(save.FileName).Equals(".mp3", StringComparison.OrdinalIgnoreCase)
             ? SidAudioExport.Format.Mp3
