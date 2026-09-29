@@ -187,14 +187,71 @@ public class SidSongLengthTests
         Assert.Null(SidAudioExport.ParseLength(typed));
     }
 
-    /// <summary>MP3 goes through Windows' own encoder, which N editions leave out. Whichever this
-    /// machine is, the answer has to be a straight yes or no rather than a throw from deep inside
-    /// Media Foundation.</summary>
+    /// <summary>
+    /// What Windows can encode varies by machine - N editions have no MP3, FLAC needs Windows 10 -
+    /// so asking has to give a straight yes or no rather than a throw from inside Media Foundation,
+    /// and WAV has to be there whatever the answer.
+    /// </summary>
     [Fact]
-    public void Asking_whether_mp3_is_available_never_throws()
+    public void Every_format_answers_whether_it_is_available()
     {
-        bool available = SidAudioExport.IsMp3Available();
-        Assert.True(available || !available);
+        foreach (var format in Enum.GetValues<SidAudioExport.Format>())
+        {
+            bool available = SidAudioExport.IsAvailable(format);
+            Assert.True(available || !available);
+        }
+
+        Assert.True(SidAudioExport.IsAvailable(SidAudioExport.Format.Wav));
+        Assert.Contains(SidAudioExport.Format.Wav, SidAudioExport.AvailableFormats());
+    }
+
+    /// <summary>A filename decides the format, so its extension and the one a format claims have to
+    /// agree - otherwise a file named .flac could be written as WAV without anything noticing.</summary>
+    [Theory]
+    [InlineData(SidAudioExport.Format.Wav, ".wav")]
+    [InlineData(SidAudioExport.Format.Mp3, ".mp3")]
+    [InlineData(SidAudioExport.Format.Flac, ".flac")]
+    public void A_formats_extension_names_it_back(SidAudioExport.Format format, string extension)
+    {
+        Assert.Equal(extension, SidAudioExport.ExtensionOf(format));
+        Assert.Equal(format, SidAudioExport.FormatOf("tune" + extension));
+        Assert.Equal(format, SidAudioExport.FormatOf("TUNE" + extension.ToUpperInvariant()));
+    }
+
+    /// <summary>Anything unrecognised is WAV, the one format always available - better than
+    /// refusing a name outright.</summary>
+    [Theory]
+    [InlineData("tune")]
+    [InlineData("tune.ogg")]
+    [InlineData("tune.sid")]
+    public void An_unknown_extension_falls_back_to_wav(string name)
+    {
+        Assert.Equal(SidAudioExport.Format.Wav, SidAudioExport.FormatOf(name));
+    }
+
+    /// <summary>FLAC is lossless, so a render of it has to come back as the same audio - a smaller
+    /// file than WAV, but not a shorter one.</summary>
+    [Fact]
+    public void Rendering_to_flac_writes_a_file_when_windows_can()
+    {
+        if (!SidAudioExport.IsAvailable(SidAudioExport.Format.Flac))
+            return;   // no encoder on this machine; the availability test above covers that case
+
+        string path = Path.Combine(Path.GetTempPath(), $"magsid-export-{Guid.NewGuid():N}.flac");
+        try
+        {
+            SidAudioExport.Render(
+                Load("BellaCiao.s"), path, SidAudioExport.Format.Flac, TimeSpan.FromSeconds(2));
+
+            var written = new FileInfo(path);
+            Assert.True(written.Exists);
+            Assert.True(written.Length > 4000, $"A two-second FLAC came out at {written.Length} bytes.");
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 
     private static SidFile Load(string songFile)

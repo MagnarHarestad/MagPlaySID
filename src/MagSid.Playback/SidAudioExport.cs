@@ -13,33 +13,98 @@ namespace MagSid.Playback;
 /// </summary>
 public static class SidAudioExport
 {
-    /// <summary>WAV always; MP3 only where Windows has an encoder for it.</summary>
+    /// <summary>WAV always; the compressed formats only where Windows has an encoder for them.</summary>
     public enum Format
     {
         Wav,
         Mp3,
+        Flac,
     }
 
     /// <summary>
-    /// MP3 encoding goes through Media Foundation, which is part of Windows rather than something
+    /// The encoders go through Media Foundation, which is part of Windows rather than something
     /// shipped here - so no native library travels with the editor and the single-file build stays
-    /// one file. Windows N editions without the Media Feature Pack have no MP3 encoder at all,
-    /// which is why this is asked rather than assumed.
+    /// one file. What Windows actually has varies: N editions without the Media Feature Pack have
+    /// no MP3 encoder, and FLAC arrived only in Windows 10. So this is asked rather than assumed.
     /// </summary>
-    public static bool IsMp3Available()
+    public static bool IsAvailable(Format format)
     {
+        if (format == Format.Wav)
+            return true;
+
         try
         {
             MediaFoundationApi.Startup();
-            return MediaFoundationEncoder
-                .GetOutputMediaTypes(AudioSubtypes.MFAudioFormat_MP3)
-                .Length > 0;
+            return MediaFoundationEncoder.GetOutputMediaTypes(SubtypeOf(format)).Length > 0;
         }
         catch (Exception)
         {
             return false;
         }
     }
+
+    /// <summary>The formats this machine can actually write, WAV first.</summary>
+    public static IReadOnlyList<Format> AvailableFormats() =>
+        [.. Enum.GetValues<Format>().Where(IsAvailable)];
+
+    /// <summary>Which format a filename asks for, by its extension. WAV for anything else, since
+    /// that is the one always available.</summary>
+    public static Format FormatOf(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".mp3" => Format.Mp3,
+        ".flac" => Format.Flac,
+        _ => Format.Wav,
+    };
+
+    public static string ExtensionOf(Format format) => format switch
+    {
+        Format.Mp3 => ".mp3",
+        Format.Flac => ".flac",
+        _ => ".wav",
+    };
+
+    /// <summary>
+    /// Picks the encoder's output type, matching bit depth before anything else.
+    ///
+    /// NAudio's own SelectMediaType orders only by how close the bitrate is, which is right for a
+    /// lossy format and wrong for FLAC: FLAC advertises 8, 16 and 24-bit types at one sample rate
+    /// all carrying the same nominal bitrate, so that ordering can land on 8-bit, and the sink
+    /// writer then refuses the 16-bit input with an error that names the media type rather than the
+    /// mismatch. Matching the depth first is what makes FLAC work at all.
+    ///
+    /// Not every type carries a bit depth - MP3's do not, and asking throws - so a type without one
+    /// simply does not lose on that count.
+    /// </summary>
+    private static MediaType? SelectOutputType(Format format, WaveFormat input)
+    {
+        // Lossless, so a bitrate is not a quality setting: ask high and take the best offered.
+        int desiredBitRate = format == Format.Flac ? 1_000_000 : 192_000;
+
+        return MediaFoundationEncoder.GetOutputMediaTypes(SubtypeOf(format))
+            .Where(type => type.SampleRate == input.SampleRate && type.ChannelCount == input.Channels)
+            .OrderBy(type => BitsPerSampleOf(type) is { } bits && bits != input.BitsPerSample ? 1 : 0)
+            .ThenBy(type => Math.Abs(desiredBitRate - (type.AverageBytesPerSecond * 8)))
+            .FirstOrDefault();
+    }
+
+    private static int? BitsPerSampleOf(MediaType type)
+    {
+        try
+        {
+            return type.BitsPerSample;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static Guid SubtypeOf(Format format) => format switch
+    {
+        Format.Mp3 => AudioSubtypes.MFAudioFormat_MP3,
+        Format.Flac => AudioSubtypes.MFAudioFormat_FLAC,
+        _ => throw new ArgumentOutOfRangeException(nameof(format), format, "WAV is not encoded."),
+    };
 
     /// <summary>
     /// Reads a length a person typed: "02:35:01" as minutes, seconds and hundredths, "3:30"
@@ -113,17 +178,27 @@ public static class SidAudioExport
             return;
         }
 
-        if (!IsMp3Available())
+        if (!IsAvailable(format))
         {
             throw new SidPlaybackException(
-                "Windows has no MP3 encoder available on this machine, so only WAV can be written. "
-                + "That encoder is part of the Media Feature Pack, which N editions of Windows leave out.");
+                $"Windows has no {format.ToString().ToUpperInvariant()} encoder on this machine, so "
+                + "that format cannot be written here. WAV always works. MP3 comes with the Media "
+                + "Feature Pack, which N editions of Windows leave out, and FLAC needs Windows 10 "
+                + "or later.");
         }
 
         // Media Foundation pulls from a provider rather than being written to, so the length is
         // enforced by a wrapper that stops the tune rather than by counting writes.
         var source = new BoundedProvider(new SidFilePlaybackEngine(file, chipModel), totalSamples, progress, cancellation);
-        MediaFoundationEncoder.EncodeToMp3(source, path, 192_000);
+
+        var mediaType = SelectOutputType(format, source.WaveFormat)
+            ?? throw new SidPlaybackException(
+                $"Windows' {format.ToString().ToUpperInvariant()} encoder will not take "
+                + $"{source.WaveFormat.BitsPerSample}-bit mono at {source.WaveFormat.SampleRate}Hz, "
+                + "which is what this player produces.");
+
+        using var encoder = new MediaFoundationEncoder(mediaType);
+        encoder.Encode(path, source);
     }
 
     private static void Pump(

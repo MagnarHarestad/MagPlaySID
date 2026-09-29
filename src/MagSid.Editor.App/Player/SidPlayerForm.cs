@@ -436,14 +436,19 @@ public sealed class SidPlayerForm : Form
         if (_exporting)
             return;
 
-        bool mp3 = SidAudioExport.IsMp3Available();
+        // Only the formats this machine can actually write - offering one Windows has no encoder
+        // for would mean the failure arrives after the file has been named.
+        var formats = SidAudioExport.AvailableFormats();
+        string filter = string.Join("|", formats.Select(format =>
+        {
+            string extension = SidAudioExport.ExtensionOf(format);
+            return $"{format.ToString().ToUpperInvariant()} audio (*{extension})|*{extension}";
+        }));
 
         using var save = new SaveFileDialog
         {
             Title = "Export audio",
-            Filter = mp3
-                ? "WAV audio (*.wav)|*.wav|MP3 audio (*.mp3)|*.mp3"
-                : "WAV audio (*.wav)|*.wav",
+            Filter = filter,
             FileName = (string.IsNullOrWhiteSpace(_file.Name)
                 ? Path.GetFileNameWithoutExtension(_path)
                 : _file.Name.Trim()) + ".wav",
@@ -460,9 +465,7 @@ public sealed class SidPlayerForm : Form
         if (Path.GetDirectoryName(save.FileName) is { Length: > 0 } chosen)
             EditorSettings.AudioExportDirectory = chosen;
 
-        var format = Path.GetExtension(save.FileName).Equals(".mp3", StringComparison.OrdinalIgnoreCase)
-            ? SidAudioExport.Format.Mp3
-            : SidAudioExport.Format.Wav;
+        var format = SidAudioExport.FormatOf(save.FileName);
 
         if (SidAudioExport.ParseLength(_exportLength.Text) is not { } duration)
         {
