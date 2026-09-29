@@ -39,6 +39,11 @@ public sealed class SidPlayerForm : Form
     /// second later does not overwrite what was asked for.</summary>
     private bool _exportLengthEdited;
 
+    /// <summary>A render is under way. Guards the button in code rather than by disabling it: a
+    /// disabled WinForms button paints its text in the system's grey and ignores ForeColor
+    /// entirely, which on this window's near-black header is unreadable.</summary>
+    private bool _exporting;
+
     /// <summary>How long the tune runs before it repeats, found by running it. Null while the
     /// search is still going, or when the tune shows no repeating state at all.</summary>
     private SidSongLength.Result? _length;
@@ -428,6 +433,9 @@ public sealed class SidPlayerForm : Form
     /// </summary>
     private void DoExport()
     {
+        if (_exporting)
+            return;
+
         bool mp3 = SidAudioExport.IsMp3Available();
 
         using var save = new SaveFileDialog
@@ -460,8 +468,9 @@ public sealed class SidPlayerForm : Form
         }
 
         string previous = _export.Text;
-        _export.Enabled = false;
+        _exporting = true;
         _export.Text = "Rendering...";
+        _export.ForeColor = SidPlayerPalette.Subtitle;
 
         var file = _file;
         string path = save.FileName;
@@ -473,8 +482,9 @@ public sealed class SidPlayerForm : Form
 
             BeginInvoke(() =>
             {
-                _export.Enabled = true;
+                _exporting = false;
                 _export.Text = previous;
+                _export.ForeColor = SidPlayerPalette.Title;
 
                 if (task.Exception?.GetBaseException() is { } error)
                 {
