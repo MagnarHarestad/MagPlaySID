@@ -1336,6 +1336,23 @@ public sealed class TrackerGridControl : Control
         return _editMode || firstPress;
     }
 
+    /// <summary>
+    /// Enters a note that came from somewhere other than the computer keyboard - a MIDI keyboard.
+    ///
+    /// The same path a typed note takes, so edit mode still decides whether it is written or only
+    /// played, the cursor still advances, and the instrument is still picked the same way. A second
+    /// route into the song would be a second set of rules to keep in step with this one.
+    /// </summary>
+    public void EnterNote(NoteName note)
+    {
+        if (_song is null || _song.Instruments.Count == 0)
+            return;
+
+        // PitchClasses above runs C, C#, D ... B, which is the order NoteName's own table index
+        // counts in - so the remainder is the index into it.
+        EnterNote(note.TableIndex % 12, note.Octave);
+    }
+
     private void EnterNote(int pitchClass, int octave)
     {
         if (_song!.Instruments.Count == 0)

@@ -473,12 +473,23 @@ public sealed class MainForm : Form
     /// on screen.</summary>
     private void OnMidiNote(NoteName note, int velocity)
     {
-        int instrument = _dawView.SelectedInstrumentNumber
-                         ?? _instrumentList.SelectedInstrument?.Number
-                         ?? 1;
+        if (_dawShowing)
+        {
+            // The roll records it when it is the view on screen; the note sounds either way,
+            // because hearing what you played is not conditional on it being recorded.
+            _dawView.StepInput(note);
 
-        _dawView.StepInput(note);
-        PreviewNote(note, instrument);
+            int instrument = _dawView.SelectedInstrumentNumber
+                             ?? _instrumentList.SelectedInstrument?.Number
+                             ?? 1;
+            PreviewNote(note, instrument);
+            return;
+        }
+
+        // The tracker's own entry path, which already decides whether edit mode writes the note or
+        // only plays it, advances the cursor, and picks the instrument. It raises NoteEntered on
+        // the way, and that is already wired to PreviewNote - so the audition is not repeated here.
+        _trackerGrid.EnterNote(note);
     }
 
     private void CloseMidi()

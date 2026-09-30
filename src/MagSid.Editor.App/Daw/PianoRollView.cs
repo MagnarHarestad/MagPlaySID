@@ -174,17 +174,58 @@ internal sealed class PianoRollView : Control
     /// </summary>
     public bool StepInput(NoteName note)
     {
-        if (_pattern is not { } pattern)
+        if (_pattern is not { } pattern || pattern.Rows.Count == 0)
             return false;
 
-        int row = Math.Max(0, _selectedRow);
-        if (row >= pattern.Rows.Count || pattern.Rows[row] is LoopStartRow or LoopEndRow)
+        // Where the cursor sits, or the next place a note can actually go. A loop marker owns its
+        // row outright, so parking on one would leave every key after it doing nothing.
+        if (WritableRowFrom(pattern, Math.Max(0, _selectedRow)) is not { } row)
             return false;
 
         PatternNotes.SetNote(pattern, row, note, _defaultInstrument);
-        _selectedRow = Math.Min(pattern.Rows.Count - 1, row + 1);
+
+        // Round to the top rather than stopping at the bottom. Clamping meant every key after the
+        // last row overwrote that one row, which looks like the keyboard has stopped working.
+        _selectedRow = WritableRowFrom(pattern, (row + 1) % pattern.Rows.Count) ?? row;
+
+        EnsureRowVisible(_selectedRow);
         Commit();
         return true;
+    }
+
+    /// <summary>The first row from <paramref name="from"/> onwards that can hold a note, wrapping
+    /// once. Null when the pattern is nothing but loop markers, which cannot be played into.</summary>
+    private static int? WritableRowFrom(Pattern pattern, int from)
+    {
+        for (int i = 0; i < pattern.Rows.Count; i++)
+        {
+            int row = (from + i) % pattern.Rows.Count;
+            if (pattern.Rows[row] is not (LoopStartRow or LoopEndRow))
+                return row;
+        }
+
+        return null;
+    }
+
+    /// <summary>Scrolls the least amount that brings a row on screen - so wrapping to the top takes
+    /// the view with it instead of leaving the cursor somewhere nobody is looking.</summary>
+    private void EnsureRowVisible(int row)
+    {
+        if (!_scrollX.Enabled)
+            return;
+
+        int visible = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
+        int left = row * RowWidth;
+        int right = left + RowWidth;
+        int max = Math.Max(0, _scrollX.Maximum - _scrollX.LargeChange + 1);
+
+        int target = _scrollX.Value;
+        if (left < _scrollX.Value)
+            target = left;
+        else if (right > _scrollX.Value + visible)
+            target = right - visible;
+
+        _scrollX.Value = Math.Clamp(target, 0, max);
     }
 
     /// <summary>Re-voices the selected note with another instrument, keeping its pitch and length,
