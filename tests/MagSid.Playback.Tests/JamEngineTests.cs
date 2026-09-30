@@ -1,3 +1,4 @@
+using MagSid.Core;
 using MagSid.Core.Model;
 
 namespace MagSid.Playback.Tests;
@@ -167,6 +168,66 @@ public class JamEngineTests
         engine.Frame(); // program completes on this frame, but nothing ever asked to release
 
         Assert.DoesNotContain(writes, w => w.Offset == 4 && (w.Value & 0x01) == 0);
+    }
+
+    /// <summary>
+    /// Magnificent's KickBass shape: three wavetable steps but four arpeggio steps ending on ROOT.
+    /// The falling pitch *is* the drum, and waiting only for the wavetable released the note two
+    /// frames before the sweep ever reached its root - on exactly the short taps a drum is played
+    /// with.
+    /// </summary>
+    [Fact]
+    public void Deferred_NoteOff_also_waits_for_an_arpeggio_longer_than_the_wavetable()
+    {
+        var instrument = MakeInstrument(1);
+        instrument.Wavetable.AddRange([0x81, 0x41, 0x11]); // three steps - complete after frame 3
+        instrument.Arpeggio.AddRange([Note("B-7"), Note("B-7"), Note("D-3"), Note("F#2")]);
+        instrument.ArpeggioEnding = ArpeggioEnding.Root;
+
+        var (engine, writes) = Build();
+        engine.NoteOn(Note("C-4"), instrument);
+        engine.NoteOff(Note("C-4")); // released before a single frame has run
+
+        for (int frame = 1; frame <= 4; frame++)
+        {
+            writes.Clear();
+            engine.Frame();
+            Assert.DoesNotContain(writes, w => w.Offset == 4 && (w.Value & 0x01) == 0);
+        }
+
+        // Frame 5 is where the arpeggio runs past its last step and ROOT writes the row's own note.
+        // The release belongs on that frame and no earlier.
+        writes.Clear();
+        engine.Frame();
+
+        var (lo, hi) = NotePalTable.GetFreq(Note("C-4"));
+        Assert.Contains(writes, w => w.Offset == 0 && w.Value == lo);
+        Assert.Contains(writes, w => w.Offset == 1 && w.Value == hi);
+        Assert.Contains(writes, w => w.Offset == 4 && (w.Value & 0x01) == 0);
+    }
+
+    /// <summary>A looping arpeggio has no last step to settle on, so completion has to mean "one
+    /// pass" rather than "the end" - otherwise a key-up on a plain arpeggio would never release and
+    /// the voice would hang for good.</summary>
+    [Fact]
+    public void A_looping_arpeggio_releases_after_one_pass_rather_than_hanging()
+    {
+        var instrument = MakeInstrument(1);
+        instrument.Arpeggio.AddRange([Note("C-4"), Note("E-4")]);
+        instrument.ArpeggioEnding = ArpeggioEnding.Loop;
+
+        var (engine, writes) = Build();
+        engine.NoteOn(Note("C-4"), instrument);
+        engine.NoteOff(Note("C-4"));
+
+        writes.Clear();
+        engine.Frame();
+        Assert.DoesNotContain(writes, w => w.Offset == 4 && (w.Value & 0x01) == 0); // mid-pass
+
+        for (int frame = 2; frame <= 8; frame++)
+            engine.Frame();
+
+        Assert.Contains(writes, w => w.Offset == 4 && (w.Value & 0x01) == 0);
     }
 
     [Fact]

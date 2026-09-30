@@ -31,6 +31,21 @@ public sealed class VoiceEngine
     public bool HasWavetableCompleted =>
         _instrument is not null && _wavetablePosition - 1 >= WavetableOf(_instrument).Count;
 
+    /// <summary>
+    /// True once the note program has run past its last step - which is where ROOT takes over, a
+    /// HOLD settles, and a loop turns back.
+    ///
+    /// Separate from the wavetable because the two are not the same length. Magnificent's KickBass
+    /// has three wavetable steps and four arpeggio steps, so waiting only for the wavetable let a
+    /// short key-up cut the pitch sweep before it ever reached its root note - the drum's whole
+    /// character, gone, on exactly the short taps a drum gets played with.
+    /// </summary>
+    public bool HasArpeggioCompleted =>
+        _instrument is null || !_instrument.HasArpeggio || _arpeggioCompleted;
+
+    /// <summary>Both programs have had their say. What a key-up waits for.</summary>
+    public bool HaveProgramsCompleted => HasWavetableCompleted && HasArpeggioCompleted;
+
     /// <summary>The 0-based step each program last actually played on this voice, or -1 when it
     /// has not played one since the last trigger. Reported rather than derived from the position
     /// counters: the wavetable's stops advancing once the program runs out and the arpeggio's
@@ -46,6 +61,7 @@ public sealed class VoiceEngine
     private Instrument? _instrument;
     private int _wavetablePosition;
     private int _arpeggioIndex = -1;
+    private bool _arpeggioCompleted;
     private NoteName _rootNote;
     private int _pulseLow;
     private int _pulseHigh;
@@ -117,6 +133,7 @@ public sealed class VoiceEngine
         _instrument = instrument;
         _wavetablePosition = 1;
         _arpeggioIndex = instrument.HasArpeggio ? 0 : -1;
+        _arpeggioCompleted = false;
         LastWavetableStep = -1;
         LastArpeggioStep = -1;
 
@@ -300,6 +317,10 @@ public sealed class VoiceEngine
 
         if (_arpeggioIndex >= steps.Count)
         {
+            // Recorded before the switch, because two of the three endings move the index back and
+            // a caller looking at it afterwards would never see the program reach its end.
+            _arpeggioCompleted = true;
+
             switch (instrument.ArpeggioEnding)
             {
                 case ArpeggioEnding.Root:

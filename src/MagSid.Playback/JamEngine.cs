@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 using MagSid.Sid;
 using NAudio.Wave;
 
@@ -133,13 +133,15 @@ public sealed class JamEngine : IWaveProvider, IDisposable
     /// <summary>Releases the voice currently sounding this note, if any - a key-up for a note
     /// that was stolen by a later chord note, or that was never sounding (e.g. two keys mapped
     /// to the same note), is simply ignored rather than releasing whatever else happens to be
-    /// playing. If that voice's own WAVE program hasn't played through once yet (see
-    /// VoiceEngine.HasWavetableCompleted), the release itself is deferred instead - in both Edit
-    /// and Jam mode, a note is guaranteed to at least finish its own program once, however
+    /// playing. If that voice's own programs haven't played through once yet (see
+    /// VoiceEngine.HaveProgramsCompleted), the release itself is deferred instead - in both Edit
+    /// and Jam mode, a note is guaranteed to at least finish its own programs once, however
     /// briefly the key was actually held, rather than being cut wherever the key happened to come
-    /// up. The slot stays marked busy while deferred (so NoteOn can't steal it out from under the
-    /// still-sounding note) and Frame() finishes the release the moment the program actually
-    /// completes.</summary>
+    /// up. Both programs, not just the wavetable: they are not the same length, and a drum whose
+    /// pitch sweep is longer than its waveform list would otherwise lose its root note on exactly
+    /// the short taps a drum gets played with. The slot stays marked busy while deferred (so
+    /// NoteOn can't steal it out from under the still-sounding note) and Frame() finishes the
+    /// release the moment both programs actually complete.</summary>
     public void NoteOff(NoteName note)
     {
         lock (_chip)
@@ -150,7 +152,7 @@ public sealed class JamEngine : IWaveProvider, IDisposable
                 return;
             }
 
-            if (!_voices[slot].HasWavetableCompleted)
+            if (!_voices[slot].HaveProgramsCompleted)
             {
                 _slotPendingRelease[slot] = true;
                 return;
@@ -216,11 +218,10 @@ public sealed class JamEngine : IWaveProvider, IDisposable
         {
             _voices[i].Automate(RegisterBase(i), _write);
 
-            // Finishes a release NoteOff had to defer (see NoteOff's own comment) the moment
-            // this voice's WAVE program actually completes - checked after Automate so a
-            // completion that happens on THIS frame is caught immediately rather than one frame
-            // late.
-            if (_slotPendingRelease[i] && _voices[i].HasWavetableCompleted)
+            // Finishes a release NoteOff had to defer (see NoteOff's own comment) the moment both
+            // of this voice's programs actually complete - checked after Automate so a completion
+            // that happens on THIS frame is caught immediately rather than one frame late.
+            if (_slotPendingRelease[i] && _voices[i].HaveProgramsCompleted)
             {
                 _voices[i].ReleaseNote(RegisterBase(i), _write);
                 _slotNotes[i] = null;
