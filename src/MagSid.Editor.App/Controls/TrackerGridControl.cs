@@ -1381,13 +1381,15 @@ public sealed class TrackerGridControl : Control
 
         EnsureRowCount(pattern, localRow + 1);
 
-        // A row that already carries a note keeps its own instrument untouched - only a fresh
-        // row picks one, and it should pick the one selected in the Instruments panel (the same
-        // source Jam mode plays from, see SelectedInstrumentNumber), not always the song's first
-        // instrument regardless of what's selected.
-        int instrumentNumber = pattern.Rows[localRow] is NoteRow existing
-            ? existing.InstrumentNumber
-            : SelectedInstrumentNumber?.Invoke() ?? _song.Instruments[0].Number;
+        // Whatever is selected in the Instruments panel, on every note - including over a row that
+        // already carries one.
+        //
+        // This used to leave an occupied row's instrument alone, so retyping a pitch kept whatever
+        // was already there. That reads as the note being written ignoring the selection: pick
+        // instrument 02, play a note onto a row holding 01, and 01 is what you get with nothing on
+        // screen saying why. It is also what the DAW's piano roll has always done, so the two views
+        // now write the same thing from the same selection.
+        int instrumentNumber = SelectedInstrumentNumber?.Invoke() ?? _song.Instruments[0].Number;
 
         pattern.Rows[localRow] = new NoteRow(note, instrumentNumber);
         Edited?.Invoke();
