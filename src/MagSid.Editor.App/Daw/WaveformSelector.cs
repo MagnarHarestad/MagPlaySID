@@ -22,10 +22,10 @@ internal sealed class WaveformSelector : Control
 
     private static readonly (string Label, byte Bit)[] Tabs =
     [
-        ("TRI", 0x10),
-        ("SAW", 0x20),
-        ("PUL", 0x40),
-        ("NOI", 0x80),
+        ("Triangle", 0x10),
+        ("Saw", 0x20),
+        ("Pulse", 0x40),
+        ("Noise", 0x80),
     ];
 
     private byte _waveform = 0x41;
