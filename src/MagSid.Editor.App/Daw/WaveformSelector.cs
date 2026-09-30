@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -7,8 +7,10 @@ namespace MagSid.Editor.App.Daw;
 ///
 /// The byte is a SID control register: bit 4 triangle, 5 saw, 6 pulse, 7 noise, bit 0 the gate.
 /// More than one can be set at once - the combined waveforms are a real and much-used SID trick -
-/// so these are four independent latches rather than a radio group, and the drawing shows what the
-/// combination actually is.
+/// and the drawing shows what the combination actually is.
+///
+/// Left-click picks one waveform on its own, right-click adds or removes one. Choosing a waveform
+/// is the common intent and combining the rare one, so the plain click is the plain meaning.
 ///
 /// The gate bit is not a tab: it is what starts a note, and an instrument whose base waveform has it
 /// clear would simply never sound. It is forced on, quietly, the same way the assembler's emitter
@@ -84,23 +86,29 @@ internal sealed class WaveformSelector : Control
         base.OnMouseLeave(e);
     }
 
+    /// <summary>Left picks this waveform alone, right toggles it into or out of the combination.
+    /// The low nibble carries through untouched either way: gate, sync and ring modulation are not
+    /// waveforms, and choosing one should not quietly clear them.</summary>
     protected override void OnMouseClick(MouseEventArgs e)
     {
         int at = TabAt(e.X, e.Y);
-        if (at < 0)
-            return;
+        if (at >= 0 && e.Button is MouseButtons.Left or MouseButtons.Right)
+        {
+            byte bit = Tabs[at].Bit;
+            byte next = e.Button == MouseButtons.Right
+                ? (byte)(_waveform ^ bit)
+                : (byte)((_waveform & 0x0F) | bit);
 
-        byte bit = Tabs[at].Bit;
-        byte next = (byte)(_waveform ^ bit);
-
-        // Clearing the last waveform bit would leave an instrument that cannot make a sound, so the
-        // last one standing refuses to go out.
-        if ((next & 0xF0) == 0)
-            return;
-
-        _waveform = (byte)(next | 0x01);
-        Invalidate();
-        WaveformChanged?.Invoke(_waveform);
+            // Clearing the last waveform bit would leave an instrument that cannot make a sound, so
+            // the last one standing refuses to go out.
+            next |= 0x01;
+            if ((next & 0xF0) != 0 && next != _waveform)
+            {
+                _waveform = next;
+                Invalidate();
+                WaveformChanged?.Invoke(_waveform);
+            }
+        }
 
         base.OnMouseClick(e);
     }
@@ -147,6 +155,9 @@ internal sealed class WaveformSelector : Control
         var far = new StringFormat { Alignment = StringAlignment.Far };
         g.DrawString($"${_waveform:X2}", hexFont, hexInk,
             new RectangleF(0, preview.Y + 2, preview.Width - 5, 12), far);
+
+        // A gesture nobody can see is a gesture nobody finds.
+        g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
     }
 
     /// <summary>Sums whichever waveforms are selected. Combined waveforms on a real SID are an AND
