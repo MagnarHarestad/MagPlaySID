@@ -58,6 +58,23 @@ internal sealed class DawInstrumentView : Panel
         WireKnobs();
     }
 
+    /// <summary>Every knob in this view, for the host to offer to MIDI. Gathered by walking the
+    /// controls rather than listed, so a knob added later is included without anyone remembering
+    /// to add it here too.</summary>
+    public IEnumerable<KnobControl> Knobs() => AllKnobs(this);
+
+    private static IEnumerable<KnobControl> AllKnobs(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            if (child is KnobControl knob)
+                yield return knob;
+
+            foreach (var nested in AllKnobs(child))
+                yield return nested;
+        }
+    }
+
     /// <summary>Raised after any edit, with the instrument that changed. The host marks the song
     /// dirty and refreshes anything showing this instrument.</summary>
     public event Action<Instrument>? Edited;
@@ -448,6 +465,11 @@ internal sealed class DawInstrumentView : Panel
         Func<int, string> format, int defaultValue = 0)
     {
         knob.Caption = caption;
+
+        // Derived from the caption rather than listed separately, so a knob cannot be added with a
+        // binding key someone forgot to give it. Prefixed by panel, since CUTOFF means one thing on
+        // an instrument and another on a filter step.
+        knob.BindingKey = "instrument." + caption.ToLowerInvariant();
         knob.Accent = accent;
         knob.Minimum = minimum;
         knob.Maximum = maximum;

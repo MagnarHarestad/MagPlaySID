@@ -42,6 +42,27 @@ internal sealed class KnobControl : Control
 
     public event Action<int>? ValueChanged;
 
+    /// <summary>The knob is waiting for a controller to move. The host listens for the next one and
+    /// binds it here.</summary>
+    public event Action<KnobControl>? MidiLearnRequested;
+
+    public event Action<KnobControl>? MidiForgetRequested;
+
+    /// <summary>
+    /// Names this knob in the saved bindings. Stable across releases and independent of where the
+    /// knob sits on screen - a binding keyed by position would move to a different parameter the
+    /// first time the layout changed.
+    /// </summary>
+    public string BindingKey { get; set; } = string.Empty;
+
+    /// <summary>The controller bound to this knob, or null. Shown on the knob so a surface full of
+    /// encoders can be read back without opening anything.</summary>
+    public int? BoundController { get; set; }
+
+    /// <summary>Waiting for a controller to move. Drawn, because a knob that is listening and one
+    /// that is not have to be told apart at a glance.</summary>
+    public bool Learning { get; set; }
+
     public Color Accent { get; set; } = DawPalette.Oscillator;
 
     /// <summary>The caption under the ring - ATT, CUTOFF, and so on.</summary>
@@ -99,12 +120,40 @@ internal sealed class KnobControl : Control
         Invalidate();
     }
 
+    private void ShowMidiMenu(Point at)
+    {
+        var menu = new ContextMenuStrip();
+
+        menu.Items.Add(new ToolStripMenuItem(
+            Learning ? "Stop learning" : "Learn MIDI",
+            null,
+            (_, _) => MidiLearnRequested?.Invoke(this)));
+
+        var forget = new ToolStripMenuItem(
+            BoundController is { } controller ? $"Forget CC {controller}" : "Not bound",
+            null,
+            (_, _) => MidiForgetRequested?.Invoke(this))
+        {
+            Enabled = BoundController is not null,
+        };
+        menu.Items.Add(forget);
+
+        DarkTheme.Apply(menu);
+        menu.Show(this, at);
+    }
+
     private float Fraction => _maximum > _minimum
         ? (_value - _minimum) / (float)(_maximum - _minimum)
         : 0f;
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Right && BindingKey.Length > 0)
+        {
+            ShowMidiMenu(e.Location);
+            return;
+        }
+
         if (e.Button == MouseButtons.Left)
         {
             _dragging = true;
@@ -238,13 +287,34 @@ internal sealed class KnobControl : Control
 
         g.SmoothingMode = SmoothingMode.Default;
 
+        // Listening, or already bound. Both belong on the knob itself: a dialog listing bindings
+        // would answer the question in the one place the eye is not.
+        if (Learning)
+        {
+            using var halo = new Pen(DawPalette.Effect, 2f);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.DrawArc(halo, ring, StartAngle, SweepAngle);
+            g.SmoothingMode = SmoothingMode.Default;
+        }
+        else if (BoundController is { } controller)
+        {
+            using var ccFont = new Font("Segoe UI", 6f);
+            using var ccInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 190));
+            g.DrawString($"CC{controller}", ccFont, ccInk, 2, 1);
+        }
+
         using var captionFont = new Font("Segoe UI", 6.75f, FontStyle.Bold);
         using var valueFont = new Font("Consolas", 7.5f);
         using var dim = new SolidBrush(DawPalette.TextDim);
         using var ink = new SolidBrush(DawPalette.Text);
 
         var centred = new StringFormat { Alignment = StringAlignment.Center };
-        g.DrawString(Caption, captionFont, dim, new RectangleF(0, ring.Bottom + 2, Width, 12), centred);
+        g.DrawString(
+            Learning ? "LEARN..." : Caption,
+            captionFont,
+            Learning ? new SolidBrush(DawPalette.Effect) : dim,
+            new RectangleF(0, ring.Bottom + 2, Width, 12),
+            centred);
         g.DrawString(Format(_value), valueFont, ink, new RectangleF(0, ring.Bottom + 12, Width, 12), centred);
     }
 }

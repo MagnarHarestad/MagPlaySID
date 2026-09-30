@@ -162,6 +162,31 @@ internal sealed class PianoRollView : Control
 
     public void SetDefaultInstrument(int instrumentNumber) => _defaultInstrument = instrumentNumber;
 
+    /// <summary>
+    /// Writes a note at the cursor and steps past it - what a keyboard is for.
+    ///
+    /// One row per key, not the grid's spacing: rows are ticks, so stepping by four would leave
+    /// gaps a player did not ask for. Lengthening a note is what holding the row after it does, and
+    /// that is a separate gesture.
+    ///
+    /// Returns false when there is nowhere to write - no pattern, or the cursor sitting on a loop
+    /// marker, which owns its row.
+    /// </summary>
+    public bool StepInput(NoteName note)
+    {
+        if (_pattern is not { } pattern)
+            return false;
+
+        int row = Math.Max(0, _selectedRow);
+        if (row >= pattern.Rows.Count || pattern.Rows[row] is LoopStartRow or LoopEndRow)
+            return false;
+
+        PatternNotes.SetNote(pattern, row, note, _defaultInstrument);
+        _selectedRow = Math.Min(pattern.Rows.Count - 1, row + 1);
+        Commit();
+        return true;
+    }
+
     /// <summary>Re-voices the selected note with another instrument, keeping its pitch and length,
     /// and auditions it so the change is heard. Nothing selected, nothing happens.</summary>
     public void SetSelectedNoteInstrument(int instrumentNumber)

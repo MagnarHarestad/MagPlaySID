@@ -22,6 +22,8 @@ public static class EditorSettings
     private static int _sidLoadAddress = MagSid.Core.SidLoadAddress.Default;
     private static string _sidOpenDirectory = string.Empty;
     private static string _audioExportDirectory = string.Empty;
+    private static string _midiDevice = string.Empty;
+    private static string _midiKnobBindings = string.Empty;
     private static bool _loaded;
 
     public static bool ShowHighHex
@@ -103,6 +105,35 @@ public static class EditorSettings
         set => SetDirectory(ref _audioExportDirectory, value);
     }
 
+    /// <summary>The MIDI input last used, by name rather than index - a device's number moves when
+    /// another is plugged in, and reopening by number would quietly attach to the wrong one.</summary>
+    public static string MidiDevice
+    {
+        get { EnsureLoaded(); return _midiDevice; }
+        set
+        {
+            EnsureLoaded();
+            string trimmed = value?.Trim() ?? string.Empty;
+            if (_midiDevice == trimmed) return;
+            _midiDevice = trimmed;
+            Save();
+        }
+    }
+
+    /// <summary>Which controller turns which knob, as MidiKnobBindings spells it.</summary>
+    public static string MidiKnobBindings
+    {
+        get { EnsureLoaded(); return _midiKnobBindings; }
+        set
+        {
+            EnsureLoaded();
+            string text = value ?? string.Empty;
+            if (_midiKnobBindings == text) return;
+            _midiKnobBindings = text;
+            Save();
+        }
+    }
+
     /// <summary>Empty for a folder that has since been deleted or moved - a dialog pointed at one
     /// that no longer exists opens somewhere arbitrary rather than where it was told.</summary>
     private static string ExistingDirectory(ref string field)
@@ -142,6 +173,8 @@ public static class EditorSettings
 
                 _sidOpenDirectory = stored.SidOpenDirectory ?? string.Empty;
                 _audioExportDirectory = stored.AudioExportDirectory ?? string.Empty;
+                _midiDevice = stored.MidiDevice ?? string.Empty;
+                _midiKnobBindings = stored.MidiKnobBindings ?? string.Empty;
             }
         }
         catch
@@ -162,6 +195,8 @@ public static class EditorSettings
                 SidLoadAddress = _sidLoadAddress,
                 SidOpenDirectory = _sidOpenDirectory,
                 AudioExportDirectory = _audioExportDirectory,
+                MidiDevice = _midiDevice,
+                MidiKnobBindings = _midiKnobBindings,
             }));
         }
         catch
@@ -177,5 +212,7 @@ public static class EditorSettings
         public int? SidLoadAddress { get; set; }
         public string? SidOpenDirectory { get; set; }
         public string? AudioExportDirectory { get; set; }
+        public string? MidiDevice { get; set; }
+        public string? MidiKnobBindings { get; set; }
     }
 }

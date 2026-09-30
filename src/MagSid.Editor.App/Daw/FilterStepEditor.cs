@@ -173,6 +173,7 @@ internal sealed class FilterStepEditor : Panel
                       Func<int, string> format, int defaultValue, int x)
     {
         knob.Caption = caption;
+        knob.BindingKey = "filter." + caption.ToLowerInvariant();
         knob.Accent = DawPalette.Filter;
         knob.Minimum = minimum;
         knob.Maximum = maximum;

@@ -80,6 +80,15 @@ internal sealed class DawView : Panel
         RefreshInstrumentList();
     }
 
+    /// <summary>Every knob the DAW shows, for MIDI learn.</summary>
+    public IEnumerable<KnobControl> Knobs() => _instrument.Knobs();
+
+    /// <summary>A key was pressed on a MIDI keyboard. Writes into the piano roll when that is the
+    /// view on screen, and reports whether it did - the caller sounds the note either way, because
+    /// hearing what you played is not conditional on it being recorded.</summary>
+    public bool StepInput(MagSid.Core.Model.NoteName note) =>
+        _pianoRoll.Visible && _pianoRoll.StepInput(note);
+
     /// <summary>Which order entry each channel is playing. Three numbers, because the channels
     /// genuinely are in three different places - see ArrangeView.</summary>
     public void SetPlayheads(int channel1, int channel2, int channel3)

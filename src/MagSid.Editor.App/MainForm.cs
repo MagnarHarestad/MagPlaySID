@@ -7,6 +7,7 @@ using MagSid.Core.Validation;
 using MagSid.Editor.App.Controls;
 using MagSid.Editor.App.Export;
 using MagSid.Editor.App.Daw;
+using MagSid.Editor.App.Midi;
 using MagSid.Editor.App.Player;
 using MagSid.Playback;
 using MagSid.Sid;
@@ -27,6 +28,11 @@ public sealed class MainForm : Form
     /// rebuilt on every switch - it carries selection and scroll state that should survive going
     /// away and coming back.</summary>
     private readonly DawView _dawView = new();
+
+    /// <summary>MIDI input, shared by the knobs and the piano roll. Null until a device opens.</summary>
+    private MidiInputService? _midi;
+    private MidiKnobBindings? _midiBindings;
+    private ToolStripMenuItem? _midiMenu;
     private ToolStripMenuItem? _viewToggleItem;
     private bool _dawShowing;
 
@@ -233,6 +239,10 @@ public sealed class MainForm : Form
         _viewToggleItem = new ToolStripMenuItem("&DAW", null, (_, _) => ToggleView());
         menu.Items.Add(_viewToggleItem);
 
+        _midiMenu = new ToolStripMenuItem("&MIDI");
+        _midiMenu.DropDownOpening += (_, _) => BuildMidiMenu();
+        menu.Items.Add(_midiMenu);
+
         return menu;
     }
 
@@ -382,6 +392,102 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
+    /// Lists the MIDI inputs, built each time it opens so a keyboard plugged in mid-session shows
+    /// up without restarting.
+    /// </summary>
+    private void BuildMidiMenu()
+    {
+        if (_midiMenu is null)
+            return;
+
+        _midiMenu.DropDownItems.Clear();
+        var devices = MidiInputService.Devices();
+
+        if (devices.Count == 0)
+        {
+            _midiMenu.DropDownItems.Add(new ToolStripMenuItem("No MIDI inputs found") { Enabled = false });
+            return;
+        }
+
+        for (int i = 0; i < devices.Count; i++)
+        {
+            int index = i;
+            string name = devices[i];
+            _midiMenu.DropDownItems.Add(new ToolStripMenuItem(name, null, (_, _) => OpenMidi(index))
+            {
+                Checked = _midi?.DeviceName == name,
+            });
+        }
+
+        _midiMenu.DropDownItems.Add(new ToolStripSeparator());
+        _midiMenu.DropDownItems.Add(new ToolStripMenuItem("Close MIDI", null, (_, _) => CloseMidi())
+        {
+            Enabled = _midi?.IsOpen == true,
+        });
+
+        _midiMenu.DropDownItems.Add(new ToolStripMenuItem("Forget all knob bindings", null, (_, _) =>
+        {
+            EditorSettings.MidiKnobBindings = string.Empty;
+            MessageBox.Show(this, "Knob bindings cleared. They take effect next time MagSID starts.",
+                "MIDI", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }));
+    }
+
+    private void OpenMidi(int deviceIndex)
+    {
+        CloseMidi();
+
+        var midi = new MidiInputService(this);
+        if (!midi.Open(deviceIndex))
+        {
+            midi.Dispose();
+            MessageBox.Show(this,
+                "That MIDI input could not be opened. Another program usually has it.",
+                "MIDI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _midi = midi;
+        EditorSettings.MidiDevice = midi.DeviceName ?? string.Empty;
+
+        _midiBindings ??= CreateBindings();
+
+        midi.ControlChanged += (controller, value) => _midiBindings!.HandleControlChange(controller, value);
+        midi.NotePressed += OnMidiNote;
+        midi.NoteReleased += ReleaseJamNote;
+    }
+
+    private MidiKnobBindings CreateBindings()
+    {
+        var bindings = new MidiKnobBindings(EditorSettings.MidiKnobBindings);
+        bindings.Changed += () => EditorSettings.MidiKnobBindings = bindings.Save();
+
+        foreach (var knob in _dawView.Knobs())
+            bindings.Register(knob);
+
+        return bindings;
+    }
+
+    /// <summary>A key on the MIDI keyboard. It always sounds - hearing what you played is not
+    /// conditional on it being recorded - and it writes into the piano roll when that is the view
+    /// on screen.</summary>
+    private void OnMidiNote(NoteName note, int velocity)
+    {
+        int instrument = _dawView.SelectedInstrumentNumber
+                         ?? _instrumentList.SelectedInstrument?.Number
+                         ?? 1;
+
+        _dawView.StepInput(note);
+        PreviewNote(note, instrument);
+    }
+
+    private void CloseMidi()
+    {
+        _midi?.Dispose();
+        _midi = null;
+    }
+
+    /// <summary>
     /// Swaps the centre of the window between the tracker and the DAW view.
     ///
     /// Both edit the same Song object, so there is nothing to convert and nothing that can fall out
@@ -453,6 +559,16 @@ public sealed class MainForm : Form
     private void WireEvents()
     {
         _session.StructureChanged += RefreshAll;
+
+        // Reopen whatever was used last, by name - a device's index moves when another is plugged
+        // in, so reopening by number would quietly attach to the wrong keyboard.
+        if (EditorSettings.MidiDevice is { Length: > 0 } wanted)
+        {
+            var devices = MidiInputService.Devices();
+            int index = devices.ToList().FindIndex(name => name == wanted);
+            if (index >= 0)
+                OpenMidi(index);
+        }
         _session.HistoryChanged += RefreshHistoryMenuState;
         _session.DirtyChanged += RefreshStatusBar;
 
