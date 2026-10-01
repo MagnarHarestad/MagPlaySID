@@ -207,6 +207,17 @@ public sealed class MainForm : Form
             _instrumentEditorPanel.RefreshHighHexDisplay();
         };
 
+        // Under the hex switch and checked the same way: both are one-line preferences about how
+        // the editor behaves rather than actions, and this one is the kind a musician sets once
+        // depending on which tracker taught them what Space means.
+        var swapSpacebarItem = new ToolStripMenuItem("Swap &Spacebar Behavior") { CheckOnClick = true };
+        swapSpacebarItem.Checked = EditorSettings.SwapSpacebar;
+        swapSpacebarItem.CheckedChanged += (_, _) =>
+        {
+            EditorSettings.SwapSpacebar = swapSpacebarItem.Checked;
+            UpdateEditModeLabel();
+        };
+
         _undoItem.Click += (_, _) => StepHistory(undo: true);
         _redoItem.Click += (_, _) => StepHistory(undo: false);
 
@@ -221,7 +232,7 @@ public sealed class MainForm : Form
         exportSidItem.ShortcutKeys = Keys.F9;
 
         file.DropDownItems.AddRange([aboutItem, new ToolStripSeparator(), _undoItem, _redoItem,
-            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, playInVsidItem, new ToolStripSeparator(), showHighHexItem, new ToolStripSeparator(), exitItem]);
+            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, playInVsidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, new ToolStripSeparator(), exitItem]);
         menu.Items.Add(file);
 
         var signalPathItem = new ToolStripMenuItem("&Signal Path", null, (_, _) => DoSignalPath());
@@ -708,7 +719,12 @@ public sealed class MainForm : Form
     private void UpdateEditModeLabel()
     {
         bool edit = _trackerGrid.EditMode;
-        _editModeLabel.Text = edit ? "● EDIT" : "○ JAM";
+        // The key is on the label, not only in the menu: Space changes meaning silently when the
+        // switch is flipped, and a song that starts playing because of a setting made weeks ago
+        // reads as a fault.
+        string key = EditorSettings.SwapSpacebar ? "F5" : "Space";
+        _editModeLabel.Text = (edit ? "● EDIT" : "○ JAM") + " · " + key;
+        _editModeLabel.ToolTipText = $"Edit/Jam ({key}) - click to flip";
         _editModeLabel.ForeColor = edit ? Color.OrangeRed : Color.MediumSeaGreen;
     }
 
@@ -764,6 +780,31 @@ public sealed class MainForm : Form
     /// The speed spinner is left alone: it is the one place in this window where a keystroke
     /// belongs to a control rather than to the transport.
     /// </summary>
+    /// <summary>True where a space is a space: the speed spinner, a hex field, a button, and a
+    /// grid cell being renamed - the instrument list is a DataGridView, and an instrument called
+    /// "Lead 2" has to be typeable. Everywhere else the window's own Space wins.</summary>
+    private bool SpaceBelongsToTheFocusedControl() => ActiveControl switch
+    {
+        NumericUpDown or TextBoxBase or ButtonBase => true,
+        DataGridView grid => grid.IsCurrentCellInEditMode,
+        _ => false,
+    };
+
+    /// <summary>Play from where it last stopped, or stop if something is already playing - what
+    /// Space does once the menu switch hands it the transport. Resuming rather than starting over
+    /// is deliberate: F1 is there for starting from the top.</summary>
+    private void ToggleTransport()
+    {
+        if (_waveOut is null)
+        {
+            StartFromCurrentPosition();
+        }
+        else
+        {
+            StopAnyPlayback();
+        }
+    }
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData == Keys.F1 && ActiveControl is not NumericUpDown)
@@ -787,6 +828,30 @@ public sealed class MainForm : Form
         if (keyData == Keys.F4 && ActiveControl is not NumericUpDown)
         {
             StopAnyPlayback();
+            return true;
+        }
+
+        // Space and F5 are a pair, and the menu switch decides which of them carries which job.
+        // Both are claimed here rather than in the tracker grid so they work from the DAW view
+        // too - the grid is hidden there and never sees a keystroke. A control that owns the
+        // space key keeps it, because inside those a space is a space.
+        if (keyData == Keys.Space && !SpaceBelongsToTheFocusedControl())
+        {
+            if (EditorSettings.SwapSpacebar)
+            {
+                ToggleTransport();
+            }
+            else
+            {
+                _trackerGrid.ToggleEditMode();
+            }
+
+            return true;
+        }
+
+        if (keyData == Keys.F5 && ActiveControl is not NumericUpDown)
+        {
+            _trackerGrid.ToggleEditMode();
             return true;
         }
 

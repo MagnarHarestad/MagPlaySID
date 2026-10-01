@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace MagSid.Editor.App;
 
@@ -18,6 +18,7 @@ public static class EditorSettings
         "MagSid.Editor", "settings.json");
 
     private static bool _showHighHex;
+    private static bool _swapSpacebar;
     private static string _sidAuthor = string.Empty;
     private static int _sidLoadAddress = MagSid.Core.SidLoadAddress.Default;
     private static string _sidOpenDirectory = string.Empty;
@@ -40,6 +41,28 @@ public static class EditorSettings
                 return;
 
             _showHighHex = value;
+            Save();
+        }
+    }
+
+    /// <summary>False - the default - gives Space the Edit/Jam toggle. True hands it the
+    /// transport instead, and F5 takes over Edit/Jam. Which one a tracker musician wants depends
+    /// entirely on which tracker they came from, so it is a preference rather than a choice to
+    /// make for them.</summary>
+    public static bool SwapSpacebar
+    {
+        get
+        {
+            EnsureLoaded();
+            return _swapSpacebar;
+        }
+        set
+        {
+            EnsureLoaded();
+            if (_swapSpacebar == value)
+                return;
+
+            _swapSpacebar = value;
             Save();
         }
     }
@@ -165,6 +188,7 @@ public static class EditorSettings
                 && JsonSerializer.Deserialize<StoredSettings>(File.ReadAllText(FilePath)) is { } stored)
             {
                 _showHighHex = stored.ShowHighHex;
+                _swapSpacebar = stored.SwapSpacebar;
                 _sidAuthor = stored.SidAuthor ?? string.Empty;
                 // Absent in settings written before the address was settable, and 0 there means
                 // "never chosen" rather than "load at $0000".
@@ -191,6 +215,7 @@ public static class EditorSettings
             File.WriteAllText(FilePath, JsonSerializer.Serialize(new StoredSettings
             {
                 ShowHighHex = _showHighHex,
+                SwapSpacebar = _swapSpacebar,
                 SidAuthor = _sidAuthor,
                 SidLoadAddress = _sidLoadAddress,
                 SidOpenDirectory = _sidOpenDirectory,
@@ -208,6 +233,7 @@ public static class EditorSettings
     private sealed class StoredSettings
     {
         public bool ShowHighHex { get; set; }
+        public bool SwapSpacebar { get; set; }
         public string? SidAuthor { get; set; }
         public int? SidLoadAddress { get; set; }
         public string? SidOpenDirectory { get; set; }

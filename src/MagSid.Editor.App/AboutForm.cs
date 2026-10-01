@@ -1,4 +1,4 @@
-using System.Drawing.Text;
+﻿using System.Drawing.Text;
 
 namespace MagSid.Editor.App;
 
@@ -233,15 +233,31 @@ public sealed class AboutForm : Form
              "  '  /  Shift+'      Octave down / up\n\n");
         Body("The apostrophe follows your Windows keyboard layout.\n\n");
 
+        Heading("Swap Spacebar Behavior");
+        Body("A menu switch, directly under Show High Hex-Values. Unchecked - the default - " +
+             "Space toggles Edit/Jam and the transport stays on F1-F4. Checked, Space plays and " +
+             "stops the song instead, carrying on from where it last stopped, and Edit/Jam moves " +
+             "to F5.\n\n" +
+             "Which one feels right depends on which tracker you came from, so neither is " +
+             "treated as the correct answer. The setting is remembered between sessions, and the " +
+             "toolbar indicator always names the key that is currently live, so a Space pressed " +
+             "out of habit never does something unannounced.\n\n" +
+             "Both keys work from anywhere in the window, the DAW view included. Space is left " +
+             "alone while a field that needs it has focus - the speed spinner, a text box, a " +
+             "button - where a space is a space.\n\n");
+
         Heading("Entering notes");
-        Mono("  Space   Toggle Edit / Jam\n" +
+        Mono("  Space   Toggle Edit / Jam   (F5 instead, when Space has been swapped)\n" +
              "  +  /  -   Step the selected instrument\n\n");
         Body("Edit writes a typed note into the pattern at the cursor. Jam plays it live and " +
              "leaves the pattern alone - for browsing or auditioning without any risk of " +
-             "overwriting what's there.\n\n" +
-             "Space also doubles as a panic button: switching modes silences every voice " +
-             "instantly, rather than letting whatever was jammed or auditioned ring out its own " +
-             "release.\n\n" +
+             "overwriting what's there. The same switch governs the DAW view: in Jam, notes " +
+             "played from the MIDI keyboard sound but are not written into the piano roll.\n\n" +
+             "Whichever key it sits on, the toggle doubles as a panic button: switching modes " +
+             "silences every voice instantly, rather than letting whatever was jammed or " +
+             "auditioned ring out its own release.\n\n" +
+             "The toolbar indicator names the key that is live - '* EDIT . Space' or " +
+             "'o JAM . F5' - and clicking it flips the mode as well.\n\n" +
              "+ and - move the instrument that a fresh note picks up - the same thing as " +
              "clicking a different row in the Instruments panel, without leaving the pattern to " +
              "do it. Clicking a row there does the reverse: focus jumps back to the pattern so " +
@@ -303,8 +319,9 @@ public sealed class AboutForm : Form
              "  F2   Play from the current position\n" +
              "  F3   Loop just the pattern under the cursor, on all three channels\n" +
              "  F4   Stop\n" +
+             "  F5   Toggle Edit / Jam   (only needed when Space has been swapped)\n" +
              "  ▶ Play (the toolbar button)   Same as F1\n\n");
-        Body("These work from anywhere in the window, the same as Space used to.\n\n" +
+        Body("These work from anywhere in the window, the DAW view included.\n\n" +
              "F2 carries on from exactly where playback last stopped — each channel picking up " +
              "its own pattern, its own row, and its place in any loop it was inside. That detail " +
              "matters: the three channels have their own song orders and their patterns are " +

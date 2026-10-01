@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using MagSid.Core.Model;
 using MagSid.Playback;
@@ -167,7 +167,8 @@ public sealed class TrackerGridControl : Control
     private CursorField _cursorField;
     private int _octave = 4;
 
-    // GoatTracker's own EDIT/JAM toggle (Space here - the transport moved to F1/F2/F4). Edit
+    // GoatTracker's own EDIT/JAM toggle (Space or F5, depending on the menu's Swap Spacebar
+    // Behavior switch - MainForm owns both keys). Edit
     // (the default, matching GoatTracker) means
     // a note key writes into the pattern at the cursor, same as today. Jam turns every
     // pattern-mutating command into a no-op except note entry itself, which keeps playing the
@@ -275,7 +276,7 @@ public sealed class TrackerGridControl : Control
     /// which is the thing <see cref="SelectedInstrumentNumber"/> actually reads.</summary>
     public event Action<int>? InstrumentStepRequested;
 
-    /// <summary>Space flipped Edit/Jam - MainForm answers with JamEngine.SilenceAll(), a "panic
+    /// <summary>Edit/Jam was flipped - MainForm answers with JamEngine.SilenceAll(), a "panic
     /// button" hard reset of every voice rather than a graceful release. See
     /// <see cref="ToggleEditMode"/>.</summary>
     public event Action? JamSilenceRequested;
@@ -294,9 +295,9 @@ public sealed class TrackerGridControl : Control
     /// SongPlaybackEngine.SamplesProduced.</summary>
     public Func<long>? AudioClockSamples { get; set; }
 
-    /// <summary>Fired when Space toggles Edit/Jam - MainForm mirrors it onto the toolbar
-    /// indicator next to Play, since Space only reaches this control while it has focus and the
-    /// indicator needs to reflect the current state regardless of where focus is.</summary>
+    /// <summary>Fired whenever Edit/Jam flips - MainForm mirrors it onto the toolbar indicator
+    /// next to Play, which has to reflect the current state regardless of where focus is and of
+    /// which view is on screen.</summary>
     public event Action? EditModeChanged;
 
     private readonly bool[] _channelMuted = new bool[3];
@@ -312,8 +313,9 @@ public sealed class TrackerGridControl : Control
 
     public bool EditMode => _editMode;
 
-    /// <summary>Flips Edit/Jam - the same action Space performs here, exposed so MainForm's
-    /// toolbar indicator can double as a button.</summary>
+    /// <summary>Flips Edit/Jam. The keystroke for it lives in MainForm.ProcessCmdKey rather than
+    /// here, so it also works from the DAW view where this control is hidden; the toolbar
+    /// indicator calls the same method on a click.</summary>
     public void ToggleEditMode()
     {
         _editMode = !_editMode;
@@ -501,7 +503,7 @@ public sealed class TrackerGridControl : Control
     }
 
     /// <summary>Called by MainForm as playback stops, before the engine is torn down: parks the
-    /// edit cursor exactly where channel 1 was at that moment, so Space-Space resumes from there
+    /// edit cursor exactly where channel 1 was at that moment, so stop-then-play resumes from there
     /// instead of restarting the song - the same channel the playback-follow row-number gutter already
     /// uses as its shared reference. <see cref="ResolveDisplayRow"/> is the same machinery the
     /// static view already resolves every row through, so "where the cursor lands" and "what the
@@ -580,7 +582,6 @@ public sealed class TrackerGridControl : Control
             case Keys.Return:
             case Keys.Home:
             case Keys.End:
-            case Keys.Space:
                 return true;
         }
         return base.IsInputKey(keyData);
@@ -724,15 +725,6 @@ public sealed class TrackerGridControl : Control
             return;
         }
 
-        // Transport moved to F1/F2/F4 (MainForm.ProcessCmdKey), which work from anywhere in the
-        // window the way Space used to - freeing Space up for Edit/Jam here. The toolbar
-        // indicator still toggles it on a click as well.
-        if (e.KeyCode == Keys.Space)
-        {
-            ToggleEditMode();
-            e.Handled = true;
-            return;
-        }
         if (_isPlaybackActive)
         {
             return;
@@ -918,7 +910,7 @@ public sealed class TrackerGridControl : Control
     /// <summary>The other half of <see cref="TryBeginJamHold"/>: releases whichever note this
     /// physical key was sounding, if any. Fires regardless of the current cursor field or
     /// Edit/Jam state - a key that started a jammed note has to release it even if the cursor
-    /// moved off the Note field or Space flipped modes while it was held, or the note is stuck
+    /// moved off the Note field or the mode flipped while it was held, or the note is stuck
     /// sounding until the app closes.</summary>
     protected override void OnKeyUp(KeyEventArgs e)
     {
