@@ -790,14 +790,15 @@ public sealed class MainForm : Form
         _ => false,
     };
 
-    /// <summary>Play from where it last stopped, or stop if something is already playing - what
-    /// Space does once the menu switch hands it the transport. Resuming rather than starting over
-    /// is deliberate: F1 is there for starting from the top.</summary>
+    /// <summary>Play from the top, or stop if something is already playing - what Space does once
+    /// the menu switch hands it the transport. The same start as F1 and the toolbar's Play, not
+    /// F2's resume: a play button that begins somewhere other than the beginning is the kind of
+    /// difference that gets blamed on the song.</summary>
     private void ToggleTransport()
     {
         if (_waveOut is null)
         {
-            StartFromCurrentPosition();
+            StartFromBeginning();
         }
         else
         {

@@ -236,8 +236,8 @@ public sealed class AboutForm : Form
         Heading("Swap Spacebar Behavior");
         Body("A menu switch, directly under Show High Hex-Values. Unchecked - the default - " +
              "Space toggles Edit/Jam and the transport stays on F1-F4. Checked, Space plays and " +
-             "stops the song instead, carrying on from where it last stopped, and Edit/Jam moves " +
-             "to F5.\n\n" +
+             "stops the song instead - playing from the top, exactly as F1 and the toolbar's Play " +
+             "button do - and Edit/Jam moves to F5.\n\n" +
              "Which one feels right depends on which tracker you came from, so neither is " +
              "treated as the correct answer. The setting is remembered between sessions, and the " +
              "toolbar indicator always names the key that is currently live, so a Space pressed " +
