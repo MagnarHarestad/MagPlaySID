@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using MagSid.Core;
 using MagSid.Core.Model;
@@ -469,15 +469,19 @@ public sealed class MainForm : Form
     }
 
     /// <summary>A key on the MIDI keyboard. It always sounds - hearing what you played is not
-    /// conditional on it being recorded - and it writes into the piano roll when that is the view
-    /// on screen.</summary>
+    /// conditional on it being recorded - and it is written down only in Edit mode, in whichever
+    /// view is on screen.</summary>
     private void OnMidiNote(NoteName note, int velocity)
     {
         if (_dawShowing)
         {
-            // The roll records it when it is the view on screen; the note sounds either way,
-            // because hearing what you played is not conditional on it being recorded.
-            _dawView.StepInput(note);
+            // Edit mode writes it into the roll, Jam mode only sounds it - the same rule the
+            // tracker's own entry path follows, decided by the same toolbar switch, so flipping to
+            // Jam means the same thing in both views.
+            if (_trackerGrid.EditMode)
+            {
+                _dawView.StepInput(note);
+            }
 
             int instrument = _dawView.SelectedInstrumentNumber
                              ?? _instrumentList.SelectedInstrument?.Number
