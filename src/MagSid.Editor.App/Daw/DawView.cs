@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -88,6 +88,13 @@ internal sealed class DawView : Panel
     /// hearing what you played is not conditional on it being recorded.</summary>
     public bool StepInput(MagSid.Core.Model.NoteName note) =>
         _pianoRoll.Visible && _pianoRoll.StepInput(note);
+
+    /// <summary>Lights the roll's own key for a note being held, wherever that note came from.
+    /// Harmless while the DAW is hidden - the roll simply repaints into nothing.</summary>
+    public void SetNoteSounding(MagSid.Core.Model.NoteName note, bool sounding) =>
+        _pianoRoll.SetNoteSounding(note, sounding);
+
+    public void ClearSoundingNotes() => _pianoRoll.ClearSoundingNotes();
 
     /// <summary>Which order entry each channel is playing. Three numbers, because the channels
     /// genuinely are in three different places - see ArrangeView.</summary>

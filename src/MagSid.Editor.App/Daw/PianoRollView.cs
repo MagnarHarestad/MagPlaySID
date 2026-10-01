@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -35,6 +35,12 @@ internal sealed class PianoRollView : Control
 
     private const int LowestOctave = 1;
     private const int HighestOctave = 6;
+
+    /// <summary>Held notes, for the keyboard strip. A set rather than one note: three can sound
+    /// at once, which is what the chip has.</summary>
+    private readonly HashSet<NoteName> _heldKeys = [];
+
+    private static readonly Color SoundingKey = DawPalette.Oscillator;
 
     private static readonly string[] PitchNames =
         ["B", "A#", "A", "G#", "G", "F#", "F", "E", "D#", "D", "C#", "C"];
@@ -877,6 +883,31 @@ internal sealed class PianoRollView : Control
         return new Rectangle(x + 1, y + 1, Math.Max(3, width), height);
     }
 
+    /// <summary>Lights a key while its note is actually being held, from the MIDI keyboard or
+    /// from anywhere else that sounds a held note. Repaints only the keyboard strip, because this
+    /// runs on every key-down and key-up and the grid beside it has not changed.</summary>
+    public void SetNoteSounding(NoteName note, bool sounding)
+    {
+        if (sounding ? !_heldKeys.Add(note) : !_heldKeys.Remove(note))
+        {
+            return;
+        }
+
+        Invalidate(new Rectangle(0, GridTop, KeyboardWidth + 1, Math.Max(0, Height - GridTop)));
+    }
+
+    /// <summary>Every key out at once - for a panic silence, where no key-up is coming.</summary>
+    public void ClearSoundingNotes()
+    {
+        if (_heldKeys.Count == 0)
+        {
+            return;
+        }
+
+        _heldKeys.Clear();
+        Invalidate(new Rectangle(0, GridTop, KeyboardWidth + 1, Math.Max(0, Height - GridTop)));
+    }
+
     private void DrawKeyboard(Graphics g)
     {
         int top = GridTop;
@@ -895,9 +926,22 @@ internal sealed class PianoRollView : Control
 
             string pitch = PitchNames[key % 12];
             bool black = pitch.Contains('#');
+            bool lit = _heldKeys.Count > 0 && _heldKeys.Contains(NoteForKey(key));
 
-            using (var fill = new SolidBrush(black ? Color.FromArgb(0x18, 0x1E, 0x2C) : Color.FromArgb(0xC0, 0xC6, 0xD4)))
+            Color face = lit
+                ? black ? ControlPaint.Dark(SoundingKey, 0.12f) : SoundingKey
+                : black ? Color.FromArgb(0x18, 0x1E, 0x2C) : Color.FromArgb(0xC0, 0xC6, 0xD4);
+
+            using (var fill = new SolidBrush(face))
                 g.FillRectangle(fill, 2, y + 1, KeyboardWidth - 6, KeyHeight - 2);
+
+            // A lit key spills into the grid, so a held note is visible without looking away from
+            // where the notes are.
+            if (lit)
+            {
+                using var spill = new SolidBrush(DawPalette.WithAlpha(SoundingKey, 90));
+                g.FillRectangle(spill, KeyboardWidth + 1, y + 1, 6, KeyHeight - 2);
+            }
 
             if (pitch == "C")
             {

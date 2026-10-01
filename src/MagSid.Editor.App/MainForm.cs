@@ -647,7 +647,11 @@ public sealed class MainForm : Form
         _trackerGrid.NoteEntered += PreviewNote;
         _trackerGrid.NoteReleased += ReleaseJamNote;
         _trackerGrid.InstrumentStepRequested += StepSelectedInstrument;
-        _trackerGrid.JamSilenceRequested += () => _jamEngine?.SilenceAll();
+        _trackerGrid.JamSilenceRequested += () =>
+        {
+            _jamEngine?.SilenceAll();
+            _dawView.ClearSoundingNotes();
+        };
         _trackerGrid.EditModeChanged += UpdateEditModeLabel;
         _trackerGrid.SelectedInstrumentNumber = () =>
             _instrumentList.SelectedInstrument?.Number ?? _session.Song.Instruments.FirstOrDefault()?.Number ?? 1;
@@ -1236,6 +1240,7 @@ public sealed class MainForm : Form
         StopPlayback();
         StopPatternPreview();
         _jamEngine?.SilenceAll();
+        _dawView.ClearSoundingNotes();
     }
 
     private void DoOpen()
@@ -1327,6 +1332,10 @@ public sealed class MainForm : Form
             // the key was actually held, before an early key-up's release actually lands. See
             // JamEngine.NoteOn's own doc comment.
             _jamEngine.NoteOn(note, instrument);
+
+            // Only once it actually sounds: a key lit for a note nobody can hear would be worse
+            // than no light at all.
+            _dawView.SetNoteSounding(note, true);
         }
         catch (Exception ex) when (ex is InvalidOperationException or NAudio.MmException)
         {
@@ -1381,7 +1390,11 @@ public sealed class MainForm : Form
     /// <summary>The other half of <see cref="PreviewNote"/>: releases a jammed note's voice on
     /// key-up. No instrument to resolve here - JamEngine tracks which of its three voices this
     /// note occupies internally.</summary>
-    private void ReleaseJamNote(NoteName note) => _jamEngine?.NoteOff(note);
+    private void ReleaseJamNote(NoteName note)
+    {
+        _jamEngine?.NoteOff(note);
+        _dawView.SetNoteSounding(note, false);
+    }
 
     /// <summary>+/- from the pattern view: moves the Instruments panel's own selection, which
     /// is what <see cref="SelectedInstrumentNumber"/> actually reads - so this is the same
