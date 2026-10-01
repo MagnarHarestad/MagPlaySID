@@ -95,12 +95,23 @@ public sealed class MainForm : Form
     /// the panel's layout settles.</summary>
     private const int LeftPanelWidth = 620;
 
-    // FixedPanel.Panel2 because the tracker grid's columns are all fixed pixel widths: keeping
-    // *it* the constant one means widening the window hands the extra space to the pattern and
-    // instrument lists, which can actually use it, instead of leaving dead margin right of CH3.
-    // (It also stops the two panes rescaling proportionally on every resize, which quietly
-    // moved the grid's left edge and made screen positions unpredictable.)
-    private readonly SplitContainer _rootSplit = new() { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel2 };
+    // Not docked: it is sized to exactly what its two halves need and centred in the window, so
+    // the Instruments column and the Song grid stay side by side and the spare width of a
+    // maximised window becomes margin either side of the pair rather than stretch inside it.
+    // FixedPanel.Panel2 keeps the grid's fixed pixel columns the constant half if the splitter
+    // is ever dragged, and stops the two panes rescaling proportionally on a resize - which
+    // quietly moved the grid's left edge and made screen positions unpredictable.
+    private readonly SplitContainer _rootSplit = new() { FixedPanel = FixedPanel.Panel2 };
+
+    /// <summary>What <see cref="_rootSplit"/> is centred inside. Its own background is what shows
+    /// in the margins, so they are the window's dark blue rather than the splitter's lighter
+    /// border colour.</summary>
+    private Panel? _retroHost;
+
+    /// <summary>Instruments, the splitter, and the Song grid, with no slack anywhere in it. The
+    /// same figure the window's own starting ClientSize is built from.</summary>
+    private int NaturalRetroWidth =>
+        LeftPanelWidth + _rootSplit.SplitterWidth + TrackerGridControl.ContentWidth + 1;
 
     /// <summary>Holds the Instruments list and the instrument editor at their own width inside
     /// the left pane, so widening the window leaves margin either side instead of stretching
@@ -142,7 +153,7 @@ public sealed class MainForm : Form
         // margin to the right of CH3. +1 keeps the grid's last vertical separator off the
         // very edge pixel. ClientSize (not Width/Height) so the border/title chrome doesn't
         // eat into the calculation.
-        ClientSize = new Size(LeftPanelWidth + _rootSplit.SplitterWidth + TrackerGridControl.ContentWidth + 1, 941);
+        ClientSize = new Size(NaturalRetroWidth, 941);
         StartPosition = FormStartPosition.CenterScreen;
 
         // The tracker grid and every dialog were already dark; the shell around them was not, so
@@ -335,6 +346,21 @@ public sealed class MainForm : Form
         return status;
     }
 
+    /// <summary>Centres Instruments and Song as one block, at the width the two of them actually
+    /// need. A window narrower than that gets the whole width instead, and the splitter gives way
+    /// on the Instruments side since the grid's columns are fixed.</summary>
+    private void CentreRetroPanes()
+    {
+        if (_retroHost is not { } host)
+        {
+            return;
+        }
+
+        int width = Math.Min(NaturalRetroWidth, host.ClientSize.Width);
+        _rootSplit.SetBounds(
+            Math.Max(0, (host.ClientSize.Width - width) / 2), 0, width, host.ClientSize.Height);
+    }
+
     /// <summary>Centres the Instruments column in the left pane, and lets it shrink below its own
     /// width rather than overflow when the pane is narrower than it - a window dragged small
     /// should clip evenly, not hide one edge.</summary>
@@ -424,6 +450,11 @@ public sealed class MainForm : Form
         var host = new Panel { Dock = DockStyle.Fill, BackColor = EditorPalette.Background };
         host.Controls.Add(_dawView);
         host.Controls.Add(_rootSplit);
+
+        _retroHost = host;
+        host.Resize += (_, _) => CentreRetroPanes();
+        CentreRetroPanes();
+
         return host;
     }
 
@@ -595,7 +626,7 @@ public sealed class MainForm : Form
     {
         int chromeWidth = Width - ClientSize.Width;
         int chromeHeight = Height - ClientSize.Height;
-        int neededClientWidth = LeftPanelWidth + _rootSplit.SplitterWidth + TrackerGridControl.ContentWidth + 1;
+        int neededClientWidth = NaturalRetroWidth;
 
         MinimumSize = new Size(neededClientWidth + chromeWidth, 420 + chromeHeight);
     }
