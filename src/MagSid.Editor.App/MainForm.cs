@@ -102,6 +102,11 @@ public sealed class MainForm : Form
     // moved the grid's left edge and made screen positions unpredictable.)
     private readonly SplitContainer _rootSplit = new() { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel2 };
 
+    /// <summary>Holds the Instruments list and the instrument editor at their own width inside
+    /// the left pane, so widening the window leaves margin either side instead of stretching
+    /// fields that have nothing to put in the extra space.</summary>
+    private readonly Panel _retroColumn = new() { BackColor = EditorPalette.Background };
+
     private bool _suppressSpeedEvent;
     private WaveOutEvent? _waveOut;
     private SongPlaybackEngine? _playbackEngine;
@@ -330,6 +335,17 @@ public sealed class MainForm : Form
         return status;
     }
 
+    /// <summary>Centres the Instruments column in the left pane, and lets it shrink below its own
+    /// width rather than overflow when the pane is narrower than it - a window dragged small
+    /// should clip evenly, not hide one edge.</summary>
+    private void CentreRetroColumn()
+    {
+        var host = _rootSplit.Panel1;
+        int width = Math.Min(LeftPanelWidth, host.ClientSize.Width);
+        _retroColumn.SetBounds(
+            Math.Max(0, (host.ClientSize.Width - width) / 2), 0, width, host.ClientSize.Height);
+    }
+
     private Control BuildLayout()
     {
         // The splitter bar itself is painted by the SplitContainer, not by either panel, so
@@ -345,12 +361,21 @@ public sealed class MainForm : Form
         // *reverse* of Add order (see InstrumentListControl's own header/buttons/grid comment) -
         // editor added first so it's processed last and gets what's left, instrumentList added
         // last so it's processed first and claims its own height off the top.
+        // Both go inside a column of their own rather than straight into Panel1. Panel1 is the
+        // panel that absorbs the extra width when the window is maximised, and neither of these
+        // can use it: the editor's content is a fixed width and the list's columns only get
+        // emptier as they stretch. The column keeps their width and CentreRetroColumn puts the
+        // spare space on both sides of it instead.
         _instrumentEditorPanel.Dock = DockStyle.Fill;
-        _rootSplit.Panel1.Controls.Add(_instrumentEditorPanel);
+        _retroColumn.Controls.Add(_instrumentEditorPanel);
 
         _instrumentList.Dock = DockStyle.Top;
         _instrumentList.Height = _instrumentList.PreferredHeight;
-        _rootSplit.Panel1.Controls.Add(_instrumentList);
+        _retroColumn.Controls.Add(_instrumentList);
+
+        _rootSplit.Panel1.Controls.Add(_retroColumn);
+        _rootSplit.Panel1.Resize += (_, _) => CentreRetroColumn();
+        CentreRetroColumn();
 
         // The tracker grid gets the whole right-hand side: song-order editing lives in its own
         // per-channel order-track column now, so there's no separate order panel to split with.
