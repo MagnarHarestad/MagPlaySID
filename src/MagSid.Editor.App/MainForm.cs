@@ -1180,7 +1180,12 @@ public sealed class MainForm : Form
 
         // The engine accumulates this itself, frame by frame, so polling at whatever rate this
         // timer happens to run at cannot miss a step - see ProgramCoverage.
+        // Each view follows its own list. They are separate selections once either has been
+        // clicked, and feeding the DAW the retro list's instrument lit the steps of whichever
+        // instrument the other view happened to be on.
         int selected = _instrumentList.SelectedInstrument?.Number ?? -1;
+        int dawSelected = _dawView.SelectedInstrumentNumber ?? selected;
+
         if (selected > 0)
         {
             // Against the device's play position, not the sequencer's - see PlayheadAt.
@@ -1188,7 +1193,13 @@ public sealed class MainForm : Form
                 out int waveStep, out int arpStep, out int filterStep);
             _instrumentEditorPanel.SetPlaybackCoverage(
                 _playbackEngine.CoverageFor(selected), waveStep, arpStep, filterStep);
-            _dawView.SetProgramPlayheads(waveStep, arpStep, filterStep);
+        }
+
+        if (dawSelected > 0)
+        {
+            _playbackEngine.PlayheadAt(LivePlaybackSample(), dawSelected,
+                out int dawWave, out int dawArp, out int dawFilter);
+            _dawView.SetProgramPlayheads(dawWave, dawArp, dawFilter);
         }
         else
         {

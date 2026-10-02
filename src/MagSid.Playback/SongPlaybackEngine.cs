@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Threading;
 using MagSid.Core.Model;
 using MagSid.Sid;
@@ -84,8 +84,13 @@ public sealed class SongPlaybackEngine : IWaveProvider
                     break;
                 }
 
-                // Later frames overwrite earlier ones, so this ends on the newest frame at or
-                // before the instant asked for - the one being heard.
+                // Only the newest frame at or before the instant asked for describes what is
+                // sounding now, so each frame starts from nothing. Carrying a step forward from an
+                // older frame left an instrument that had already stopped lit up for as long as its
+                // last note stayed in the ring.
+                wavetableStep = arpeggioStep = filterStep = -1;
+                found = false;
+
                 int w = -1, a = -1;
                 if (frame.Instrument0 == instrumentNumber) { w = frame.Wave0; a = frame.Arp0; }
                 if (frame.Instrument1 == instrumentNumber) { w = frame.Wave1; a = frame.Arp1; }
