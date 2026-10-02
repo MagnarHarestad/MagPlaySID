@@ -291,7 +291,12 @@ internal sealed class DawView : Panel
         _arrangePage.Dock = DockStyle.Fill;
         _arrangePage.BackColor = DawPalette.Background;
         _arrangeTop.Dock = DockStyle.Top;
-        _arrangeTop.Height = ArrangeView.PreferredHeight;
+
+        // Never past the bottom of a full instrument list. The strip beside it holds 16 and no
+        // more, and arrange lanes hanging below the last instrument are height the piano roll
+        // could have had. ArrangeView lays its lanes out to whatever height it ends up with.
+        ApplyArrangeHeight();
+        _instrumentList.HandleCreated += (_, _) => ApplyArrangeHeight();
         _arrangeTop.BackColor = DawPalette.Background;
         _arrangeTop.Controls.Add(_arrange);
 
@@ -307,6 +312,17 @@ internal sealed class DawView : Panel
 
         Show(DawTab.Arrange);
     }
+
+    /// <summary>Sixteen rows of the instrument list - the song format's own limit, so the list can
+    /// never grow past it. Read off the list itself rather than assumed: ItemHeight follows the
+    /// font, and a ListBox quietly overrides what it is set to.</summary>
+    private int InstrumentStripHeight => 16 * _instrumentList.ItemHeight;
+
+    /// <summary>Applied twice: once while building, and again when the list gets its handle.
+    /// Until then ItemHeight still reports whatever it was assigned rather than what the font
+    /// actually gives, and the lanes would keep a height measured against the wrong row.</summary>
+    private void ApplyArrangeHeight() =>
+        _arrangeTop.Height = Math.Min(ArrangeView.PreferredHeight, InstrumentStripHeight);
 
     private void ShowSelectedInstrument()
     {

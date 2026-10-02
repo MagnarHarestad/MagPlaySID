@@ -45,8 +45,8 @@ internal sealed class PianoRollView : Control
     private static readonly string[] PitchNames =
         ["B", "A#", "A", "G#", "G", "F#", "F", "E", "D#", "D", "C#", "C"];
 
-    private readonly HScrollBar _scrollX = new() { Dock = DockStyle.Bottom, Height = 16 };
-    private readonly VScrollBar _scrollY = new() { Dock = DockStyle.Right, Width = 16 };
+    private readonly SlimScrollBar _scrollX = new(Orientation.Horizontal) { Dock = DockStyle.Bottom, Height = 12 };
+    private readonly SlimScrollBar _scrollY = new(Orientation.Vertical) { Dock = DockStyle.Right, Width = 12 };
 
     private Song? _song;
     private Pattern? _pattern;
@@ -479,7 +479,7 @@ internal sealed class PianoRollView : Control
     {
         // Shift scrolls sideways, as it does everywhere else. Typed as the base class because
         // HScrollBar and VScrollBar share one only through it.
-        ScrollBar bar = ModifierKeys.HasFlag(Keys.Shift) ? _scrollX : _scrollY;
+        SlimScrollBar bar = ModifierKeys.HasFlag(Keys.Shift) ? _scrollX : _scrollY;
         if (!bar.Enabled)
             return;
 

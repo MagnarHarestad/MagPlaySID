@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -18,17 +18,30 @@ internal sealed class ArrangeView : Control
 {
     private const int GutterWidth = 104;
     private const int RulerHeight = 24;
-    private const int LaneHeight = 78;
+    private const int DefaultLaneHeight = 78;
+    private const int MinLaneHeight = 40;
     private const int LaneGap = 4;
     private const int PixelsPerRow = 5;
     private const int HintHeight = 26;
-    private const int ScrollHeight = 16;
+    private const int ScrollHeight = 12;
 
     /// <summary>Tall enough for the ruler, the three lanes, the hint and the scroll bar - and no
     /// taller, because the piano roll below wants every pixel it can get.</summary>
-    public const int PreferredHeight = RulerHeight + (3 * (LaneHeight + LaneGap)) + HintHeight + ScrollHeight;
+    public const int PreferredHeight =
+        RulerHeight + (3 * (DefaultLaneHeight + LaneGap)) + HintHeight + ScrollHeight;
 
-    private readonly HScrollBar _scroll = new() { Dock = DockStyle.Bottom, Height = ScrollHeight };
+    /// <summary>The three lanes share whatever is left after the fixed furniture, so the view fits
+    /// the height it is given instead of only one height. Below <see cref="MinLaneHeight"/> a lane
+    /// has no room for its own name and counts, so it stops shrinking and clips instead.</summary>
+    private int LaneHeight => Math.Max(
+        MinLaneHeight,
+        (Height - RulerHeight - HintHeight - ScrollHeight - (3 * LaneGap)) / 3);
+
+    private readonly SlimScrollBar _scroll = new(Orientation.Horizontal)
+    {
+        Dock = DockStyle.Bottom,
+        Height = ScrollHeight,
+    };
 
     private Song? _song;
     private int _selectedChannel;
@@ -437,16 +450,23 @@ internal sealed class ArrangeView : Control
             g.DrawLine(border, 0, top + LaneHeight, Width, top + LaneHeight);
         }
 
+        // Name over two lines of counts, centred in the lane rather than pinned to its top: the
+        // lane's height follows the view's, and a block measured from the top falls out of a short
+        // one.
+        const int NameToMeta = 20;
+        const int MetaToMeta = 14;
+        int textTop = top + Math.Max(4, (LaneHeight - (NameToMeta + MetaToMeta + 12)) / 2);
+
         using (var nameFont = new Font("Segoe UI", 8.5f, FontStyle.Bold))
         using (var nameInk = new SolidBrush(DawPalette.Text))
-            g.DrawString($"CH {channel + 1}", nameFont, nameInk, 12, top + 10);
+            g.DrawString($"CH {channel + 1}", nameFont, nameInk, 12, textTop);
 
         using (var metaFont = new Font("Consolas", 7f))
         using (var metaInk = new SolidBrush(DawPalette.TextFaint))
         {
             int rows = LaneLength(order) / PixelsPerRow;
-            g.DrawString($"{order.Tokens.Count} clips", metaFont, metaInk, 12, top + 30);
-            g.DrawString($"{rows} rows", metaFont, metaInk, 12, top + 44);
+            g.DrawString($"{order.Tokens.Count} clips", metaFont, metaInk, 12, textTop + NameToMeta);
+            g.DrawString($"{rows} rows", metaFont, metaInk, 12, textTop + NameToMeta + MetaToMeta);
         }
 
         // clips
