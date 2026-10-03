@@ -57,6 +57,10 @@ internal sealed class PianoRollView : Control
     private IReadOnlyList<NoteBlock> _notes = [];
     private IReadOnlyList<ReleaseBlock> _releases = [];
 
+    // Beat columns against pattern rows - see BuildColumns.
+    private int[] _rowOfColumn = [];
+    private int[] _columnOfRow = [];
+
     private int _selectedRow = -1;
     private int _playRow = -1;
     private (int Row, int Key) _hovered = (-1, -1);
@@ -221,7 +225,7 @@ internal sealed class PianoRollView : Control
             return;
 
         int visible = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
-        int left = row * RowWidth;
+        int left = ColumnOf(row) * RowWidth;
         int right = left + RowWidth;
         int max = Math.Max(0, _scrollX.Maximum - _scrollX.LargeChange + 1);
 
@@ -283,10 +287,12 @@ internal sealed class PianoRollView : Control
         if (!_scrollY.Enabled || _notes.Count == 0)
             return false;
 
-        int firstRow = _scrollX.Value / RowWidth;
-        int lastRow = (_scrollX.Value + Math.Max(1, Width - KeyboardWidth - _scrollY.Width)) / RowWidth;
+        int firstColumn = _scrollX.Value / RowWidth;
+        int lastColumn = (_scrollX.Value + Math.Max(1, Width - KeyboardWidth - _scrollY.Width)) / RowWidth;
 
-        var visible = _notes.Where(n => n.Row <= lastRow && n.Row + n.Length > firstRow && KeyForNote(n.Note) >= 0).ToList();
+        var visible = _notes.Where(n =>
+            ColumnOf(n.Row) <= lastColumn && ColumnOf(n.Row) + n.Length > firstColumn
+            && KeyForNote(n.Note) >= 0).ToList();
         if (visible.Count == 0)
             visible = _notes.Where(n => KeyForNote(n.Note) >= 0).ToList();
         if (visible.Count == 0)
@@ -320,7 +326,7 @@ internal sealed class PianoRollView : Control
         if (!_scrollX.Enabled)
             return false;
 
-        int x = _playRow * RowWidth;
+        int x = ColumnOf(_playRow) * RowWidth;
         int visible = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
         int max = Math.Max(0, _scrollX.Maximum - _scrollX.LargeChange + 1);
 
@@ -343,7 +349,70 @@ internal sealed class PianoRollView : Control
             _notes = [];
             _releases = [];
         }
+
+        BuildColumns();
     }
+
+    /// <summary>
+    /// Which pattern row each beat column shows, and the way back.
+    ///
+    /// A loop marker is an instruction, not a beat - it takes a row in the stream but sounds for no
+    /// time at all. Giving it a column of its own pushed every note after it one beat to the right
+    /// of where the bar lines said it was, which is what made an LE look like it sat a beat late
+    /// against the same pattern in the tracker. Columns count playable rows only, exactly as the
+    /// tracker numbers its lines, and a marker is drawn on the column it brackets: an LS on the row
+    /// after it, an LE on the row before.
+    /// </summary>
+    private void BuildColumns()
+    {
+        var rows = _pattern?.Rows;
+        if (rows is null)
+        {
+            _rowOfColumn = [];
+            _columnOfRow = [];
+            return;
+        }
+
+        var columns = new List<int>(rows.Count);
+        _columnOfRow = new int[rows.Count];
+
+        for (int row = 0; row < rows.Count; row++)
+        {
+            if (rows[row] is LoopStartRow or LoopEndRow)
+            {
+                continue;
+            }
+
+            _columnOfRow[row] = columns.Count;
+            columns.Add(row);
+        }
+
+        // A marker borrows the column of the row it brackets, so clicking its label lands on the
+        // marker's own row and the label sits where the tracker shows it.
+        for (int row = 0; row < rows.Count; row++)
+        {
+            if (rows[row] is LoopStartRow)
+            {
+                _columnOfRow[row] = row + 1 < rows.Count ? _columnOfRow[row + 1] : Math.Max(0, columns.Count - 1);
+            }
+            else if (rows[row] is LoopEndRow)
+            {
+                _columnOfRow[row] = row > 0 ? _columnOfRow[row - 1] : 0;
+            }
+        }
+
+        _rowOfColumn = [.. columns];
+    }
+
+    /// <summary>The column a pattern row is drawn in.</summary>
+    private int ColumnOf(int row) =>
+        row >= 0 && row < _columnOfRow.Length ? _columnOfRow[row] : 0;
+
+    /// <summary>The pattern row a column stands for, or -1 past the end.</summary>
+    private int RowOf(int column) =>
+        column >= 0 && column < _rowOfColumn.Length ? _rowOfColumn[column] : -1;
+
+    private int ColumnCount => _rowOfColumn.Length;
 
     private static int KeyCount => (HighestOctave - LowestOctave + 1) * 12;
 
@@ -368,15 +437,15 @@ internal sealed class PianoRollView : Control
 
     private void UpdateScrollRange()
     {
-        int rows = _pattern?.Rows.Count ?? 0;
+        int columns = ColumnCount;
         int visibleWidth = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
         int visibleHeight = Math.Max(1, Height - RulerHeight - HeaderHeight - _scrollX.Height);
 
         _scrollX.Minimum = 0;
-        _scrollX.Maximum = Math.Max(0, (rows * RowWidth) + 40);
+        _scrollX.Maximum = Math.Max(0, (columns * RowWidth) + 40);
         _scrollX.LargeChange = visibleWidth;
         _scrollX.SmallChange = RowWidth * 4;
-        _scrollX.Enabled = rows * RowWidth > visibleWidth;
+        _scrollX.Enabled = columns * RowWidth > visibleWidth;
 
         _scrollY.Minimum = 0;
         _scrollY.Maximum = Math.Max(0, (KeyCount * KeyHeight) + 20);
@@ -410,6 +479,20 @@ internal sealed class PianoRollView : Control
 
     private int BeatBarTop => RulerHeight + HeaderHeight;
 
+    /// <summary>The loop marker drawn in a column, or -1.</summary>
+    private int MarkerRowInColumn(Pattern pattern, int column)
+    {
+        for (int row = 0; row < pattern.Rows.Count; row++)
+        {
+            if (pattern.Rows[row] is (LoopStartRow or LoopEndRow) && ColumnOf(row) == column)
+            {
+                return row;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>The row whose cell in the beat bar is under a point, if the point is in the strip
     /// at all. Rows only - the strip has no pitch, which is the whole point of it.</summary>
     private int? BeatBarRowAt(Point point)
@@ -421,8 +504,13 @@ internal sealed class PianoRollView : Control
             return null;
         }
 
-        int row = (point.X - KeyboardWidth + _scrollX.Value) / RowWidth;
-        return row >= 0 && row < pattern.Rows.Count ? row : null;
+        int column = (point.X - KeyboardWidth + _scrollX.Value) / RowWidth;
+
+        // A marker shares its column with the row it brackets, and the strip is the only way to
+        // reach the marker - the note keeps its own block in the grid.
+        int marker = MarkerRowInColumn(pattern, column);
+        int row = marker >= 0 ? marker : RowOf(column);
+        return row >= 0 ? row : null;
     }
 
     private (int Row, int Key)? CellAt(Point point)
@@ -430,10 +518,10 @@ internal sealed class PianoRollView : Control
         if (_pattern is null || point.X < KeyboardWidth || point.Y < GridTop)
             return null;
 
-        int row = (point.X - KeyboardWidth + _scrollX.Value) / RowWidth;
+        int row = RowOf((point.X - KeyboardWidth + _scrollX.Value) / RowWidth);
         int key = (point.Y - GridTop + _scrollY.Value) / KeyHeight;
 
-        return row >= 0 && row < _pattern.Rows.Count && key >= 0 && key < KeyCount ? (row, key) : null;
+        return row >= 0 && key >= 0 && key < KeyCount ? (row, key) : null;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -835,14 +923,16 @@ internal sealed class PianoRollView : Control
 
         int every = _grid == RollGrid.Beats ? 16 : 4;
 
-        for (int row = 0; row < pattern.Rows.Count; row += every)
+        _ = pattern;
+
+        for (int column = 0; column < ColumnCount; column += every)
         {
-            int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
             if (x < KeyboardWidth || x > Width)
                 continue;
 
             g.DrawLine(tick, x, 6, x, RulerHeight);
-            string label = _grid == RollGrid.Beats ? ((row / 16) + 1).ToString() : row.ToString("X2");
+            string label = _grid == RollGrid.Beats ? ((column / 16) + 1).ToString() : column.ToString("X2");
             g.DrawString(label, font, strong, x + 3, 5);
         }
     }
@@ -877,16 +967,18 @@ internal sealed class PianoRollView : Control
         int top = GridTop;
         int bottom = Height - _scrollX.Height;
 
-        for (int row = 0; row <= pattern.Rows.Count; row++)
+        _ = pattern;
+
+        for (int column = 0; column <= ColumnCount; column++)
         {
-            int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
             if (x < KeyboardWidth || x > Width - _scrollY.Width)
                 continue;
 
             Color colour = _grid == RollGrid.Beats
-                ? row % 16 == 0 ? Color.FromArgb(0x2C, 0x38, 0x52)
-                    : row % 4 == 0 ? Color.FromArgb(0x1C, 0x24, 0x36) : Color.FromArgb(0x14, 0x1A, 0x27)
-                : row % 4 == 0 ? Color.FromArgb(0x22, 0x2C, 0x42) : Color.FromArgb(0x17, 0x1E, 0x2C);
+                ? column % 16 == 0 ? Color.FromArgb(0x2C, 0x38, 0x52)
+                    : column % 4 == 0 ? Color.FromArgb(0x1C, 0x24, 0x36) : Color.FromArgb(0x14, 0x1A, 0x27)
+                : column % 4 == 0 ? Color.FromArgb(0x22, 0x2C, 0x42) : Color.FromArgb(0x17, 0x1E, 0x2C);
 
             using var pen = new Pen(colour);
             g.DrawLine(pen, x, top, x, bottom);
@@ -915,23 +1007,26 @@ internal sealed class PianoRollView : Control
         using (var backing = new SolidBrush(DawPalette.Inset))
             g.FillRectangle(backing, left, BeatBarTop, right - left, BeatBarHeight);
 
-        for (int row = 0; row < pattern.Rows.Count; row++)
+        _ = pattern;
+
+        for (int column = 0; column < ColumnCount; column++)
         {
-            int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
             if (x + RowWidth < left || x > right)
             {
                 continue;
             }
 
+            int row = RowOf(column);
             int width = Math.Min(RowWidth, right - x);
             var cell = new Rectangle(x, BeatBarTop, width, BeatBarHeight);
 
-            // Every fourth row is a beat and every sixteenth a bar, the same counting the grid
-            // behind it uses - so a glance at the strip says where you are without reading the
-            // ruler.
-            Color fill = row % 16 == 0
+            // Every fourth beat column is a beat and every sixteenth a bar, the same counting the
+            // grid behind it uses - so a glance at the strip says where you are without reading
+            // the ruler.
+            Color fill = column % 16 == 0
                 ? Color.FromArgb(0x24, 0x2E, 0x45)
-                : row % 4 == 0 ? Color.FromArgb(0x1A, 0x22, 0x33) : Color.FromArgb(0x12, 0x17, 0x22);
+                : column % 4 == 0 ? Color.FromArgb(0x1A, 0x22, 0x33) : Color.FromArgb(0x12, 0x17, 0x22);
 
             using (var brush = new SolidBrush(fill))
                 g.FillRectangle(brush, cell);
@@ -984,7 +1079,9 @@ internal sealed class PianoRollView : Control
                 continue;
             }
 
-            int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
+            // On the column it brackets, not on one of its own - an LS belongs to the row after
+            // it and an LE to the row before, which is where the tracker prints them too.
+            int x = KeyboardWidth + (ColumnOf(row) * RowWidth) - _scrollX.Value;
             if (x < KeyboardWidth || x > Width - _scrollY.Width)
             {
                 continue;
@@ -1060,7 +1157,7 @@ internal sealed class PianoRollView : Control
         if (key < 0)
             return null;
 
-        int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
+        int x = KeyboardWidth + (ColumnOf(row) * RowWidth) - _scrollX.Value;
         int y = GridTop + (key * KeyHeight) - _scrollY.Value;
         int width = (length * RowWidth) - 2;
         int height = KeyHeight - 2;
@@ -1150,7 +1247,7 @@ internal sealed class PianoRollView : Control
         if (_playRow < 0)
             return;
 
-        int x = KeyboardWidth + (_playRow * RowWidth) - _scrollX.Value;
+        int x = KeyboardWidth + (ColumnOf(_playRow) * RowWidth) - _scrollX.Value;
         if (x < KeyboardWidth || x > Width - _scrollY.Width)
             return;
 
