@@ -118,6 +118,10 @@ public sealed class MainForm : Form
     /// fields that have nothing to put in the extra space.</summary>
     private readonly Panel _retroColumn = new() { BackColor = EditorPalette.Background };
 
+    /// <summary>Which note each held typing key is sounding in the DAW view, so key-up releases
+    /// the right one even after the octave moved under it.</summary>
+    private readonly Dictionary<Keys, NoteName> _dawHeldKeys = [];
+
     private bool _suppressSpeedEvent;
     private WaveOutEvent? _waveOut;
     private SongPlaybackEngine? _playbackEngine;
@@ -154,6 +158,14 @@ public sealed class MainForm : Form
         // very edge pixel. ClientSize (not Width/Height) so the border/title chrome doesn't
         // eat into the calculation.
         ClientSize = new Size(NaturalRetroWidth, 941);
+
+        // The DAW's piano keys are caught here rather than in a control, since the control that
+        // owns them in the retro view is hidden over there. KeyPreview is what lets the window see
+        // them before whatever has focus does - a ListBox would otherwise jump to an item on every
+        // letter typed.
+        KeyPreview = true;
+        KeyDown += OnDawKeyDown;
+        KeyUp += OnDawKeyUp;
         StartPosition = FormStartPosition.CenterScreen;
 
         // The tracker grid and every dialog were already dark; the shell around them was not, so
@@ -836,10 +848,11 @@ public sealed class MainForm : Form
     /// The speed spinner is left alone: it is the one place in this window where a keystroke
     /// belongs to a control rather than to the transport.
     /// </summary>
-    /// <summary>True where a space is a space: the speed spinner, a hex field, a button, and a
-    /// grid cell being renamed - the instrument list is a DataGridView, and an instrument called
-    /// "Lead 2" has to be typeable. Everywhere else the window's own Space wins.</summary>
-    private bool SpaceBelongsToTheFocusedControl() => ActiveControl switch
+    /// <summary>True where a keystroke belongs to the control under it: the speed spinner, a hex
+    /// field, a button, and a grid cell being renamed - the instrument list is a DataGridView, and
+    /// an instrument called "Lead 2" has to be typeable. Everywhere else the window's own keys
+    /// win.</summary>
+    private bool TypingInAField() => ActiveControl switch
     {
         NumericUpDown or TextBoxBase or ButtonBase => true,
         DataGridView grid => grid.IsCurrentCellInEditMode,
@@ -859,6 +872,52 @@ public sealed class MainForm : Form
         else
         {
             StopAnyPlayback();
+        }
+    }
+
+    /// <summary>
+    /// The piano keys, for the DAW view. The tracker grid handles its own, but it is hidden over
+    /// there and never sees a keystroke - so these are caught at the window, which is also the only
+    /// place that knows which view is showing.
+    ///
+    /// Routed through the same handler a MIDI key takes, so Edit mode still decides whether the
+    /// note is written into the roll and Jam mode still only sounds it. A second route into the
+    /// song would be a second set of rules to keep in step.
+    /// </summary>
+    private void OnDawKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (!_dawShowing || TypingInAField() || e.Control || e.Alt)
+        {
+            return;
+        }
+
+        if (e.KeyCode == PianoKeyMap.OctaveKey)
+        {
+            _dawView.StepOctave(e.Shift);
+            e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
+        if (PianoKeyMap.TryNote(e.KeyCode, _dawView.Octave) is not { } note)
+        {
+            return;
+        }
+
+        // Windows repeats a held key; the note is already sounding and retriggering it on every
+        // repeat would machine-gun it.
+        if (_dawHeldKeys.TryAdd(e.KeyCode, note))
+        {
+            OnMidiNote(note, 127);
+        }
+
+        e.Handled = e.SuppressKeyPress = true;
+    }
+
+    private void OnDawKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (_dawHeldKeys.Remove(e.KeyCode, out var note))
+        {
+            ReleaseJamNote(note);
         }
     }
 
@@ -892,7 +951,7 @@ public sealed class MainForm : Form
         // Both are claimed here rather than in the tracker grid so they work from the DAW view
         // too - the grid is hidden there and never sees a keystroke. A control that owns the
         // space key keeps it, because inside those a space is a space.
-        if (keyData == Keys.Space && !SpaceBelongsToTheFocusedControl())
+        if (keyData == Keys.Space && !TypingInAField())
         {
             if (EditorSettings.SwapSpacebar)
             {

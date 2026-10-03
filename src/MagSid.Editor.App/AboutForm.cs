@@ -267,6 +267,12 @@ public sealed class AboutForm : Form
              "clicking a different row in the Instruments panel, without leaving the pattern to " +
              "do it. Clicking a row there does the reverse: focus jumps back to the pattern so " +
              "typing continues right away.\n\n");
+        Body("The DAW view takes the same keys, the same octave key and the same Edit/Jam rule - " +
+             "its own octave, shown beside the tabs, since the two views are looked at one at a " +
+             "time. In its piano roll, Return (or CapsLock) writes a gate-off on the selected " +
+             "row and Ctrl+click writes one where you click; the loop markers are Ctrl+L and " +
+             "Ctrl+E there, as they are here, because bare S and E are C# and E on the piano " +
+             "keys.\n\n");
         Body("Piano keys across two octaves:\n\n");
         Mono("  Q 2 W 3 E R 5 T 6 Y 7 U     octave +1\n" +
              "  Z S X D C V G B H N J M     selected octave\n" +

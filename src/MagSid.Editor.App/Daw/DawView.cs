@@ -20,6 +20,7 @@ internal sealed class DawView : Panel
     private readonly Panel _arrangePage = new();
     private readonly Splitter _arrangeSplitter = new();
     private readonly Panel _arrangeTop = new();
+    private readonly Label _octaveLabel = new();
     private readonly ToggleButton _autoScroll = new("AUTOSCROLL") { Checked = true, Accent = DawPalette.Oscillator };
     private readonly DawInstrumentView _instrument = new();
     private readonly Panel _placeholder = new();
@@ -86,6 +87,23 @@ internal sealed class DawView : Panel
     /// <summary>A key was pressed on a MIDI keyboard. Writes into the piano roll when that is the
     /// view on screen, and reports whether it did - the caller sounds the note either way, because
     /// hearing what you played is not conditional on it being recorded.</summary>
+    /// <summary>The octave the computer keyboard's lower key row plays in; the upper row is one
+    /// above it. Its own, not the tracker's: the two views are looked at one at a time, and a
+    /// shared octave would move under you while you were not watching.</summary>
+    public int Octave { get; private set; } = 4;
+
+    public void StepOctave(bool up)
+    {
+        int next = PianoKeyMap.StepOctave(Octave, up);
+        if (next == Octave)
+        {
+            return;
+        }
+
+        Octave = next;
+        _octaveLabel.Text = $"OCT {Octave}";
+    }
+
     public bool StepInput(MagSid.Core.Model.NoteName note) =>
         _pianoRoll.Visible && _pianoRoll.StepInput(note);
 
@@ -210,6 +228,17 @@ internal sealed class DawView : Panel
         _autoScroll.Margin = new Padding(24, 0, 0, 0);
         _autoScroll.CheckedChanged += on => _pianoRoll.AutoScroll = on;
         _tabs.Controls.Add(_autoScroll);
+
+        // The octave the typing keys play in, where it can be seen. A keyboard that plays two
+        // octaves off and says nothing about it reads as a tuning fault.
+        _octaveLabel.Text = $"OCT {Octave}";
+        _octaveLabel.Font = new Font("Consolas", 8.5f, FontStyle.Bold);
+        _octaveLabel.ForeColor = DawPalette.TextDim;
+        _octaveLabel.AutoSize = false;
+        _octaveLabel.Size = new Size(70, 26);
+        _octaveLabel.TextAlign = ContentAlignment.MiddleCenter;
+        _octaveLabel.Margin = new Padding(20, 3, 0, 0);
+        _tabs.Controls.Add(_octaveLabel);
 
         _instrumentList.Dock = DockStyle.Left;
         _instrumentList.Width = 186;

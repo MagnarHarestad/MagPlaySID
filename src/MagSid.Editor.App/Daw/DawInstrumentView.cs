@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -35,6 +35,13 @@ internal sealed class DawInstrumentView : Panel
 
     private readonly ToggleButton _continuous = new("CONT");
     private readonly ToggleButton _noHardRestart = new("NO HR");
+
+    // What happens after the note program's last step. The lane draws the answer as a marker, but
+    // drawing it was all it could do - this is where it gets set.
+    private readonly ToggleButton _endingLoop = new("LOOP");
+    private readonly ToggleButton _endingHold = new("HOLD");
+    private readonly ToggleButton _endingRoot = new("ROOT");
+    private readonly KnobControl _arpLoopFrom = new();
 
     private readonly ProgramLaneControl _wavetable = new();
     private readonly ProgramLaneControl _noteProgram = new();
@@ -93,6 +100,7 @@ internal sealed class DawInstrumentView : Panel
                 _wavetable.SetSteps([]);
                 _noteProgram.SetSteps([]);
                 _filter.SetSteps([]);
+                ShowEnding(null);
                 return;
             }
 
@@ -121,6 +129,7 @@ internal sealed class DawInstrumentView : Panel
 
             _continuous.Checked = instrument.PulseContinuous;
             _noHardRestart.Checked = instrument.NoHardRestart;
+            ShowEnding(instrument);
 
             RefreshDerived(instrument);
             _filterStep.ShowStep(instrument, _filter.SelectedStep);
@@ -447,13 +456,101 @@ internal sealed class DawInstrumentView : Panel
         {
             lane.Dock = DockStyle.Fill;
             lane.Margin = new Padding(0, row == 0 ? 0 : 5, 0, 0);
-            programs.Controls.Add(lane, 0, row);
+
+            if (lane != _noteProgram)
+            {
+                programs.Controls.Add(lane, 0, row);
+                continue;
+            }
+
+            // The ending belongs beside the steps it follows, not in a panel somewhere else: it is
+            // the last thing the program does, and the lane already draws it as the step after the
+            // last one.
+            var withEnding = new Panel { Dock = DockStyle.Fill, Margin = lane.Margin, BackColor = DawPalette.Background };
+            withEnding.Controls.Add(lane);
+            withEnding.Controls.Add(BuildEndingStrip());
+            programs.Controls.Add(withEnding, 0, row);
         }
 
         Controls.Add(programs);
         Controls.Add(_filterStep);
         Controls.Add(top);
         Controls.Add(header);
+    }
+
+    /// <summary>LOOP, HOLD and ROOT are one choice, so they latch as a group - and the loop's own
+    /// start step only means anything for LOOP, which is the only time it is shown.</summary>
+    private Control BuildEndingStrip()
+    {
+        var strip = new Panel { Dock = DockStyle.Right, Width = 108, BackColor = DawPalette.Background };
+
+        var caption = new Label
+        {
+            Text = "AFTER THE LAST STEP",
+            Font = new Font("Segoe UI", 6.5f, FontStyle.Bold),
+            ForeColor = DawPalette.TextFaint,
+            AutoSize = false,
+            Size = new Size(104, 24),
+            Location = new Point(2, 4),
+        };
+        strip.Controls.Add(caption);
+
+        var endings = new[]
+        {
+            (Button: _endingLoop, Ending: ArpeggioEnding.Loop),
+            (Button: _endingHold, Ending: ArpeggioEnding.Hold),
+            (Button: _endingRoot, Ending: ArpeggioEnding.Root),
+        };
+
+        for (int i = 0; i < endings.Length; i++)
+        {
+            var (button, ending) = endings[i];
+            button.Accent = DawPalette.Oscillator;
+            button.Size = new Size(50, 22);
+            button.Location = new Point(2 + (i % 2 * 54), 30 + (i / 2 * 26));
+            button.CheckedChanged += on =>
+            {
+                if (!on)
+                {
+                    return;
+                }
+
+                Commit(instrument => instrument.ArpeggioEnding = ending);
+                ShowEnding(_instrument);
+            };
+            strip.Controls.Add(button);
+        }
+
+        Knob(_arpLoopFrom, "FROM", DawPalette.Oscillator, 0, 63, value => value.ToString());
+        _arpLoopFrom.Size = new Size(50, 62);
+        _arpLoopFrom.Location = new Point(56, 56);
+        _arpLoopFrom.ValueChanged += value => Commit(instrument => instrument.ArpeggioLoopPoint = value);
+        strip.Controls.Add(_arpLoopFrom);
+
+        return strip;
+    }
+
+    /// <summary>Silently, because this also runs as the answer to a click on one of these very
+    /// buttons - firing their events again from here would be a loop.</summary>
+    private void ShowEnding(Instrument? instrument)
+    {
+        bool loading = _loading;
+        _loading = true;
+
+        try
+        {
+            var ending = instrument?.ArpeggioEnding ?? ArpeggioEnding.Root;
+            _endingLoop.Checked = ending == ArpeggioEnding.Loop;
+            _endingHold.Checked = ending == ArpeggioEnding.Hold;
+            _endingRoot.Checked = ending == ArpeggioEnding.Root;
+
+            _arpLoopFrom.Visible = ending == ArpeggioEnding.Loop;
+            _arpLoopFrom.SetValueSilently(instrument?.ArpeggioLoopPoint ?? 0);
+        }
+        finally
+        {
+            _loading = loading;
+        }
     }
 
     private static string Hex1(int value) => $"${value:X}";

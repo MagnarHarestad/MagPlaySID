@@ -448,6 +448,16 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        // Ctrl+click writes a gate-off instead of a note. Which key column it lands in does not
+        // matter - a release has no pitch - so the row alone decides.
+        if (ModifierKeys.HasFlag(Keys.Control))
+        {
+            PatternNotes.SetRelease(pattern, cell.Row);
+            _selectedRow = cell.Row;
+            Commit();
+            return;
+        }
+
         // A marker owns its row, so a click there selects it instead of writing a note over
         // something that took a deliberate keystroke to place.
         if (pattern.Rows[cell.Row] is LoopStartRow or LoopEndRow)
@@ -489,7 +499,7 @@ internal sealed class PianoRollView : Control
     }
 
     protected override bool IsInputKey(Keys keyData) => keyData is
-        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.S or Keys.E;
+        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Return;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
@@ -501,6 +511,18 @@ internal sealed class PianoRollView : Control
 
         if (HandleMarkerKey(e, pattern))
         {
+            base.OnKeyDown(e);
+            return;
+        }
+
+        // The tracker's own key for it, and the one thing the roll could not say: silence from
+        // here. Shortening a note gives a release at its end, but a row with nothing before it
+        // had no way to carry one.
+        if (e.KeyCode is Keys.Return or Keys.CapsLock)
+        {
+            PatternNotes.SetRelease(pattern, _selectedRow);
+            Commit();
+            e.Handled = true;
             base.OnKeyDown(e);
             return;
         }
@@ -562,8 +584,9 @@ internal sealed class PianoRollView : Control
     }
 
     /// <summary>
-    /// The loop markers: S puts an LS on the selected row, E an LE. On a row that already carries
-    /// one, the arrows change an LE's repeat count and Delete takes the marker away.
+    /// The loop markers: Ctrl+L puts an LS on the selected row, Ctrl+E an LE - the tracker's own
+    /// bindings. On a row that already carries one, the arrows change an LE's repeat count and
+    /// Delete takes the marker away.
     ///
     /// Handled before the note keys because a marker owns its row outright - there is no note there
     /// to move or shorten, and falling through would leave the row unreachable from the keyboard.
@@ -575,13 +598,15 @@ internal sealed class PianoRollView : Control
 
         switch (e.KeyCode)
         {
-            case Keys.S:
+            // Ctrl+L and Ctrl+E, the tracker's own bindings. Bare S and E used to do this, but
+            // they are also C# and E on the piano keys, and the roll plays those now.
+            case Keys.L when e.Control:
                 PatternNotes.SetLoopStart(pattern, _selectedRow);
                 Commit();
                 e.Handled = true;
                 return true;
 
-            case Keys.E:
+            case Keys.E when e.Control:
                 PatternNotes.SetLoopEnd(pattern, _selectedRow, null);
                 Commit();
                 e.Handled = true;

@@ -129,25 +129,6 @@ public sealed class TrackerGridControl : Control
         FormatFlags = StringFormatFlags.NoWrap,
     };
 
-    // Physical-key -> pitch-class (0-11) maps, classic tracker piano-key layout.
-    private static readonly Dictionary<Keys, int> LowerRowPitch = new()
-    {
-        [Keys.Z] = 0, [Keys.S] = 1, [Keys.X] = 2, [Keys.D] = 3, [Keys.C] = 4, [Keys.V] = 5,
-        [Keys.G] = 6, [Keys.B] = 7, [Keys.H] = 8, [Keys.N] = 9, [Keys.J] = 10, [Keys.M] = 11,
-    };
-
-    private static readonly Dictionary<Keys, int> UpperRowPitch = new()
-    {
-        [Keys.Q] = 0, [Keys.D2] = 1, [Keys.W] = 2, [Keys.D3] = 3, [Keys.E] = 4, [Keys.R] = 5,
-        [Keys.D5] = 6, [Keys.T] = 7, [Keys.D6] = 8, [Keys.Y] = 9, [Keys.D7] = 10, [Keys.U] = 11,
-    };
-
-    private static readonly (char Letter, bool IsSharp)[] PitchClasses =
-    [
-        ('C', false), ('C', true), ('D', false), ('D', true), ('E', false), ('F', false),
-        ('F', true), ('G', false), ('G', true), ('A', false), ('A', true), ('B', false),
-    ];
-
     private Song? _song;
     private int _songPosition;
     /// <summary>The first row drawn - always placed so the cursor lands on the window's centre
@@ -761,12 +742,12 @@ public sealed class TrackerGridControl : Control
             e.Handled = true;
             return;
         }
-        if (e.KeyCode == ApostropheKey)
+        if (e.KeyCode == PianoKeyMap.OctaveKey)
         {
             // ' alone lowers the octave, Shift+' raises it - resolved against the *current
             // Windows input layout* rather than hardcoded to the US Oem7 position, so this
             // lands on whatever key actually types ' for the active keyboard layout.
-            _octave = e.Shift ? Math.Min(7, _octave + 1) : Math.Max(0, _octave - 1);
+            _octave = PianoKeyMap.StepOctave(_octave, e.Shift);
             Invalidate();
             e.Handled = true;
             return;
@@ -859,7 +840,7 @@ public sealed class TrackerGridControl : Control
 
         if (_cursorField == CursorField.Note)
         {
-            if (LowerRowPitch.TryGetValue(e.KeyCode, out int lowerPitch))
+            if (PianoKeyMap.LowerPitch(e.KeyCode) is { } lowerPitch)
             {
                 if (TryBeginJamHold(e.KeyCode, lowerPitch, _octave))
                 {
@@ -868,7 +849,7 @@ public sealed class TrackerGridControl : Control
                 e.Handled = true;
                 return;
             }
-            if (UpperRowPitch.TryGetValue(e.KeyCode, out int upperPitch))
+            if (PianoKeyMap.UpperPitch(e.KeyCode) is { } upperPitch)
             {
                 if (TryBeginJamHold(e.KeyCode, upperPitch, _octave + 1))
                 {
@@ -957,28 +938,6 @@ public sealed class TrackerGridControl : Control
         Keys.F => 0xF,
         _ => null,
     };
-
-    [DllImport("user32.dll")]
-    private static extern short VkKeyScanEx(char ch, IntPtr dwhkl);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetKeyboardLayout(uint idThread);
-
-    /// <summary>Whatever Keys value the *currently active Windows input layout* maps to
-    /// produce '. Note-entry/hex-digit keys (letters, digits) sit on the same physical keys
-    /// across QWERTY-family layouts including Swedish, so they don't need this - but OEM
-    /// punctuation keys like apostrophe genuinely move between layouts, so hardcoding Oem7
-    /// (the US position) would land on the wrong physical key for e.g. a Swedish user.
-    /// Re-resolved on every keypress rather than cached, so switching input language mid-
-    /// session (Alt+Shift, language bar, etc.) takes effect immediately.</summary>
-    private static Keys ApostropheKey
-    {
-        get
-        {
-            short result = VkKeyScanEx('\'', GetKeyboardLayout(0));
-            return result == -1 ? Keys.Oem7 : (Keys)(result & 0xFF);
-        }
-    }
 
     /// <summary>Steps the cursor a fixed block of rows, stopping at the top of the song and at
     /// the end of the cursor channel's own chained content rather than running past either. The
@@ -1303,12 +1262,6 @@ public sealed class TrackerGridControl : Control
     /// changing octave (') while a chord is held cannot release the wrong note.</summary>
     private readonly Dictionary<Keys, NoteName> _heldJamNotes = new();
 
-    private static NoteName MakeNote(int pitchClass, int octave)
-    {
-        var (letter, isSharp) = PitchClasses[pitchClass];
-        return new NoteName(letter, isSharp, Math.Clamp(octave, 0, 7));
-    }
-
     /// <summary>Records which note this physical key is currently sounding, in both modes, so
     /// <see cref="OnKeyUp"/> can release it - a typed audition in Edit mode gets a gate-off on
     /// release exactly like a jammed one, not just whatever release curve the previous retrigger
@@ -1323,7 +1276,7 @@ public sealed class TrackerGridControl : Control
     private bool TryBeginJamHold(Keys key, int pitchClass, int octave)
     {
         bool firstPress = _heldJamKeys.Add(key);
-        _heldJamNotes[key] = MakeNote(pitchClass, octave);
+        _heldJamNotes[key] = PianoKeyMap.Note(pitchClass, octave);
 
         return _editMode || firstPress;
     }
@@ -1354,7 +1307,7 @@ public sealed class TrackerGridControl : Control
             return;
         }
 
-        var note = MakeNote(pitchClass, octave);
+        var note = PianoKeyMap.Note(pitchClass, octave);
 
         if (!_editMode)
         {
