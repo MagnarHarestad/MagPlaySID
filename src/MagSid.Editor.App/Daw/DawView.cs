@@ -339,6 +339,14 @@ internal sealed class DawView : Panel
         _arrange.Dock = DockStyle.Fill;
         _arrange.OrderEdited += () => OrderEdited?.Invoke();
         _arrange.MuteToggled += channel => MuteToggleRequested?.Invoke(channel);
+
+        // The roll may be showing the very pattern that just changed length, so it reloads before
+        // the host hears about the edit.
+        _arrange.PatternLengthChanged += () =>
+        {
+            _pianoRoll.ReloadPattern();
+            PatternEdited?.Invoke();
+        };
         // The roll below always shows the pattern of the selected clip - selecting is the whole
         // gesture, no double-click and no tab switch.
         _arrange.SelectedPatternChanged += (channel, patternNumber) =>

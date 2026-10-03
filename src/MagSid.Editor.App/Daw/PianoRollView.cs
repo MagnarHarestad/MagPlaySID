@@ -29,8 +29,11 @@ internal enum RollGrid
 internal sealed class PianoRollView : Control
 {
     private const int KeyboardWidth = 72;
-    private const int RulerHeight = 24;
-    private const int HeaderHeight = 32;
+    // One strip above the beat bar, not two: the pattern's name, what it holds, the bar numbers,
+    // the ruling and the switch between rulings all fit on a line, and the second line was mostly
+    // air taken off the roll.
+    private const int RulerHeight = 26;
+    private const int HeaderHeight = 0;
     private const int KeyHeight = 15;
     private const int RowWidth = 22;
 
@@ -847,13 +850,6 @@ internal sealed class PianoRollView : Control
 
         switch (e.KeyCode)
         {
-            case Keys.Delete:
-                PatternNotes.Remove(pattern, _selectedRow);
-                _selectedRow = -1;
-                Commit();
-                e.Handled = true;
-                break;
-
             case Keys.Right when e.Control:
                 PatternNotes.SetLength(pattern, _selectedRow, note.Length + 1);
                 Commit();
@@ -911,7 +907,16 @@ internal sealed class PianoRollView : Control
                 pattern.Rows.Insert(Math.Min(_selectedRow, pattern.Rows.Count), new HoldRow());
                 break;
 
-            case Keys.Delete when e.Shift && _selectedRow >= 0 && _selectedRow < pattern.Rows.Count:
+            // Delete takes the event on the row if there is one, and the row itself if there is
+            // not - so on a row picked in the beat bar, where there is nothing to take, it is the
+            // other half of Insert. Shift+Delete always takes the row.
+            case Keys.Delete when !e.Shift && _selectedRow < pattern.Rows.Count
+                                 && pattern.Rows[_selectedRow] is NoteRow or NoteOffRow:
+                PatternNotes.Remove(pattern, _selectedRow);
+                break;
+
+            case Keys.Delete when _selectedRow >= 0 && _selectedRow < pattern.Rows.Count
+                                  && pattern.Rows.Count > 1:
                 pattern.Rows.RemoveAt(_selectedRow);
                 _selectedRow = Math.Min(_selectedRow, pattern.Rows.Count - 1);
                 break;
@@ -995,6 +1000,15 @@ internal sealed class PianoRollView : Control
         }
     }
 
+    /// <summary>Re-reads the pattern it is already showing - for when something outside the roll
+    /// changed it, such as a clip dragged longer in the arrange lanes.</summary>
+    public void ReloadPattern()
+    {
+        Reread();
+        UpdateScrollRange();
+        Invalidate();
+    }
+
     private void Commit()
     {
         Reread();
@@ -1002,7 +1016,7 @@ internal sealed class PianoRollView : Control
         Edited?.Invoke();
     }
 
-    private Rectangle GridToggleBounds => new(Width - _scrollY.Width - 168, RulerHeight + 6, 156, 20);
+    private Rectangle GridToggleBounds => new(Width - _scrollY.Width - 168, 3, 156, 20);
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -1087,7 +1101,7 @@ internal sealed class PianoRollView : Control
         var far = new StringFormat { Alignment = StringAlignment.Far };
         g.DrawString(
             _grid == RollGrid.Beats ? "16 rows to a bar" : "one line per row, hex",
-            hintFont, hintInk, new RectangleF(0, box.Bottom - 34, box.X - 8, 12), far);
+            hintFont, hintInk, new RectangleF(0, box.Y + 5, box.X - 8, 12), far);
     }
 
     private void DrawRulerNumbers(Graphics g)
@@ -1109,9 +1123,9 @@ internal sealed class PianoRollView : Control
             if (x < KeyboardWidth || x > Width)
                 continue;
 
-            g.DrawLine(tick, x, 6, x, RulerHeight);
+            g.DrawLine(tick, x, 14, x, RulerHeight);
             string label = _grid == RollGrid.Beats ? ((column / 16) + 1).ToString() : column.ToString("X2");
-            g.DrawString(label, font, strong, x + 3, 5);
+            g.DrawString(label, font, strong, x + 3, 6);
         }
     }
 

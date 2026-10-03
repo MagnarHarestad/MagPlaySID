@@ -213,6 +213,15 @@ internal sealed class ArrangeView : Control
     /// <summary>A click on a lane's header asked for that channel to be muted or unmuted.</summary>
     public event Action<int>? MuteToggled;
 
+    /// <summary>A clip's end was dragged, which is the pattern's own length - so this is a change
+    /// to the pattern, not to the order, and the roll showing it has to be told.</summary>
+    public event Action? PatternLengthChanged;
+
+    /// <summary>The clip being resized, as (channel, index), or null.</summary>
+    private (int Channel, int Index)? _resizing;
+
+    private bool _resizeChanged;
+
     private int LaneTop(int channel) => RulerHeight + (channel * (LaneHeight + LaneGap));
 
     /// <summary>The lane header under a point - the gutter the channel's name sits in.</summary>
@@ -267,8 +276,78 @@ internal sealed class ArrangeView : Control
         return null;
     }
 
+    /// <summary>The last few pixels of a clip, where a drag changes the pattern's length. Every
+    /// clip of that pattern changes with it, in this lane and the others - a pattern has one
+    /// length, and the lanes are showing the same thing twice.</summary>
+    private (int Channel, int Index)? EndHandleAt(Point point)
+    {
+        if (ClipAt(point) is not { } at || _song is null)
+        {
+            return null;
+        }
+
+        var order = _song.ChannelOrders[at.Channel];
+        if (order.Tokens[at.Index] is not PatternRefToken token)
+        {
+            return null;
+        }
+
+        int end = GutterWidth + OffsetOf(order, at.Index)
+                  + Math.Max(PixelsPerRow * 2, RowsOf(token.PatternNumber) * PixelsPerRow)
+                  - _scroll.Value;
+
+        return point.X >= end - 5 && point.X <= end + 1 ? at : null;
+    }
+
+    /// <summary>Drags a clip's end to wherever the pointer is, in whole rows. One row is the floor:
+    /// a pattern of nothing has no row for anything to be written on.</summary>
+    private void DragClipEnd(int x)
+    {
+        if (_resizing is not { } at || _song is null)
+        {
+            return;
+        }
+
+        var order = _song.ChannelOrders[at.Channel];
+        if (order.Tokens[at.Index] is not PatternRefToken token
+            || _song.Patterns.FirstOrDefault(p => p.Number == token.PatternNumber) is not { } pattern)
+        {
+            return;
+        }
+
+        int start = GutterWidth + OffsetOf(order, at.Index) - _scroll.Value;
+        int rows = Math.Max(1, (int)Math.Round((x - start) / (double)PixelsPerRow));
+        if (rows == pattern.Rows.Count)
+        {
+            return;
+        }
+
+        while (pattern.Rows.Count > rows)
+        {
+            pattern.Rows.RemoveAt(pattern.Rows.Count - 1);
+        }
+
+        while (pattern.Rows.Count < rows)
+        {
+            pattern.Rows.Add(new HoldRow());
+        }
+
+        _resizeChanged = true;
+        UpdateScrollRange();
+        Invalidate();
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        if (_resizing is not null)
+        {
+            DragClipEnd(e.X);
+            base.OnMouseMove(e);
+            return;
+        }
+
+        Cursor = EndHandleAt(e.Location) is not null ? Cursors.SizeWE : Cursors.Default;
+
         var at = ClipAt(e.Location) ?? (-1, -1);
         if (at != _hovered)
         {
@@ -295,6 +374,19 @@ internal sealed class ArrangeView : Control
         {
             MuteToggled?.Invoke(header);
             Invalidate();
+            base.OnMouseDown(e);
+            return;
+        }
+
+        if (e.Button == MouseButtons.Left && EndHandleAt(e.Location) is { } handle)
+        {
+            _resizing = handle;
+            _resizeChanged = false;
+            _selectedChannel = handle.Channel;
+            _selectedIndex = handle.Index;
+            Capture = true;
+            Invalidate();
+            AnnounceSelection();
             base.OnMouseDown(e);
             return;
         }
@@ -420,6 +512,27 @@ internal sealed class ArrangeView : Control
         int count = song.ChannelOrders[_selectedChannel].Tokens.Count;
         _selectedIndex = count == 0 ? -1 : Math.Clamp(_selectedIndex, 0, count - 1);
         Invalidate();
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        // One edit for the drag rather than one per pixel - the song is marked dirty and every
+        // view rebuilt on each of them.
+        if (_resizing is not null)
+        {
+            _resizing = null;
+            Capture = false;
+
+            if (_resizeChanged)
+            {
+                _resizeChanged = false;
+                UpdateScrollRange();
+                Invalidate();
+                PatternLengthChanged?.Invoke();
+            }
+        }
+
+        base.OnMouseUp(e);
     }
 
     private void Edited()
@@ -592,7 +705,7 @@ internal sealed class ArrangeView : Control
         using var font = new Font("Segoe UI", 7.5f);
         using var ink = new SolidBrush(DawPalette.TextFaint);
         g.DrawString(
-            "Click a clip to edit it in the roll below  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  Ctrl+R restarts here  ·  click a channel name to mute  ·  "
+            "Click a clip to edit it  ·  drag its end to resize the pattern  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  Ctrl+R restarts here  ·  mute from the channel name  ·  "
             + "↻ marks where the channel restarts",
             font, ink, 12, y);
     }

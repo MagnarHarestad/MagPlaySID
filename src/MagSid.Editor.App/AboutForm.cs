@@ -287,6 +287,9 @@ public sealed class AboutForm : Form
              "Shift+V copy and paste the whole pattern - one clipboard between the two views, so " +
              "a pattern copied in either pastes into the other. Plain Delete is left to removing " +
              "the note under the cursor, which is the commoner thing to want in a roll.\n\n" +
+             "A clip's end is a handle too: dragging it adds rows to that pattern or takes them " +
+             "away, and the clips after it move along. It is the pattern's own length, so every " +
+             "clip of that pattern changes with it.\n\n" +
              "In the arrange lanes, Ctrl+R makes the selected clip the one the channel restarts " +
              "at, and clicking a channel's name mutes it - the same mute the pattern view shows, " +
              "not a second one. F2 or a double-click renames an instrument in the strip.\n\n");
