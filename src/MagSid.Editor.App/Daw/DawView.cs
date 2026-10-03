@@ -158,19 +158,28 @@ internal sealed class DawView : Panel
     /// channel is in and the roll takes the row from one that matches - the channel of the selected
     /// clip first, since that is the one the roll was opened from, then any other. Anything else
     /// would draw a playhead from a channel that is somewhere else entirely.</summary>
-    public void SetPlayRow(int patternChannel1, int row1, int patternChannel2, int row2, int patternChannel3, int row3)
+    /// <summary>Each channel's pattern, the row in it being heard and how far through that row.
+    /// The roll follows whichever channel is playing the pattern it shows - the selected clip's
+    /// channel first, since that is the one being looked at.</summary>
+    public void SetPlayRow(
+        (int Pattern, int Row, double Fraction) channel1,
+        (int Pattern, int Row, double Fraction) channel2,
+        (int Pattern, int Row, double Fraction) channel3)
     {
         int showing = _pianoRoll.Pattern?.Number ?? -1;
-        int[] patterns = [patternChannel1, patternChannel2, patternChannel3];
-        int[] rows = [row1, row2, row3];
+        var channels = new[] { channel1, channel2, channel3 };
 
         int preferred = _arrange.Selection?.Channel ?? 0;
-        int row = patterns[preferred] == showing ? rows[preferred]
-            : patterns[0] == showing ? rows[0]
-            : patterns[1] == showing ? rows[1]
-            : patterns[2] == showing ? rows[2] : -1;
+        foreach (int ch in new[] { preferred, 0, 1, 2 })
+        {
+            if (channels[ch].Pattern == showing)
+            {
+                _pianoRoll.SetPlayRow(channels[ch].Row, channels[ch].Fraction);
+                return;
+            }
+        }
 
-        _pianoRoll.SetPlayRow(row);
+        _pianoRoll.SetPlayRow(-1, 0);
     }
 
     /// <summary>Which step of the selected instrument's programs is sounding. Same idea as the
@@ -181,7 +190,7 @@ internal sealed class DawView : Panel
     public void ClearPlayback()
     {
         _arrange.SetPlayheads(-1, -1, -1);
-        _pianoRoll.SetPlayRow(-1);
+        _pianoRoll.SetPlayRow(-1, 0);
         _instrument.SetPlayheads(-1, -1, -1);
     }
 

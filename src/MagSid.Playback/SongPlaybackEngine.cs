@@ -214,11 +214,18 @@ public sealed class SongPlaybackEngine : IWaveProvider
     /// Null before the first frame has been produced, or once the wanted instant has aged out of
     /// the bounded history.
     /// </summary>
-    public SongSequencer.SequencerPosition? PositionAt(long sample)
+    public SongSequencer.SequencerPosition? PositionAt(long sample) => PositionAt(sample, out _);
+
+    /// <summary>The same, and the sample the returned frame was captured at - so a caller that
+    /// wants to know how far into that frame <paramref name="sample"/> is can work it out, rather
+    /// than seeing the song stand still for a fiftieth of a second at a time.</summary>
+    public SongSequencer.SequencerPosition? PositionAt(long sample, out long capturedAt)
     {
         lock (_historyLock)
         {
             SongSequencer.SequencerPosition? best = null;
+            capturedAt = 0;
+
             foreach (var (samples, position) in _positionHistory)
             {
                 if (samples > sample)
@@ -227,13 +234,30 @@ public sealed class SongPlaybackEngine : IWaveProvider
                 }
 
                 best = position;
+                capturedAt = samples;
+            }
+
+            if (best is not null)
+            {
+                return best;
             }
 
             // Asking for an instant older than the history reaches is not an error - the caller
             // gets the oldest frame still held, which is the closest thing to it that exists.
-            return best ?? (_positionHistory.Count > 0 ? _positionHistory.Peek().Position : null);
+            if (_positionHistory.Count == 0)
+            {
+                return null;
+            }
+
+            var oldest = _positionHistory.Peek();
+            capturedAt = oldest.Samples;
+            return oldest.Position;
         }
     }
+
+    /// <summary>Audio samples in one player frame - what a sub-frame offset is measured
+    /// against.</summary>
+    public const double SamplesPerFrame = SampleRate / FrameRate;
 
     public int Read(byte[] buffer, int offset, int count)
     {

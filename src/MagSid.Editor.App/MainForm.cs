@@ -1236,14 +1236,27 @@ public sealed class MainForm : Form
 
         // The DAW's three views follow the same clock the tracker does - the device's play
         // position, not the sequencer's, which runs a whole output buffer ahead.
-        if (_playbackEngine.PositionAt(LivePlaybackSample()) is { Channels.Count: 3 } position)
+        long heard = LivePlaybackSample();
+        if (_playbackEngine.PositionAt(heard, out long capturedAt) is { Channels.Count: 3 } position)
         {
             _dawView.SetPlayheads(
                 position.Channels[0].OrderPos, position.Channels[1].OrderPos, position.Channels[2].OrderPos);
-            _dawView.SetPlayRow(
-                position.Channels[0].CurrentPatternNumber, position.Channels[0].RowIndex,
-                position.Channels[1].CurrentPatternNumber, position.Channels[1].RowIndex,
-                position.Channels[2].CurrentPatternNumber, position.Channels[2].RowIndex);
+
+            // The row being heard and how far through it - worked out from the sequencer's own
+            // tick countdown rather than its raw row index, which jumps a note at a time. The
+            // part of a frame comes from the audio clock, so the line moves between frames too.
+            double subFrame = (heard - capturedAt) / SongPlaybackEngine.SamplesPerFrame;
+            int speed = _session.Song.Speed;
+
+            var at = new (int Pattern, int Row, double Fraction)[3];
+            for (int ch = 0; ch < 3; ch++)
+            {
+                var channel = position.Channels[ch];
+                var (row, fraction) = PlayheadPosition.Of(channel, position.SpeedCounter, speed, subFrame);
+                at[ch] = (channel.CurrentPatternNumber, row, fraction);
+            }
+
+            _dawView.SetPlayRow(at[0], at[1], at[2]);
         }
 
         // The engine accumulates this itself, frame by frame, so polling at whatever rate this

@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -74,10 +73,7 @@ internal sealed class PianoRollView : Control
     private int _selectedRow = -1;
     private int _playRow = -1;
 
-    // How far into the sounding row the playhead has travelled, and what that row's length is
-    // measured to be - see SetPlayRow.
-    private long _rowStartTicks;
-    private double _rowDurationTicks;
+    // How far through the sounding row the playhead is, 0 to 1 - see SetPlayRow.
     private double _playFraction;
     private (int Row, int Key) _hovered = (-1, -1);
 
@@ -304,65 +300,43 @@ internal sealed class PianoRollView : Control
     public bool AutoScroll { get; set; } = true;
 
     /// <summary>
-    /// Which row is sounding, or -1.
+    /// Which row is sounding, or -1, and how far through it.
     ///
     /// Called on every poll, not only when the row changes: the vertical centring eases toward its
     /// target over several frames and needs the ticks in between to get there - and so does the
-    /// playhead, which glides across the row it is on rather than standing on it until the next
-    /// one. A row's length is measured from the polls themselves rather than worked out from the
-    /// song's speed, so a speed change, a loop or a stall needs no telling; the next row boundary
-    /// corrects the estimate either way.
+    /// playhead, which glides from beat to beat at the song's own speed. The fraction comes from
+    /// the sequencer's tick countdown and the audio clock (see PlayheadPosition), so nothing here
+    /// has to guess how long a row is.
     /// </summary>
-    public void SetPlayRow(int row)
+    public void SetPlayRow(int row, double fraction)
     {
+        // Where the line is now, before either value changes - the region to repaint has to cover
+        // where it was as well as where it goes.
         int previous = _playRow;
-        long now = Stopwatch.GetTimestamp();
+        int before = PlayheadX(_playRow, _playFraction);
 
-        if (row != previous)
-        {
-            if (previous >= 0 && row >= 0 && _rowStartTicks > 0)
-            {
-                double measured = now - _rowStartTicks;
-
-                // Half the old estimate and half the new one: rows are even in length, and one
-                // poll arriving late should not make the next row's glide overshoot.
-                _rowDurationTicks = _rowDurationTicks <= 0 ? measured : (_rowDurationTicks + measured) / 2.0;
-            }
-
-            _rowStartTicks = now;
-        }
-
-        if (row < 0)
-        {
-            _rowDurationTicks = 0;
-            _playFraction = 0;
-        }
-        else if (_rowDurationTicks > 0)
-        {
-            // Never a whole row: the playhead must not reach the next column before the player
-            // does, or it would arrive at a note a hair before the note is heard.
-            _playFraction = Math.Clamp((now - _rowStartTicks) / _rowDurationTicks, 0, 0.98);
-        }
-
-        int before = PlayheadX(previous, previous == row ? _playFraction : 0);
         _playRow = row;
+        _playFraction = row < 0 ? 0 : Math.Clamp(fraction, 0.0, 1.0);
 
         bool scrolled = AutoScroll && row >= 0 && (FollowPlayRow() | CenterOnNotes());
 
-        if (previous != row || scrolled)
+        if (scrolled || (previous < 0) != (row < 0))
         {
             Invalidate();
             return;
         }
 
         // Only the sliver the line moved through. A full repaint sixty times a second to drag one
-        // vertical line across twenty-two pixels would be the most expensive thing the view does.
+        // vertical line across a beat would be the most expensive thing the view does.
         int after = PlayheadX(_playRow, _playFraction);
-        if (after != before)
+        if (after == before)
         {
-            int left = Math.Min(before, after) - 2;
-            Invalidate(new Rectangle(left, GridTop, Math.Abs(after - before) + 4, Height - GridTop));
+            return;
         }
+
+        int left = (before == int.MinValue ? after : after == int.MinValue ? before : Math.Min(before, after)) - 2;
+        int right = Math.Max(before, after) + 2;
+        Invalidate(new Rectangle(left, GridTop, right - left, Height - GridTop));
     }
 
     private int PlayheadX(int row, double fraction) => row < 0
