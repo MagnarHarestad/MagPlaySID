@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Core.Tests;
 
@@ -150,6 +150,33 @@ public class PatternNotesTests
 
         Assert.Equal(2, PatternNotes.Read(pattern)[0].Length);
         Assert.Equal(new ReleaseBlock(2, 2), Assert.Single(PatternNotes.Releases(pattern)));
+    }
+
+    /// <summary>
+    /// The rule a drag on a note's end has to obey, both halves of it: a note that runs straight
+    /// into the next one needs no release, because the next trigger is what stops it - and it
+    /// cannot be stretched past that note either. Pull it back off and the voice has nothing to
+    /// stop it, so a release appears.
+    /// </summary>
+    [Fact]
+    public void A_note_that_runs_into_the_next_one_needs_no_release()
+    {
+        var pattern = PatternOf(
+            new NoteRow(Note("C-4"), 1), new HoldRow(), new NoteRow(Note("E-4"), 1), new HoldRow());
+
+        // It already reaches the next note, and nothing stops the voice but that note's own
+        // trigger.
+        Assert.Equal(2, PatternNotes.Read(pattern)[0].Length);
+        Assert.Empty(PatternNotes.Releases(pattern));
+
+        // Pulled back off it, and now something has to.
+        Assert.True(PatternNotes.SetLength(pattern, 0, 1));
+        Assert.Equal(new ReleaseBlock(1, 1), Assert.Single(PatternNotes.Releases(pattern)));
+
+        // Dragged back out to meet it again, and the release is swallowed rather than left
+        // sounding a gap the note now covers.
+        Assert.True(PatternNotes.SetLength(pattern, 0, 2));
+        Assert.Empty(PatternNotes.Releases(pattern));
     }
 
     [Fact]

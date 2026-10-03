@@ -276,7 +276,12 @@ public sealed class AboutForm : Form
              "cell picks that row and writes nothing into it, which is how an empty row is aimed " +
              "at for a marker, a gate-off or a paste - every click inside the grid itself means a " +
              "note. Loop markers wear their labels there, and a right-click on one takes it " +
-             "away.\n\n");
+             "away.\n\n" +
+             "A new note runs to the end of the pattern, because every row after it is a hold and " +
+             "a hold is the note still sounding. Drag its right edge back to shorten it: a gate-off " +
+             "appears where it now stops, since nothing else would stop the voice. A note that " +
+             "reaches the next note needs none - that note's own trigger is what stops it - and a " +
+             "drag will not pull one past the next note, however far the pointer goes.\n\n");
         Body("The rest of the pattern keys work there too, on the selected row: Insert opens a " +
              "row, Shift+Delete closes one, Shift+End cuts everything after it, and Shift+C and " +
              "Shift+V copy and paste the whole pattern - one clipboard between the two views, so " +

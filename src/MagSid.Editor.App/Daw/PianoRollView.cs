@@ -57,6 +57,12 @@ internal sealed class PianoRollView : Control
     private IReadOnlyList<NoteBlock> _notes = [];
     private IReadOnlyList<ReleaseBlock> _releases = [];
 
+    /// <summary>The note whose end is being dragged, or -1. Only the right edge: a note's start is
+    /// its row, and dragging that would be moving it rather than resizing it.</summary>
+    private int _resizingRow = -1;
+
+    private bool _resizeChanged;
+
     // Beat columns against pattern rows - see BuildColumns.
     private int[] _rowOfColumn = [];
     private int[] _columnOfRow = [];
@@ -112,6 +118,20 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        // One edit for the whole drag, not one per pixel: the song is marked dirty and the views
+        // rebuilt on Edited, and a hundred of those while a mouse moves is a hundred too many.
+        if (_resizingRow >= 0)
+        {
+            _resizingRow = -1;
+            Capture = false;
+
+            if (_resizeChanged)
+            {
+                _resizeChanged = false;
+                Commit();
+            }
+        }
+
         ReleaseAudition();
         base.OnMouseUp(e);
     }
@@ -121,7 +141,21 @@ internal sealed class PianoRollView : Control
     protected override void OnMouseCaptureChanged(EventArgs e)
     {
         if (!Capture)
+        {
             ReleaseAudition();
+
+            // A resize left hanging would follow the pointer again on the next move, with no
+            // button held.
+            if (_resizingRow >= 0)
+            {
+                _resizingRow = -1;
+                if (_resizeChanged)
+                {
+                    _resizeChanged = false;
+                    Commit();
+                }
+            }
+        }
 
         base.OnMouseCaptureChanged(e);
     }
@@ -526,6 +560,13 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        if (_resizingRow >= 0)
+        {
+            DragNoteEnd(e.X);
+            base.OnMouseMove(e);
+            return;
+        }
+
         var at = CellAt(e.Location) ?? (-1, -1);
         if (at != _hovered)
         {
@@ -533,7 +574,71 @@ internal sealed class PianoRollView : Control
             Invalidate();
         }
 
+        // Only over the handle itself, so the cursor says which few pixels do the resizing.
+        var under = at.Item1 >= 0
+            ? _notes.FirstOrDefault(n => at.Item1 >= n.Row && at.Item1 < n.Row + n.Length)
+            : null;
+
+        Cursor = under is not null && KeyForNote(under.Note) == at.Item2 && OverEndHandle(under, e.X)
+            ? Cursors.SizeWE
+            : Cursors.Default;
+
         base.OnMouseMove(e);
+    }
+
+    /// <summary>
+    /// How far a drag may pull a note's end: over the holds behind it, and over its own release and
+    /// whatever that release was holding, but never over the next note.
+    ///
+    /// SetLength would happily take it further - a tracker lets a note be written straight over the
+    /// rows after it, and that is right for typing. It is wrong for a mouse, where overshooting by
+    /// a few pixels would delete a note the hand never meant to touch.
+    /// </summary>
+    private static int DraggableLength(Pattern pattern, int row)
+    {
+        int length = 1;
+        for (int next = row + 1; next < pattern.Rows.Count && pattern.Rows[next] is HoldRow or NoteOffRow; next++)
+        {
+            length++;
+        }
+
+        return length;
+    }
+
+    /// <summary>The right few pixels of a note's block, where a drag resizes it.</summary>
+    private bool OverEndHandle(NoteBlock note, int x)
+    {
+        int key = KeyForNote(note.Note);
+        return BlockBounds(note.Row, note.Length, key) is { } bounds
+               && x >= bounds.Right - 5 && x <= bounds.Right + 1;
+    }
+
+    /// <summary>
+    /// Shortens or lengthens the dragged note to wherever the pointer is.
+    ///
+    /// Nothing is said about gate-offs here because the format already answers it: a note reaches
+    /// as far as the next event and no further, so shortening one into the holds behind it leaves
+    /// rows with nothing sounding, and SetLength writes the release that stops it. A note that runs
+    /// straight into the next note has no slack to give back and needs no release at all.
+    /// </summary>
+    private void DragNoteEnd(int x)
+    {
+        if (_pattern is not { } pattern || _notes.FirstOrDefault(n => n.Row == _resizingRow) is not { } note)
+        {
+            return;
+        }
+
+        int column = (x - KeyboardWidth + _scrollX.Value) / RowWidth;
+        int length = Math.Clamp(column - ColumnOf(note.Row) + 1, 1, DraggableLength(pattern, note.Row));
+
+        if (!PatternNotes.SetLength(pattern, note.Row, length))
+        {
+            return;
+        }
+
+        _resizeChanged = true;
+        Reread();
+        Invalidate();
     }
 
     protected override void OnMouseLeave(EventArgs e)
@@ -600,6 +705,20 @@ internal sealed class PianoRollView : Control
         }
 
         var existing = _notes.FirstOrDefault(n => cell.Row >= n.Row && cell.Row < n.Row + n.Length);
+
+        // The last few pixels of a block are its handle. A new note runs to the end of the
+        // pattern, because every row after it is a hold and a hold is the note still sounding -
+        // so shortening one is the commonest edit there is, and it should not need the keyboard.
+        if (existing is not null && KeyForNote(existing.Note) == cell.Key && OverEndHandle(existing, e.X))
+        {
+            _resizingRow = existing.Row;
+            _resizeChanged = false;
+            _selectedRow = existing.Row;
+            Capture = true;
+            Invalidate();
+            return;
+        }
+
         if (existing is not null && KeyForNote(existing.Note) == cell.Key)
         {
             _selectedRow = existing.Row;
