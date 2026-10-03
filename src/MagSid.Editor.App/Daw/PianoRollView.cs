@@ -395,32 +395,34 @@ internal sealed class PianoRollView : Control
         base.OnResize(e);
     }
 
-    private int GridTop => RulerHeight + HeaderHeight;
+    /// <summary>The grid starts below the beat bar, which is a band of its own rather than a slice
+    /// taken out of the header - the header already has the pattern's name on one side and the
+    /// grid switch on the other, and a strip carved out of it would have been drawn over both.
+    /// </summary>
+    private int GridTop => RulerHeight + HeaderHeight + BeatBarHeight;
 
-    /// <summary>How far a loop marker's tab stands above the grid, into the header strip. It is
-    /// there to be clicked: inside the grid the marker is one row wide and sits among the notes,
-    /// where hitting it means hitting a 22-pixel column without hitting a note.</summary>
-    private const int MarkerTabHeight = 14;
+    /// <summary>The strip of row cells between the header and the grid. Clicking one picks that
+    /// row without writing anything into it - the only way to aim a marker, a gate-off or a paste
+    /// at an empty row, since every click inside the grid itself means a note. Loop markers wear
+    /// their labels here too, which is how they are selected now that they no longer run the
+    /// height of the grid.</summary>
+    private const int BeatBarHeight = 16;
 
-    private int MarkerTabTop => GridTop - MarkerTabHeight;
+    private int BeatBarTop => RulerHeight + HeaderHeight;
 
-    /// <summary>The loop marker whose tab is under a point, if any.</summary>
-    private int? MarkerTabAt(Point point)
+    /// <summary>The row whose cell in the beat bar is under a point, if the point is in the strip
+    /// at all. Rows only - the strip has no pitch, which is the whole point of it.</summary>
+    private int? BeatBarRowAt(Point point)
     {
-        if (point.Y < MarkerTabTop || point.Y >= GridTop)
+        if (_pattern is not { } pattern
+            || point.Y < BeatBarTop || point.Y >= GridTop
+            || point.X < KeyboardWidth || point.X > Width - _scrollY.Width)
         {
             return null;
         }
 
-        foreach (var (row, x, _, _) in VisibleMarkers())
-        {
-            if (point.X >= x && point.X < x + RowWidth)
-            {
-                return row;
-            }
-        }
-
-        return null;
+        int row = (point.X - KeyboardWidth + _scrollX.Value) / RowWidth;
+        return row >= 0 && row < pattern.Rows.Count ? row : null;
     }
 
     private (int Row, int Key)? CellAt(Point point)
@@ -464,19 +466,18 @@ internal sealed class PianoRollView : Control
             return;
         }
 
-        // The tab standing above the grid. Clicking it selects the marker without having to find
-        // its one-row column among the notes; right-click takes it away, as it does on a note.
-        if (MarkerTabAt(e.Location) is { } markerRow && _pattern is { } marked)
+        // The beat bar. Clicking a cell picks that row and writes nothing - which is how an empty
+        // row is aimed at for a marker, a gate-off or a paste. Right-click clears a loop marker
+        // there, the way right-click clears a note in the grid.
+        if (BeatBarRowAt(e.Location) is { } barRow && _pattern is { } marked)
         {
             if (e.Button == MouseButtons.Right)
             {
-                PatternNotes.RemoveMarker(marked, markerRow);
-                _selectedRow = Math.Min(markerRow, marked.Rows.Count - 1);
+                PatternNotes.RemoveMarker(marked, barRow);
                 Commit();
-                return;
             }
 
-            _selectedRow = markerRow;
+            _selectedRow = barRow;
             Invalidate();
             return;
         }
@@ -754,12 +755,8 @@ internal sealed class PianoRollView : Control
 
         DrawLanes(g);
         DrawColumns(g);
-
-        // Over the grid so the band is visible, under the notes so it never sits on one. Only the
-        // tabs go on last, above the grid where there is nothing to cover.
-        DrawMarkerBands(g);
         DrawBlocks(g);
-        DrawMarkerTabs(g);
+        DrawBeatBar(g);
         DrawKeyboard(g);
         DrawPlayhead(g);
     }
@@ -897,34 +894,65 @@ internal sealed class PianoRollView : Control
 
     }
 
-    /// <summary>A loop marker occupies a row of its own and stops a note reaching past it, so it is
-    /// drawn the full height of the grid rather than as a note-sized block - but underneath
-    /// everything, the grid lines included, since it is scenery rather than content.</summary>
-    private void DrawMarkerBands(Graphics g)
-    {
-        int bottom = Height - _scrollX.Height;
-
-        foreach (var (_, x, _, selected) in VisibleMarkers())
-        {
-            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, selected ? 64 : 28)))
-                g.FillRectangle(fill, x, GridTop, RowWidth, bottom - GridTop);
-
-            using var pen = new Pen(DawPalette.Effect, selected ? 2f : 1f);
-            g.DrawLine(pen, x, GridTop, x, bottom);
-        }
-    }
-
-    /// <summary>The handle that stands above the grid, carrying the label. Drawn after the notes so
-    /// it is never hidden by one, and over the header strip where there is nothing to hide.
+    /// <summary>
+    /// The beat bar: one cell per row, tinted by where it falls in the bar, with the selected row
+    /// lit and any loop marker's label sitting in its own cell.
+    ///
+    /// Markers used to run the full height of the grid, which put a band across whatever was
+    /// playing underneath them. Here they are out of the way of the notes and still the easiest
+    /// thing on screen to hit.
     /// </summary>
-    private void DrawMarkerTabs(Graphics g)
+    private void DrawBeatBar(Graphics g)
     {
+        if (_pattern is not { } pattern)
+        {
+            return;
+        }
+
+        int left = KeyboardWidth;
+        int right = Width - _scrollY.Width;
+
+        using (var backing = new SolidBrush(DawPalette.Inset))
+            g.FillRectangle(backing, left, BeatBarTop, right - left, BeatBarHeight);
+
+        for (int row = 0; row < pattern.Rows.Count; row++)
+        {
+            int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
+            if (x + RowWidth < left || x > right)
+            {
+                continue;
+            }
+
+            int width = Math.Min(RowWidth, right - x);
+            var cell = new Rectangle(x, BeatBarTop, width, BeatBarHeight);
+
+            // Every fourth row is a beat and every sixteenth a bar, the same counting the grid
+            // behind it uses - so a glance at the strip says where you are without reading the
+            // ruler.
+            Color fill = row % 16 == 0
+                ? Color.FromArgb(0x24, 0x2E, 0x45)
+                : row % 4 == 0 ? Color.FromArgb(0x1A, 0x22, 0x33) : Color.FromArgb(0x12, 0x17, 0x22);
+
+            using (var brush = new SolidBrush(fill))
+                g.FillRectangle(brush, cell);
+
+            using (var edge = new Pen(Color.FromArgb(0x0A, 0x0D, 0x14)))
+                g.DrawLine(edge, x, BeatBarTop, x, BeatBarTop + BeatBarHeight);
+
+            if (row == _selectedRow)
+            {
+                using var lit = new SolidBrush(DawPalette.WithAlpha(DawPalette.Oscillator, 120));
+                g.FillRectangle(lit, cell);
+            }
+        }
+
         foreach (var (_, x, label, selected) in VisibleMarkers())
         {
-            var tab = new Rectangle(x, MarkerTabTop, RowWidth, MarkerTabHeight);
+            var tab = new Rectangle(x, BeatBarTop, RowWidth, BeatBarHeight);
+
             using (var fill = new SolidBrush(selected
                        ? DawPalette.Effect
-                       : DawPalette.WithAlpha(DawPalette.Effect, 110)))
+                       : DawPalette.WithAlpha(DawPalette.Effect, 130)))
                 g.FillRectangle(fill, tab);
 
             using (var edge = new Pen(DawPalette.Effect))
@@ -932,8 +960,11 @@ internal sealed class PianoRollView : Control
 
             using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
             using var ink = new SolidBrush(selected ? Color.FromArgb(0x10, 0x0B, 0x02) : DawPalette.Text);
-            g.DrawString(label, font, ink, x + 1, MarkerTabTop + 1);
+            g.DrawString(label, font, ink, x + 1, BeatBarTop + 2);
         }
+
+        using (var frame = new Pen(DawPalette.Border))
+            g.DrawLine(frame, left, BeatBarTop, right, BeatBarTop);
     }
 
     /// <summary>Every loop marker currently on screen, with where it sits and what it says. The

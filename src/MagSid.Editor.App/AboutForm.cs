@@ -272,9 +272,11 @@ public sealed class AboutForm : Form
              "time. In its piano roll, Return (or CapsLock) writes a gate-off on the selected " +
              "row and Ctrl+click writes one where you click; the loop markers are Ctrl+L and " +
              "Ctrl+E there, as they are here, because bare S and E are C# and E on the piano " +
-             "keys. Each marker carries a tab above the grid: click it to select the marker " +
-             "without hunting for its one-row column among the notes, right-click it to take the " +
-             "marker away.\n\n");
+             "keys. Between the header and the grid runs a beat bar, one cell per row: clicking a " +
+             "cell picks that row and writes nothing into it, which is how an empty row is aimed " +
+             "at for a marker, a gate-off or a paste - every click inside the grid itself means a " +
+             "note. Loop markers wear their labels there, and a right-click on one takes it " +
+             "away.\n\n");
         Body("The rest of the pattern keys work there too, on the selected row: Insert opens a " +
              "row, Shift+Delete closes one, Shift+End cuts everything after it, and Shift+C and " +
              "Shift+V copy and paste the whole pattern - one clipboard between the two views, so " +
