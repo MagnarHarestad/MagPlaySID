@@ -205,7 +205,35 @@ internal sealed class ArrangeView : Control
         base.OnResize(e);
     }
 
+    /// <summary>Whether a channel is silenced, for drawing. Read from the tracker grid's own
+    /// state rather than kept here, so the two views cannot disagree about which voice is off.
+    /// </summary>
+    public Func<int, bool>? IsChannelMuted { get; set; }
+
+    /// <summary>A click on a lane's header asked for that channel to be muted or unmuted.</summary>
+    public event Action<int>? MuteToggled;
+
     private int LaneTop(int channel) => RulerHeight + (channel * (LaneHeight + LaneGap));
+
+    /// <summary>The lane header under a point - the gutter the channel's name sits in.</summary>
+    private int? HeaderAt(Point point)
+    {
+        if (point.X >= GutterWidth)
+        {
+            return null;
+        }
+
+        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        {
+            int top = LaneTop(channel);
+            if (point.Y >= top && point.Y < top + LaneHeight)
+            {
+                return channel;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The clip under a point, if any.</summary>
     private (int Channel, int Index)? ClipAt(Point point)
@@ -262,6 +290,14 @@ internal sealed class ArrangeView : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         Focus();
+
+        if (HeaderAt(e.Location) is { } header)
+        {
+            MuteToggled?.Invoke(header);
+            Invalidate();
+            base.OnMouseDown(e);
+            return;
+        }
 
         if (ClipAt(e.Location) is { } at)
         {
@@ -361,6 +397,15 @@ internal sealed class ArrangeView : Control
 
                 e.Handled = true;
                 break;
+
+            // Where the channel goes back to at the end of its own order. Stored one-based, as
+            // the file format writes it. The lane already draws it as a loop sign on the entry it
+            // points at, which is the feedback this needs.
+            case Keys.R when e.Control:
+                order.RestartPosition = _selectedIndex + 1;
+                Edited();
+                e.Handled = true;
+                break;
         }
 
         AnnounceSelection();
@@ -457,9 +502,13 @@ internal sealed class ArrangeView : Control
         const int MetaToMeta = 14;
         int textTop = top + Math.Max(4, (LaneHeight - (NameToMeta + MetaToMeta + 12)) / 2);
 
+        // A muted channel says so where its name is, in the same red the tracker's own header
+        // uses - the lane keeps its clips, so without this there is nothing to see.
+        bool muted = IsChannelMuted?.Invoke(channel) ?? false;
+
         using (var nameFont = new Font("Segoe UI", 8.5f, FontStyle.Bold))
-        using (var nameInk = new SolidBrush(DawPalette.Text))
-            g.DrawString($"CH {channel + 1}", nameFont, nameInk, 12, textTop);
+        using (var nameInk = new SolidBrush(muted ? Color.FromArgb(0xFF, 0x66, 0x66) : DawPalette.Text))
+            g.DrawString(muted ? $"CH {channel + 1} MUTE" : $"CH {channel + 1}", nameFont, nameInk, 12, textTop);
 
         using (var metaFont = new Font("Consolas", 7f))
         using (var metaInk = new SolidBrush(DawPalette.TextFaint))
@@ -543,7 +592,7 @@ internal sealed class ArrangeView : Control
         using var font = new Font("Segoe UI", 7.5f);
         using var ink = new SolidBrush(DawPalette.TextFaint);
         g.DrawString(
-            "Click a clip to edit it in the roll below  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  "
+            "Click a clip to edit it in the roll below  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  Ctrl+R restarts here  ·  click a channel name to mute  ·  "
             + "↻ marks where the channel restarts",
             font, ink, 12, y);
     }

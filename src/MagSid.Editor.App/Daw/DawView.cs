@@ -21,6 +21,22 @@ internal sealed class DawView : Panel
     private readonly Splitter _arrangeSplitter = new();
     private readonly Panel _arrangeTop = new();
     private readonly Label _octaveLabel = new();
+
+    /// <summary>Sits over the list while a name is being typed. One box, moved to whichever parent
+    /// the list currently has - it changes homes between the two tabs.</summary>
+    /// <summary>The instrument the open editor belongs to, caught at the start: the list's
+    /// selection can move while it is open, and the typed name belongs to the row it was opened
+    /// on.</summary>
+    private Instrument? _renaming;
+
+    private readonly TextBox _rename = new()
+    {
+        Visible = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = DawPalette.Inset,
+        ForeColor = DawPalette.Text,
+        Font = new Font("Consolas", 9f),
+    };
     private readonly ToggleButton _autoScroll = new("AUTOSCROLL") { Checked = true, Accent = DawPalette.Oscillator };
     private readonly DawInstrumentView _instrument = new();
     private readonly Panel _placeholder = new();
@@ -51,6 +67,18 @@ internal sealed class DawView : Panel
     /// <summary>The song order changed here. The tracker is showing the same list in its own
     /// column, so it has to be told.</summary>
     public event Action? OrderEdited;
+
+    /// <summary>A channel name in the arrange lanes was clicked. The host flips the tracker
+    /// grid's own mute, which is where that state lives.</summary>
+    public event Action<int>? MuteToggleRequested;
+
+    /// <summary>Wired by the host to the tracker grid, so a mute set in either view shows in
+    /// both.</summary>
+    public Func<int, bool>? IsChannelMuted
+    {
+        get => _arrange.IsChannelMuted;
+        set => _arrange.IsChannelMuted = value;
+    }
 
     /// <summary>A note changed in the piano roll.</summary>
     public event Action? PatternEdited;
@@ -248,7 +276,37 @@ internal sealed class DawView : Panel
         _instrumentList.Font = new Font("Consolas", 9f);
         _instrumentList.IntegralHeight = false;
         _instrumentList.ItemHeight = 22;
-        _instrumentList.SelectedIndexChanged += (_, _) => ShowSelectedInstrument();
+        _instrumentList.SelectedIndexChanged += (_, _) =>
+        {
+            CommitRename(keep: true);
+            ShowSelectedInstrument();
+        };
+
+        // F2 or a double-click, the two gestures Explorer taught everyone. The retro view renames
+        // in its own grid cell; this is the same edit, reached the same way a list allows.
+        _instrumentList.DoubleClick += (_, _) => BeginRename();
+        _instrumentList.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.F2)
+                return;
+
+            BeginRename();
+            e.Handled = true;
+        };
+
+        _rename.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode is not (Keys.Enter or Keys.Escape))
+                return;
+
+            CommitRename(keep: e.KeyCode == Keys.Enter);
+            _instrumentList.Focus();
+            e.Handled = e.SuppressKeyPress = true;
+        };
+
+        // Clicking away keeps what was typed: a name half-entered and then lost to a stray click
+        // is worse than one committed early, which is simply renamed again.
+        _rename.LostFocus += (_, _) => CommitRename(keep: true);
 
         var menu = new ContextMenuStrip();
         var copyItem = new ToolStripMenuItem("&Copy", null, (_, _) =>
@@ -280,6 +338,7 @@ internal sealed class DawView : Panel
 
         _arrange.Dock = DockStyle.Fill;
         _arrange.OrderEdited += () => OrderEdited?.Invoke();
+        _arrange.MuteToggled += channel => MuteToggleRequested?.Invoke(channel);
         // The roll below always shows the pattern of the selected clip - selecting is the whole
         // gesture, no double-click and no tab switch.
         _arrange.SelectedPatternChanged += (channel, patternNumber) =>
@@ -352,6 +411,68 @@ internal sealed class DawView : Panel
     /// actually gives, and the lanes would keep a height measured against the wrong row.</summary>
     private void ApplyArrangeHeight() =>
         _arrangeTop.Height = Math.Min(ArrangeView.PreferredHeight, InstrumentStripHeight);
+
+    /// <summary>Opens the editor over the selected row. Positioned past the number, which is not
+    /// part of the name and is not being edited.</summary>
+    private void BeginRename()
+    {
+        if (SelectedInstrument is not { } instrument
+            || _instrumentList.SelectedIndex < 0
+            || _instrumentList.Parent is not { } parent)
+        {
+            return;
+        }
+
+        var item = _instrumentList.GetItemRectangle(_instrumentList.SelectedIndex);
+        if (_rename.Parent != parent)
+        {
+            _rename.Parent?.Controls.Remove(_rename);
+            parent.Controls.Add(_rename);
+        }
+
+        _rename.Bounds = new Rectangle(
+            _instrumentList.Left + 26,
+            _instrumentList.Top + item.Top,
+            Math.Max(40, _instrumentList.Width - 28),
+            Math.Max(item.Height, _rename.PreferredHeight));
+
+        _renaming = instrument;
+        _rename.Text = instrument.Name;
+        _rename.Visible = true;
+        _rename.BringToFront();
+        _rename.Focus();
+        _rename.SelectAll();
+    }
+
+    /// <summary>Takes what was typed, or throws it away. Commits verbatim, the same as the retro
+    /// grid does: a name that happens to match the placeholder is still a name someone chose.
+    /// </summary>
+    private void CommitRename(bool keep)
+    {
+        if (!_rename.Visible)
+        {
+            return;
+        }
+
+        var instrument = _renaming;
+        _renaming = null;
+        _rename.Visible = false;
+
+        if (!keep || instrument is null)
+        {
+            return;
+        }
+
+        string name = _rename.Text.Trim();
+        if (name == instrument.Name)
+        {
+            return;
+        }
+
+        instrument.Name = name;
+        RefreshInstrumentList();
+        InstrumentEdited?.Invoke(instrument);
+    }
 
     private void ShowSelectedInstrument()
     {

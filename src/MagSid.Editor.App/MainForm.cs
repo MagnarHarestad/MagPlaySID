@@ -433,6 +433,8 @@ public sealed class MainForm : Form
         // own release is - see RollPreviewRelease.
         _dawView.NotePreviewRequested += (note, instrument) => PreviewNote(note, instrument, RollPreviewRelease);
         _dawView.NotePreviewReleased += ReleaseJamNote;
+        _dawView.MuteToggleRequested += channel => _trackerGrid.ToggleChannelMute(channel);
+        _dawView.IsChannelMuted = _trackerGrid.IsChannelMuted;
 
         // Through the session, the same as the retro list - so an instrument added here is added
         // the same way, with the same undo behaviour and the same numbering rules.
@@ -895,6 +897,13 @@ public sealed class MainForm : Form
         {
             _dawView.StepOctave(e.Shift);
             e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
+        // Shift+C and Shift+V are the roll's own copy and paste. Swallowing them here would make
+        // Shift+C play an E instead, and the roll would never see the key at all.
+        if (e.Shift && e.KeyCode is Keys.C or Keys.V)
+        {
             return;
         }
 

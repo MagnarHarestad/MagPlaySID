@@ -498,8 +498,9 @@ internal sealed class PianoRollView : Control
         Invalidate();
     }
 
-    protected override bool IsInputKey(Keys keyData) => keyData is
-        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Return;
+    protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) is
+        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Return
+        or Keys.Insert or Keys.End;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
@@ -509,7 +510,7 @@ internal sealed class PianoRollView : Control
             return;
         }
 
-        if (HandleMarkerKey(e, pattern))
+        if (HandleMarkerKey(e, pattern) || HandleRowKey(e, pattern))
         {
             base.OnKeyDown(e);
             return;
@@ -581,6 +582,56 @@ internal sealed class PianoRollView : Control
         }
 
         base.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// What the pattern itself is made of, rather than what is drawn in it: Insert opens a row,
+    /// Shift+Delete closes one, Shift+End cuts everything after the selected row, and Shift+C and
+    /// Shift+V copy and paste the whole pattern. The tracker's own keys, and the clipboard is
+    /// shared with it, so a pattern copied in either view pastes into the other.
+    ///
+    /// Returns true when the key belonged here. Note that plain Delete is left alone - it removes
+    /// the note under the cursor, which is the commoner thing to want in a roll.
+    /// </summary>
+    private bool HandleRowKey(KeyEventArgs e, Pattern pattern)
+    {
+        switch (e.KeyCode)
+        {
+            case Keys.Insert when _selectedRow >= 0:
+                pattern.Rows.Insert(Math.Min(_selectedRow, pattern.Rows.Count), new HoldRow());
+                break;
+
+            case Keys.Delete when e.Shift && _selectedRow >= 0 && _selectedRow < pattern.Rows.Count:
+                pattern.Rows.RemoveAt(_selectedRow);
+                _selectedRow = Math.Min(_selectedRow, pattern.Rows.Count - 1);
+                break;
+
+            // A pattern of nothing would have no row to put anything back on, so the first row
+            // stays whatever happens.
+            case Keys.End when e.Shift && _selectedRow >= 0 && _selectedRow < pattern.Rows.Count - 1:
+                pattern.Rows.RemoveRange(_selectedRow + 1, pattern.Rows.Count - _selectedRow - 1);
+                break;
+
+            case Keys.C when e.Shift:
+                PatternClipboard.Copy(pattern);
+                e.Handled = true;
+                return true;    // read-only: nothing to commit
+
+            case Keys.V when e.Shift:
+                if (!PatternClipboard.PasteInto(pattern, Math.Max(0, _selectedRow)))
+                {
+                    return false;
+                }
+
+                break;
+
+            default:
+                return false;
+        }
+
+        Commit();
+        e.Handled = true;
+        return true;
     }
 
     /// <summary>

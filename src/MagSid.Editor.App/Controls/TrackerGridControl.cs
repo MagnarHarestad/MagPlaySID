@@ -176,7 +176,6 @@ public sealed class TrackerGridControl : Control
     // Shift+C/Shift+V: copy/paste an entire pattern's rows. PatternRow subtypes are immutable
     // records, so the clipboard can hold the same row instances directly - no cloning needed,
     // they're never mutated in place, only replaced wholesale via `pattern.Rows[i] = ...`.
-    private List<PatternRow>? _clipboard;
 
     // Playback-follow: while active, each channel's column scrolls independently, centered on
     // its own live position, reusing the exact same ResolveDisplayRow/DrawCell/PrefixForRow
@@ -291,6 +290,16 @@ public sealed class TrackerGridControl : Control
     public event Action<int, bool>? ChannelMuteChanged;
 
     public bool IsChannelMuted(int channel) => _channelMuted[channel];
+
+    /// <summary>Flips a channel's mute from outside - the DAW's arrange lanes. The state stays
+    /// here rather than being copied there, so the two views always show the same thing and the
+    /// engines are told about it exactly once.</summary>
+    public void ToggleChannelMute(int channel)
+    {
+        _channelMuted[channel] = !_channelMuted[channel];
+        ChannelMuteChanged?.Invoke(channel, _channelMuted[channel]);
+        Invalidate();
+    }
 
     public bool EditMode => _editMode;
 
@@ -1443,14 +1452,14 @@ public sealed class TrackerGridControl : Control
             return;
         }
         var (pattern, _) = target.Value;
-        _clipboard = [.. pattern.Rows];
+        PatternClipboard.Copy(pattern);
     }
 
     /// <summary>Shift+V: overwrites the pattern at the cursor starting at the cursor's row
     /// with the last Shift+C copy, growing that pattern if needed to fit it.</summary>
     private void PastePatternAtCursor()
     {
-        if (_clipboard is null || _clipboard.Count == 0)
+        if (!PatternClipboard.HasContent)
         {
             return;
         }
@@ -1462,11 +1471,7 @@ public sealed class TrackerGridControl : Control
         }
         var (pattern, localRow) = target.Value;
 
-        EnsureRowCount(pattern, localRow + _clipboard.Count);
-        for (int i = 0; i < _clipboard.Count; i++)
-        {
-            pattern.Rows[localRow + i] = _clipboard[i];
-        }
+        PatternClipboard.PasteInto(pattern, localRow);
         Edited?.Invoke();
         Invalidate();
     }
