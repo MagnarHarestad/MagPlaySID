@@ -164,6 +164,11 @@ public sealed class AboutForm : Form
              "No HR all sit on one row (name is edited in the Instruments list itself, not " +
              "repeated here) - Waveform isn't a field of its own any more, it's just row 0 of " +
              "the program grid below (see next).\n\n");
+        Body("Sync and ring modulation live in the same register as the waveform, in bits 1 and " +
+             "2. The DAW view's oscillator panel has them as two switches beside the waveform " +
+             "tabs; here you type the byte, so $11 is a plain triangle, $14 adds ring and $17 " +
+             "adds both. Each modulates against the voice before this one - voice 1's partner is " +
+             "voice 3 - and ring is only audible on triangle.\n\n");
         Body("The program grid is one frame per row, wavetable and filter together: Wave, Note " +
              "and Hex are that frame's wavetable step, Filter, Mode+Vol, Res+Voice, Cutoff and " +
              "Sweep are that frame's filter step. Both halves can be blank independently - a " +

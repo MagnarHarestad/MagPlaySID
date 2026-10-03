@@ -12,6 +12,11 @@ namespace MagSid.Editor.App.Daw;
 /// Left-click picks one waveform on its own, right-click adds or removes one. Choosing a waveform
 /// is the common intent and combining the rare one, so the plain click is the plain meaning.
 ///
+/// Sync and ring sit beside them as their own group. They are bits 1 and 2 of the same register
+/// rather than waveforms, so either button just flips them: there is nothing to be exclusive
+/// about. Both modulate against the voice before this one - voice 1's partner is voice 3 - and
+/// ring is only audible on triangle, which the player leaves to the ear rather than enforcing.
+///
 /// The gate bit is not a tab: it is what starts a note, and an instrument whose base waveform has it
 /// clear would simply never sound. It is forced on, quietly, the same way the assembler's emitter
 /// does it.
@@ -19,6 +24,8 @@ namespace MagSid.Editor.App.Daw;
 internal sealed class WaveformSelector : Control
 {
     private const int TabHeight = 28;
+    private const int ModifierWidth = 86;
+    private const int ModifierGap = 10;
 
     private static readonly (string Label, byte Bit)[] Tabs =
     [
@@ -28,8 +35,18 @@ internal sealed class WaveformSelector : Control
         ("Noise", 0x80),
     ];
 
+    /// <summary>Sync and ring modulation: low-nibble bits, not waveforms. Both work against the
+    /// voice before this one - voice 1's partner is voice 3 - and ring is only audible on
+    /// triangle, which is why they are a separate group rather than two more tabs.</summary>
+    private static readonly (string Label, byte Bit)[] Modifiers =
+    [
+        ("Sync", 0x02),
+        ("Ring", 0x04),
+    ];
+
     private byte _waveform = 0x41;
     private int _hovered = -1;
+    private int _hoveredModifier = -1;
 
     public WaveformSelector()
     {
@@ -58,21 +75,46 @@ internal sealed class WaveformSelector : Control
         }
     }
 
+    /// <summary>Where the waveform tabs end and the modifier group begins. The modifiers take a
+    /// fixed strip on the right so they stay the same size whatever the panel does, and the four
+    /// waveforms share what is left.</summary>
+    private int WaveformStripWidth =>
+        Math.Max(Tabs.Length * 40, Width - (Modifiers.Length * ModifierWidth) - ModifierGap);
+
     private int TabAt(int x, int y)
     {
-        if (y > TabHeight || Width <= 0)
+        if (y > TabHeight || Width <= 0 || x >= WaveformStripWidth)
             return -1;
 
-        int index = x * Tabs.Length / Width;
+        int index = x * Tabs.Length / WaveformStripWidth;
         return Math.Clamp(index, 0, Tabs.Length - 1);
     }
+
+    private int ModifierAt(int x, int y)
+    {
+        if (y > TabHeight)
+            return -1;
+
+        int offset = x - WaveformStripWidth - ModifierGap;
+        if (offset < 0)
+            return -1;
+
+        int index = offset / ModifierWidth;
+        return index < Modifiers.Length ? index : -1;
+    }
+
+    private RectangleF ModifierBox(int index) => new(
+        WaveformStripWidth + ModifierGap + (index * ModifierWidth), 0, ModifierWidth - 2, TabHeight);
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         int at = TabAt(e.X, e.Y);
-        if (at != _hovered)
+        int modifier = ModifierAt(e.X, e.Y);
+
+        if (at != _hovered || modifier != _hoveredModifier)
         {
             _hovered = at;
+            _hoveredModifier = modifier;
             Invalidate();
         }
 
@@ -82,6 +124,7 @@ internal sealed class WaveformSelector : Control
     protected override void OnMouseLeave(EventArgs e)
     {
         _hovered = -1;
+        _hoveredModifier = -1;
         Invalidate();
         base.OnMouseLeave(e);
     }
@@ -91,6 +134,16 @@ internal sealed class WaveformSelector : Control
     /// waveforms, and choosing one should not quietly clear them.</summary>
     protected override void OnMouseClick(MouseEventArgs e)
     {
+        // A modifier is not a waveform, so it has nothing to be exclusive about: either button
+        // simply flips the bit, and the waveform underneath is untouched.
+        int modifier = ModifierAt(e.X, e.Y);
+        if (modifier >= 0 && e.Button is MouseButtons.Left or MouseButtons.Right)
+        {
+            Apply((byte)(_waveform ^ Modifiers[modifier].Bit));
+            base.OnMouseClick(e);
+            return;
+        }
+
         int at = TabAt(e.X, e.Y);
         if (at >= 0 && e.Button is MouseButtons.Left or MouseButtons.Right)
         {
@@ -101,16 +154,26 @@ internal sealed class WaveformSelector : Control
 
             // Clearing the last waveform bit would leave an instrument that cannot make a sound, so
             // the last one standing refuses to go out.
-            next |= 0x01;
-            if ((next & 0xF0) != 0 && next != _waveform)
+            if (((next | 0x01) & 0xF0) != 0)
             {
-                _waveform = next;
-                Invalidate();
-                WaveformChanged?.Invoke(_waveform);
+                Apply(next);
             }
         }
 
         base.OnMouseClick(e);
+    }
+
+    private void Apply(byte next)
+    {
+        byte gated = (byte)(next | 0x01);
+        if (gated == _waveform)
+        {
+            return;
+        }
+
+        _waveform = gated;
+        Invalidate();
+        WaveformChanged?.Invoke(_waveform);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -118,25 +181,21 @@ internal sealed class WaveformSelector : Control
         var g = e.Graphics;
         g.Clear(BackColor);
 
-        float tabWidth = Width / (float)Tabs.Length;
+        float tabWidth = WaveformStripWidth / (float)Tabs.Length;
         for (int i = 0; i < Tabs.Length; i++)
         {
             var (label, bit) = Tabs[i];
-            bool on = (_waveform & bit) != 0;
-            var box = new RectangleF(i * tabWidth, 0, tabWidth - 2, TabHeight);
+            DrawTab(g, new RectangleF(i * tabWidth, 0, tabWidth - 2, TabHeight), label,
+                (_waveform & bit) != 0, _hovered == i, Accent);
+        }
 
-            using (var fill = new SolidBrush(on
-                       ? DawPalette.WithAlpha(Accent, 40)
-                       : _hovered == i ? Color.FromArgb(0x1D, 0x26, 0x38) : Color.FromArgb(0x11, 0x16, 0x1F)))
-                g.FillRectangle(fill, box);
-
-            using (var border = new Pen(on ? Accent : DawPalette.BorderSoft))
-                g.DrawRectangle(border, box.X, box.Y, box.Width, box.Height);
-
-            using var font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
-            using var ink = new SolidBrush(on ? Accent : DawPalette.TextDim);
-            var centred = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(label, font, ink, box, centred);
+        // In the effects colour, not the oscillator's: these two are modulation against the
+        // neighbouring voice, and colouring them like the waveform would suggest they were one.
+        for (int i = 0; i < Modifiers.Length; i++)
+        {
+            var (label, bit) = Modifiers[i];
+            DrawTab(g, ModifierBox(i), label,
+                (_waveform & bit) != 0, _hoveredModifier == i, DawPalette.Effect);
         }
 
         var preview = new Rectangle(0, TabHeight + 6, Width - 1, Height - TabHeight - 8);
@@ -158,6 +217,22 @@ internal sealed class WaveformSelector : Control
 
         // A gesture nobody can see is a gesture nobody finds.
         g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
+    }
+
+    private static void DrawTab(Graphics g, RectangleF box, string label, bool on, bool hovered, Color accent)
+    {
+        using (var fill = new SolidBrush(on
+                   ? DawPalette.WithAlpha(accent, 40)
+                   : hovered ? Color.FromArgb(0x1D, 0x26, 0x38) : Color.FromArgb(0x11, 0x16, 0x1F)))
+            g.FillRectangle(fill, box);
+
+        using (var border = new Pen(on ? accent : DawPalette.BorderSoft))
+            g.DrawRectangle(border, box.X, box.Y, box.Width, box.Height);
+
+        using var font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+        using var ink = new SolidBrush(on ? accent : DawPalette.TextDim);
+        var centred = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        g.DrawString(label, font, ink, box, centred);
     }
 
     /// <summary>Sums whichever waveforms are selected. Combined waveforms on a real SID are an AND
