@@ -397,6 +397,32 @@ internal sealed class PianoRollView : Control
 
     private int GridTop => RulerHeight + HeaderHeight;
 
+    /// <summary>How far a loop marker's tab stands above the grid, into the header strip. It is
+    /// there to be clicked: inside the grid the marker is one row wide and sits among the notes,
+    /// where hitting it means hitting a 22-pixel column without hitting a note.</summary>
+    private const int MarkerTabHeight = 14;
+
+    private int MarkerTabTop => GridTop - MarkerTabHeight;
+
+    /// <summary>The loop marker whose tab is under a point, if any.</summary>
+    private int? MarkerTabAt(Point point)
+    {
+        if (point.Y < MarkerTabTop || point.Y >= GridTop)
+        {
+            return null;
+        }
+
+        foreach (var (row, x, _, _) in VisibleMarkers())
+        {
+            if (point.X >= x && point.X < x + RowWidth)
+            {
+                return row;
+            }
+        }
+
+        return null;
+    }
+
     private (int Row, int Key)? CellAt(Point point)
     {
         if (_pattern is null || point.X < KeyboardWidth || point.Y < GridTop)
@@ -435,6 +461,23 @@ internal sealed class PianoRollView : Control
         if (e.Y < RulerHeight + HeaderHeight && e.Y >= RulerHeight && GridToggleBounds.Contains(e.Location))
         {
             Grid = _grid == RollGrid.Beats ? RollGrid.Rows : RollGrid.Beats;
+            return;
+        }
+
+        // The tab standing above the grid. Clicking it selects the marker without having to find
+        // its one-row column among the notes; right-click takes it away, as it does on a note.
+        if (MarkerTabAt(e.Location) is { } markerRow && _pattern is { } marked)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                PatternNotes.RemoveMarker(marked, markerRow);
+                _selectedRow = Math.Min(markerRow, marked.Rows.Count - 1);
+                Commit();
+                return;
+            }
+
+            _selectedRow = markerRow;
+            Invalidate();
             return;
         }
 
@@ -711,7 +754,12 @@ internal sealed class PianoRollView : Control
 
         DrawLanes(g);
         DrawColumns(g);
+
+        // Over the grid so the band is visible, under the notes so it never sits on one. Only the
+        // tabs go on last, above the grid where there is nothing to cover.
+        DrawMarkerBands(g);
         DrawBlocks(g);
+        DrawMarkerTabs(g);
         DrawKeyboard(g);
         DrawPlayhead(g);
     }
@@ -847,41 +895,75 @@ internal sealed class PianoRollView : Control
             g.DrawLine(pen, x, top, x, bottom);
         }
 
-        // Loop markers occupy a row of their own and stop a note reaching past them, so they are
-        // drawn the full height rather than as a note-sized block.
+    }
+
+    /// <summary>A loop marker occupies a row of its own and stops a note reaching past it, so it is
+    /// drawn the full height of the grid rather than as a note-sized block - but underneath
+    /// everything, the grid lines included, since it is scenery rather than content.</summary>
+    private void DrawMarkerBands(Graphics g)
+    {
+        int bottom = Height - _scrollX.Height;
+
+        foreach (var (_, x, _, selected) in VisibleMarkers())
+        {
+            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, selected ? 64 : 28)))
+                g.FillRectangle(fill, x, GridTop, RowWidth, bottom - GridTop);
+
+            using var pen = new Pen(DawPalette.Effect, selected ? 2f : 1f);
+            g.DrawLine(pen, x, GridTop, x, bottom);
+        }
+    }
+
+    /// <summary>The handle that stands above the grid, carrying the label. Drawn after the notes so
+    /// it is never hidden by one, and over the header strip where there is nothing to hide.
+    /// </summary>
+    private void DrawMarkerTabs(Graphics g)
+    {
+        foreach (var (_, x, label, selected) in VisibleMarkers())
+        {
+            var tab = new Rectangle(x, MarkerTabTop, RowWidth, MarkerTabHeight);
+            using (var fill = new SolidBrush(selected
+                       ? DawPalette.Effect
+                       : DawPalette.WithAlpha(DawPalette.Effect, 110)))
+                g.FillRectangle(fill, tab);
+
+            using (var edge = new Pen(DawPalette.Effect))
+                g.DrawRectangle(edge, tab);
+
+            using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+            using var ink = new SolidBrush(selected ? Color.FromArgb(0x10, 0x0B, 0x02) : DawPalette.Text);
+            g.DrawString(label, font, ink, x + 1, MarkerTabTop + 1);
+        }
+    }
+
+    /// <summary>Every loop marker currently on screen, with where it sits and what it says. The
+    /// repeat count rides with the label: a bare LE loops forever and a numbered one plays the
+    /// section that many times in total, which is too different to leave unsaid.</summary>
+    private IEnumerable<(int Row, int X, string Label, bool Selected)> VisibleMarkers()
+    {
+        if (_pattern is not { } pattern)
+        {
+            yield break;
+        }
+
         for (int row = 0; row < pattern.Rows.Count; row++)
         {
             if (pattern.Rows[row] is not (LoopStartRow or LoopEndRow))
+            {
                 continue;
+            }
 
             int x = KeyboardWidth + (row * RowWidth) - _scrollX.Value;
             if (x < KeyboardWidth || x > Width - _scrollY.Width)
-                continue;
-
-            bool start = pattern.Rows[row] is LoopStartRow;
-            bool selected = row == _selectedRow;
-
-            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, selected ? 70 : 30)))
-                g.FillRectangle(fill, x, top, RowWidth, bottom - top);
-
-            using (var pen = new Pen(DawPalette.Effect, selected ? 2f : 1f))
-                g.DrawLine(pen, x, top, x, bottom);
-
-            if (selected)
             {
-                using var edge = new Pen(DawPalette.Effect);
-                g.DrawRectangle(edge, x, top, RowWidth, bottom - top - 1);
+                continue;
             }
 
-            // The repeat count rides with the label: a bare LE loops forever and a numbered one
-            // plays the section that many times in total, which is too different to leave unsaid.
-            string label = start
+            string label = pattern.Rows[row] is LoopStartRow
                 ? "LS"
                 : pattern.Rows[row] is LoopEndRow { RepeatCount: { } count } ? $"LE{count}" : "LE";
 
-            using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
-            using var ink = new SolidBrush(DawPalette.Effect);
-            g.DrawString(label, font, ink, x + 2, top + 3);
+            yield return (row, x, label, row == _selectedRow);
         }
     }
 
