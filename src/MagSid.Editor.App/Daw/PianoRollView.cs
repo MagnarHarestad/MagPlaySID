@@ -789,11 +789,23 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        // Drawn, not stamped: the button going down is where the note starts and the button
+        // coming up is where it ends. Without this a new note ran to the end of the pattern,
+        // because every row after it was a hold - so a click with no drag is one beat long, and a
+        // drag reaches exactly the beat it is let go on, with the gate-off after it that stops the
+        // voice there. The same resize the end handle uses, so it obeys the same limits: it stops
+        // at the next note rather than writing over it.
         var placed = NoteForKey(cell.Key);
         PatternNotes.SetNote(pattern, cell.Row, placed, _defaultInstrument);
         _selectedRow = cell.Row;
         Audition(placed, _defaultInstrument);
-        Commit();
+
+        Reread();
+        _resizingRow = cell.Row;
+        _resizeChanged = true;     // the note itself is already an edit, drag or no drag
+        Capture = true;
+        DragNoteEnd(e.X);
+        Invalidate();
 
         base.OnMouseDown(e);
     }
