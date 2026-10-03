@@ -1,4 +1,5 @@
-﻿using MagSid.Core.Model;
+﻿using System.Diagnostics;
+using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -69,6 +70,12 @@ internal sealed class PianoRollView : Control
 
     private int _selectedRow = -1;
     private int _playRow = -1;
+
+    // How far into the sounding row the playhead has travelled, and what that row's length is
+    // measured to be - see SetPlayRow.
+    private long _rowStartTicks;
+    private double _rowDurationTicks;
+    private double _playFraction;
     private (int Row, int Key) _hovered = (-1, -1);
 
     public PianoRollView()
@@ -293,19 +300,71 @@ internal sealed class PianoRollView : Control
     /// wherever it is, so a pattern can be edited while the tune carries on.</summary>
     public bool AutoScroll { get; set; } = true;
 
-    /// <summary>Which row is sounding, or -1.</summary>
+    /// <summary>
+    /// Which row is sounding, or -1.
+    ///
+    /// Called on every poll, not only when the row changes: the vertical centring eases toward its
+    /// target over several frames and needs the ticks in between to get there - and so does the
+    /// playhead, which glides across the row it is on rather than standing on it until the next
+    /// one. A row's length is measured from the polls themselves rather than worked out from the
+    /// song's speed, so a speed change, a loop or a stall needs no telling; the next row boundary
+    /// corrects the estimate either way.
+    /// </summary>
     public void SetPlayRow(int row)
     {
-        // Every poll, not only when the row changes: the vertical centring eases toward its target
-        // over several frames and needs the ticks in between to get there.
         int previous = _playRow;
+        long now = Stopwatch.GetTimestamp();
+
+        if (row != previous)
+        {
+            if (previous >= 0 && row >= 0 && _rowStartTicks > 0)
+            {
+                double measured = now - _rowStartTicks;
+
+                // Half the old estimate and half the new one: rows are even in length, and one
+                // poll arriving late should not make the next row's glide overshoot.
+                _rowDurationTicks = _rowDurationTicks <= 0 ? measured : (_rowDurationTicks + measured) / 2.0;
+            }
+
+            _rowStartTicks = now;
+        }
+
+        if (row < 0)
+        {
+            _rowDurationTicks = 0;
+            _playFraction = 0;
+        }
+        else if (_rowDurationTicks > 0)
+        {
+            // Never a whole row: the playhead must not reach the next column before the player
+            // does, or it would arrive at a note a hair before the note is heard.
+            _playFraction = Math.Clamp((now - _rowStartTicks) / _rowDurationTicks, 0, 0.98);
+        }
+
+        int before = PlayheadX(previous, previous == row ? _playFraction : 0);
         _playRow = row;
 
         bool scrolled = AutoScroll && row >= 0 && (FollowPlayRow() | CenterOnNotes());
 
         if (previous != row || scrolled)
+        {
             Invalidate();
+            return;
+        }
+
+        // Only the sliver the line moved through. A full repaint sixty times a second to drag one
+        // vertical line across twenty-two pixels would be the most expensive thing the view does.
+        int after = PlayheadX(_playRow, _playFraction);
+        if (after != before)
+        {
+            int left = Math.Min(before, after) - 2;
+            Invalidate(new Rectangle(left, GridTop, Math.Abs(after - before) + 4, Height - GridTop));
+        }
     }
+
+    private int PlayheadX(int row, double fraction) => row < 0
+        ? int.MinValue
+        : KeyboardWidth + (int)((ColumnOf(row) + fraction) * RowWidth) - _scrollX.Value;
 
     /// <summary>
     /// Autoscroll's vertical half: keeps the notes on screen in the middle of the roll. The target
@@ -1366,7 +1425,7 @@ internal sealed class PianoRollView : Control
         if (_playRow < 0)
             return;
 
-        int x = KeyboardWidth + (ColumnOf(_playRow) * RowWidth) - _scrollX.Value;
+        int x = PlayheadX(_playRow, _playFraction);
         if (x < KeyboardWidth || x > Width - _scrollY.Width)
             return;
 
