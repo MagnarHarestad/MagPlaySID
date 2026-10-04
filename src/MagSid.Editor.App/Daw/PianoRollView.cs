@@ -1,4 +1,5 @@
-﻿using MagSid.Core.Model;
+﻿using System.Drawing.Drawing2D;
+using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -59,6 +60,457 @@ internal sealed class PianoRollView : Control
 
     private IReadOnlyList<NoteBlock> _notes = [];
     private IReadOnlyList<ReleaseBlock> _releases = [];
+
+    private RollTool _tool = RollTool.Draw;
+
+    // Object selection: the notes chosen, a rubber band being dragged, and a move in progress
+    // measured in beat columns and keys from where the drag began.
+    private readonly HashSet<int> _selection = [];
+    private Point? _bandStart;
+    private Rectangle _band;
+    private bool _moving;
+    private int _moveFromColumn;
+    private int _moveFromKey;
+    private int _moveColumns;
+    private int _moveKeys;
+
+    // Range selection, in beat columns, inclusive. -1 when there is none.
+    private int _rangeStart = -1;
+    private int _rangeEnd = -1;
+    private bool _rangeDragging;
+
+    // The line tool's anchor cell and where the pointer is now.
+    private (int Row, int Key)? _lineStart;
+    private Point _linePointer;
+
+    // An erase drag that has taken at least one note, and so owes an edit on release.
+    private bool _erasing;
+    private bool _erased;
+
+    /// <summary>
+    /// What a click in the grid does. Changing tool drops whatever the last one had selected: a
+    /// range is not a selection of notes, and carrying one across would leave keys acting on
+    /// something no longer drawn.
+    /// </summary>
+    public RollTool Tool
+    {
+        get => _tool;
+        set
+        {
+            _tool = value;
+            _selection.Clear();
+            _rangeStart = _rangeEnd = -1;
+            _lineStart = null;
+            _bandStart = null;
+            Cursor = CursorFor(value);
+            Invalidate();
+        }
+    }
+
+    private static Cursor CursorFor(RollTool tool) => tool switch
+    {
+        RollTool.Select => Cursors.Default,
+        RollTool.Range => Cursors.IBeam,
+        RollTool.Erase => Cursors.No,
+        RollTool.Trim => Cursors.SizeWE,
+        RollTool.Split => Cursors.VSplit,
+        RollTool.Glue => Cursors.Hand,
+        _ => Cursors.Cross,
+    };
+
+    /// <summary>The beat column under an x position, unclamped.</summary>
+    private int ColumnAtX(int x) => (x - KeyboardWidth + _scrollX.Value) / RowWidth;
+
+    /// <summary>The column boundary nearest an x position - where the trim and split tools cut,
+    /// since a cut goes between beats rather than through one.</summary>
+    private int BoundaryAtX(int x) =>
+        (int)Math.Round((x - KeyboardWidth + _scrollX.Value) / (double)RowWidth);
+
+    /// <summary>The note whose block is under a cell, on its own key lane - a click beside a note
+    /// at a different pitch is not a click on it.</summary>
+    private NoteBlock? NoteAt((int Row, int Key) cell) =>
+        _notes.FirstOrDefault(n => cell.Row >= n.Row && cell.Row < n.Row + n.Length && KeyForNote(n.Note) == cell.Key);
+
+    /// <summary>Everything a left click does under a tool other than Draw. Returns true when the
+    /// tool took the click - every tool does, so the drawing behaviour never leaks into another.
+    /// </summary>
+    private bool ToolMouseDown(MouseEventArgs e, Pattern pattern, (int Row, int Key) cell)
+    {
+        var note = NoteAt(cell);
+
+        switch (_tool)
+        {
+            case RollTool.Select:
+                // A note's end is still its handle under the selection tool, as in Cubase.
+                if (note is not null && OverEndHandle(note, e.X))
+                {
+                    _resizingRow = note.Row;
+                    _resizeChanged = false;
+                    _selectedRow = note.Row;
+                    Capture = true;
+                    Invalidate();
+                    return true;
+                }
+
+                if (note is null)
+                {
+                    if (!ModifierKeys.HasFlag(Keys.Control))
+                        _selection.Clear();
+
+                    _bandStart = e.Location;
+                    _band = new Rectangle(e.Location, Size.Empty);
+                    Capture = true;
+                    Invalidate();
+                    return true;
+                }
+
+                if (ModifierKeys.HasFlag(Keys.Control))
+                {
+                    if (!_selection.Remove(note.Row))
+                        _selection.Add(note.Row);
+
+                    Invalidate();
+                    return true;
+                }
+
+                if (!_selection.Contains(note.Row))
+                {
+                    _selection.Clear();
+                    _selection.Add(note.Row);
+                }
+
+                _selectedRow = note.Row;
+                Audition(note.Note, note.InstrumentNumber);
+                _moving = true;
+                _moveFromColumn = ColumnAtX(e.X);
+                _moveFromKey = cell.Key;
+                _moveColumns = _moveKeys = 0;
+                Capture = true;
+                Invalidate();
+                return true;
+
+            case RollTool.Range:
+            {
+                int column = Math.Clamp(ColumnAtX(e.X), 0, Math.Max(0, ColumnCount - 1));
+                _rangeStart = _rangeEnd = column;
+                _rangeDragging = true;
+                _selectedRow = RowOf(column);
+                Capture = true;
+                Invalidate();
+                return true;
+            }
+
+            case RollTool.Erase:
+                _erasing = true;
+                _erased = false;
+                Capture = true;
+                EraseUnder(pattern, cell);
+                return true;
+
+            case RollTool.Trim:
+                // Everything after the boundary nearest the click goes, and a release stops the
+                // voice there. A note is never trimmed to nothing.
+                if (note is not null
+                    && PatternNotes.SetLength(pattern, note.Row, Math.Max(1, BoundaryAtX(e.X) - ColumnOf(note.Row))))
+                {
+                    Commit();
+                }
+
+                return true;
+
+            case RollTool.Split:
+                if (note is not null)
+                {
+                    int boundary = BoundaryAtX(e.X);
+                    int start = ColumnOf(note.Row);
+                    if (boundary > start && boundary < start + note.Length
+                        && PatternNotes.Split(pattern, note.Row, RowOf(boundary)))
+                    {
+                        Commit();
+                    }
+                }
+
+                return true;
+
+            case RollTool.Glue:
+                if (note is not null && PatternNotes.Glue(pattern, note.Row))
+                    Commit();
+
+                return true;
+
+            case RollTool.Line:
+                _lineStart = cell;
+                _linePointer = e.Location;
+                Capture = true;
+                Invalidate();
+                return true;
+        }
+
+        return false;
+    }
+
+    private void EraseUnder(Pattern pattern, (int Row, int Key) cell)
+    {
+        if (NoteAt(cell) is not { } note || !PatternNotes.Erase(pattern, note.Row))
+            return;
+
+        _erased = true;
+        _selection.Remove(note.Row);
+        Reread();
+        Invalidate();
+    }
+
+    private int KeyAtY(int y) => Math.Clamp((y - GridTop + _scrollY.Value) / KeyHeight, 0, KeyCount - 1);
+
+    /// <summary>A drag under one of the tools. Returns true when one was in progress.</summary>
+    private bool ToolMouseMove(MouseEventArgs e)
+    {
+        if (_bandStart is { } start)
+        {
+            _band = Rectangle.FromLTRB(
+                Math.Min(start.X, e.X), Math.Min(start.Y, e.Y), Math.Max(start.X, e.X), Math.Max(start.Y, e.Y));
+            Invalidate();
+            return true;
+        }
+
+        if (_moving)
+        {
+            int columns = ColumnAtX(e.X) - _moveFromColumn;
+            int keys = KeyAtY(e.Y) - _moveFromKey;
+            if (columns != _moveColumns || keys != _moveKeys)
+            {
+                _moveColumns = columns;
+                _moveKeys = keys;
+                Invalidate();
+            }
+
+            return true;
+        }
+
+        if (_rangeDragging)
+        {
+            int column = Math.Clamp(ColumnAtX(e.X), 0, Math.Max(0, ColumnCount - 1));
+            if (column != _rangeEnd)
+            {
+                _rangeEnd = column;
+                Invalidate();
+            }
+
+            return true;
+        }
+
+        if (_erasing)
+        {
+            if (_pattern is { } pattern && CellAt(e.Location) is { } cell)
+                EraseUnder(pattern, cell);
+
+            return true;
+        }
+
+        if (_lineStart is not null)
+        {
+            _linePointer = e.Location;
+            Invalidate();
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Ends whatever drag a tool started, and makes it one edit.</summary>
+    private void ToolMouseUp(MouseEventArgs e)
+    {
+        if (_bandStart is not null)
+        {
+            _bandStart = null;
+            foreach (var note in _notes)
+            {
+                if (BlockBounds(note.Row, note.Length, KeyForNote(note.Note)) is { } bounds && bounds.IntersectsWith(_band))
+                    _selection.Add(note.Row);
+            }
+
+            _band = Rectangle.Empty;
+            Capture = false;
+            Invalidate();
+        }
+
+        if (_moving)
+        {
+            _moving = false;
+            Capture = false;
+            if ((_moveColumns != 0 || _moveKeys != 0) && _pattern is { } pattern)
+                ApplyMove(pattern);
+
+            _moveColumns = _moveKeys = 0;
+            Invalidate();
+        }
+
+        if (_rangeDragging)
+        {
+            _rangeDragging = false;
+            Capture = false;
+            Invalidate();
+        }
+
+        if (_erasing)
+        {
+            _erasing = false;
+            Capture = false;
+            if (_erased)
+            {
+                _erased = false;
+                Commit();
+            }
+        }
+
+        if (_lineStart is { } start && _pattern is { } drawn && ColumnCount > 0)
+        {
+            _lineStart = null;
+            Capture = false;
+
+            int endRow = RowOf(Math.Clamp(ColumnAtX(e.X), 0, ColumnCount - 1));
+            PatternNotes.DrawLine(drawn, start.Row, NoteForKey(start.Key), endRow, NoteForKey(KeyAtY(e.Y)), _defaultInstrument);
+            Commit();
+        }
+    }
+
+    /// <summary>Puts the dragged selection down where the drag left it - the same distance in beats
+    /// and in keys for every note in it, so a chord shape or a phrase moves as one.</summary>
+    private void ApplyMove(Pattern pattern)
+    {
+        var moves = new List<(int FromRow, int ToRow, NoteName Note)>();
+        foreach (int row in _selection)
+        {
+            if (_notes.FirstOrDefault(n => n.Row == row) is not { } note)
+                continue;
+
+            int column = Math.Clamp(ColumnOf(row) + _moveColumns, 0, ColumnCount - 1);
+            int key = Math.Clamp(KeyForNote(note.Note) + _moveKeys, 0, KeyCount - 1);
+            moves.Add((row, RowOf(column), NoteForKey(key)));
+        }
+
+        PatternNotes.MoveNotes(pattern, moves);
+
+        // The selection follows the notes to where they went.
+        _selection.Clear();
+        foreach (var move in moves)
+            _selection.Add(move.ToRow);
+
+        if (moves.Count > 0)
+            _selectedRow = moves[0].ToRow;
+
+        Commit();
+    }
+
+    /// <summary>
+    /// Keys that act on a tool's selection rather than on the selected row: Delete takes the
+    /// selected notes or silences the range, Shift+C and Shift+V copy and paste the range, and
+    /// Escape lets go of either. Returns true when the key belonged here.
+    /// </summary>
+    private bool HandleToolKey(KeyEventArgs e, Pattern pattern)
+    {
+        bool hasRange = _tool == RollTool.Range && _rangeStart >= 0;
+        int first = Math.Min(_rangeStart, _rangeEnd);
+        int last = Math.Max(_rangeStart, _rangeEnd);
+
+        switch (e.KeyCode)
+        {
+            case Keys.Escape when _selection.Count > 0 || hasRange:
+                _selection.Clear();
+                _rangeStart = _rangeEnd = -1;
+                Invalidate();
+                break;
+
+            case Keys.Delete when _tool == RollTool.Select && _selection.Count > 0:
+                foreach (int row in _selection.OrderByDescending(r => r))
+                    PatternNotes.Erase(pattern, row);
+
+                _selection.Clear();
+                Commit();
+                break;
+
+            case Keys.Delete when hasRange:
+                PatternNotes.ClearRange(pattern, RowOf(first), RowOf(last));
+                Commit();
+                break;
+
+            case Keys.C when e.Shift && hasRange:
+                PatternClipboard.CopyRange(pattern, RowOf(first), RowOf(last));
+                break;
+
+            case Keys.V when e.Shift && hasRange:
+                if (!PatternClipboard.PasteInto(pattern, RowOf(first)))
+                    return false;
+
+                Commit();
+                break;
+
+            default:
+                return false;
+        }
+
+        e.Handled = true;
+        return true;
+    }
+
+    /// <summary>What the tools have in hand, drawn over the notes: the range, the notes being
+    /// dragged at where they would land, the rubber band, and the line about to be drawn.</summary>
+    private void DrawToolOverlays(Graphics g)
+    {
+        int bottom = Height - _scrollX.Height;
+
+        if (_rangeStart >= 0)
+        {
+            int first = Math.Min(_rangeStart, _rangeEnd);
+            int last = Math.Max(_rangeStart, _rangeEnd);
+            int left = KeyboardWidth + (first * RowWidth) - _scrollX.Value;
+            int right = KeyboardWidth + ((last + 1) * RowWidth) - _scrollX.Value;
+
+            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Oscillator, 34)))
+                g.FillRectangle(fill, left, BeatBarTop, right - left, bottom - BeatBarTop);
+
+            using var edge = new Pen(DawPalette.WithAlpha(DawPalette.Oscillator, 180));
+            g.DrawLine(edge, left, BeatBarTop, left, bottom);
+            g.DrawLine(edge, right, BeatBarTop, right, bottom);
+        }
+
+        if (_moving && (_moveColumns != 0 || _moveKeys != 0))
+        {
+            using var ghost = new Pen(Color.White) { DashStyle = DashStyle.Dash };
+            foreach (int row in _selection)
+            {
+                if (_notes.FirstOrDefault(n => n.Row == row) is not { } note)
+                    continue;
+
+                int key = Math.Clamp(KeyForNote(note.Note) + _moveKeys, 0, KeyCount - 1);
+                if (BlockBounds(row, note.Length, key) is { } bounds)
+                {
+                    bounds.Offset(_moveColumns * RowWidth, 0);
+                    g.DrawRectangle(ghost, bounds);
+                }
+            }
+        }
+
+        if (_bandStart is not null && !_band.IsEmpty)
+        {
+            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Oscillator, 24)))
+                g.FillRectangle(fill, _band);
+
+            using var edge = new Pen(DawPalette.Oscillator) { DashStyle = DashStyle.Dash };
+            g.DrawRectangle(edge, _band);
+        }
+
+        if (_lineStart is { } start)
+        {
+            int x = KeyboardWidth + (ColumnOf(start.Row) * RowWidth) - _scrollX.Value + (RowWidth / 2);
+            int y = GridTop + (start.Key * KeyHeight) - _scrollY.Value + (KeyHeight / 2);
+
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var line = new Pen(DawPalette.Oscillator, 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            g.DrawLine(line, x, y, _linePointer.X, _linePointer.Y);
+            g.SmoothingMode = SmoothingMode.Default;
+        }
+    }
 
     /// <summary>The note whose end is being dragged, or -1. Only the right edge: a note's start is
     /// its row, and dragging that would be moving it rather than resizing it.</summary>
@@ -124,6 +576,8 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        ToolMouseUp(e);
+
         // One edit for the whole drag, not one per pixel: the song is marked dirty and the views
         // rebuilt on Edited, and a hundred of those while a mouse moves is a hundred too many.
         if (_resizingRow >= 0)
@@ -603,6 +1057,12 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        if (ToolMouseMove(e))
+        {
+            base.OnMouseMove(e);
+            return;
+        }
+
         var at = CellAt(e.Location) ?? (-1, -1);
         if (at != _hovered)
         {
@@ -615,9 +1075,9 @@ internal sealed class PianoRollView : Control
             ? _notes.FirstOrDefault(n => at.Item1 >= n.Row && at.Item1 < n.Row + n.Length)
             : null;
 
-        Cursor = under is not null && KeyForNote(under.Note) == at.Item2 && OverEndHandle(under, e.X)
-            ? Cursors.SizeWE
-            : Cursors.Default;
+        bool handle = _tool is RollTool.Draw or RollTool.Select
+                      && under is not null && KeyForNote(under.Note) == at.Item2 && OverEndHandle(under, e.X);
+        Cursor = handle ? Cursors.SizeWE : CursorFor(_tool);
 
         base.OnMouseMove(e);
     }
@@ -714,10 +1174,23 @@ internal sealed class PianoRollView : Control
         if (_pattern is not { } pattern || CellAt(e.Location) is not { } cell)
             return;
 
+        // Right-click deletes the note under it, whatever the tool - and leaves silence there,
+        // rather than the tracker's hold that would let the note before grow into the gap.
         if (e.Button == MouseButtons.Right)
         {
-            PatternNotes.Remove(pattern, cell.Row);
+            if (NoteAt(cell) is { } doomed)
+                PatternNotes.Erase(pattern, doomed.Row);
+            else
+                PatternNotes.Remove(pattern, cell.Row);
+
+            _selection.Remove(cell.Row);
             Commit();
+            return;
+        }
+
+        if (e.Button == MouseButtons.Left && _tool != RollTool.Draw && ToolMouseDown(e, pattern, cell))
+        {
+            base.OnMouseDown(e);
             return;
         }
 
@@ -803,6 +1276,14 @@ internal sealed class PianoRollView : Control
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        // Before the selected-row guard: a selection of notes or a range is something to act on
+        // even when no single row is picked.
+        if (_pattern is { } selected && HandleToolKey(e, selected))
+        {
+            base.OnKeyDown(e);
+            return;
+        }
+
         if (_pattern is not { } pattern || _selectedRow < 0)
         {
             base.OnKeyDown(e);
@@ -1022,6 +1503,7 @@ internal sealed class PianoRollView : Control
         DrawLanes(g);
         DrawColumns(g);
         DrawBlocks(g);
+        DrawToolOverlays(g);
         DrawBeatBar(g);
         DrawKeyboard(g);
         DrawPlayhead(g);
@@ -1298,7 +1780,7 @@ internal sealed class PianoRollView : Control
                 continue;
 
             var colour = DawPalette.ForInstrument(note.InstrumentNumber);
-            bool selected = note.Row == _selectedRow;
+            bool selected = note.Row == _selectedRow || _selection.Contains(note.Row);
 
             using (var fill = new SolidBrush(selected ? ControlPaint.Light(colour, 0.3f) : colour))
                 g.FillRectangle(fill, bounds);

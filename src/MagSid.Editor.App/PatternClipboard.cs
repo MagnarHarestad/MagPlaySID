@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App;
 
@@ -16,9 +16,29 @@ internal static class PatternClipboard
 {
     private static List<PatternRow> _rows = [];
 
+    // A range copy holds playable rows only and pastes over playable rows only, stepping around
+    // loop markers on both ends - a marker is structure, and a range dragged across one is about
+    // the notes, not about moving the loop. A whole-pattern copy is the pattern verbatim.
+    private static bool _isRange;
+
     public static bool HasContent => _rows.Count > 0;
 
-    public static void Copy(Pattern pattern) => _rows = [.. pattern.Rows];
+    public static void Copy(Pattern pattern)
+    {
+        _rows = [.. pattern.Rows];
+        _isRange = false;
+    }
+
+    /// <summary>The playable rows from <paramref name="fromRow"/> to <paramref name="toRow"/> -
+    /// what the piano roll's range tool copies.</summary>
+    public static void CopyRange(Pattern pattern, int fromRow, int toRow)
+    {
+        _rows = [.. pattern.Rows
+            .Skip(Math.Max(0, fromRow))
+            .Take(Math.Max(0, toRow - fromRow + 1))
+            .Where(row => row is not (LoopStartRow or LoopEndRow))];
+        _isRange = true;
+    }
 
     /// <summary>Writes the copied rows over <paramref name="pattern"/> from <paramref name="row"/>
     /// on, growing it with holds if the copy runs past its end. Returns false when there is nothing
@@ -28,6 +48,23 @@ internal static class PatternClipboard
         if (_rows.Count == 0 || row < 0)
         {
             return false;
+        }
+
+        if (_isRange)
+        {
+            int next = row;
+            foreach (var copied in _rows)
+            {
+                while (next < pattern.Rows.Count && pattern.Rows[next] is LoopStartRow or LoopEndRow)
+                    next++;
+
+                if (next >= pattern.Rows.Count)
+                    pattern.Rows.Add(new HoldRow());
+
+                pattern.Rows[next++] = copied;
+            }
+
+            return true;
         }
 
         while (pattern.Rows.Count < row + _rows.Count)

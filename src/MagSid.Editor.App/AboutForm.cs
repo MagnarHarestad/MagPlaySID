@@ -302,6 +302,25 @@ public sealed class AboutForm : Form
              "at, and clicking a channel's name mutes it - the same mute the pattern view shows, " +
              "not a second one. F2 or a double-click renames an instrument in the strip, and so " +
              "does a click on its name at the top of the instrument page.\n\n");
+        Body("Above the piano roll sits a row of tools, Cubase-style - one is always chosen, and " +
+             "it decides what a click in the grid does. Hover one for its name.\n\n");
+        Mono("  Object Selection   Click a note, Ctrl+click to add, drag across the grid to\n" +
+             "                     select several. Drag them to move them; Delete removes them\n" +
+             "  Range Selection    Drag across beats. Delete silences the range, Shift+C copies\n" +
+             "                     it, Shift+V pastes it at its start\n" +
+             "  Draw               Click and drag to write a note as long as the drag\n" +
+             "  Erase              Click or drag across notes to delete them\n" +
+             "  Trim               Click inside a note to cut off everything after that point\n" +
+             "  Split              Click inside a note to cut it in two there\n" +
+             "  Glue               Click a note to join it to the next one\n" +
+             "  Line               Drag from one note to another to draw a run between them\n" +
+             "  Escape             Lets go of a selection or a range\n\n");
+        Body("Deleting a note in the roll - right-click, Erase, or Delete on a selection - leaves " +
+             "silence where it was. The pattern view's own clear turns the row into a hold, which " +
+             "lets the note before it run on into the gap; in a roll that reads as the earlier " +
+             "note growing by itself, so the roll stops it there instead. Moved notes keep their " +
+             "length and leave silence behind them the same way, and a release left saying " +
+             "nothing after an edit is tidied away rather than kept as a wasted byte.\n\n");
         Body("Piano keys across two octaves:\n\n");
         Mono("  Q 2 W 3 E R 5 T 6 Y 7 U     octave +1\n" +
              "  Z S X D C V G B H N J M     selected octave\n" +

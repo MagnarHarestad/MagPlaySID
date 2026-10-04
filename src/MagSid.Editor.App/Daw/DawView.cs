@@ -21,6 +21,7 @@ internal sealed class DawView : Panel
     private readonly Splitter _arrangeSplitter = new();
     private readonly Panel _arrangeTop = new();
     private readonly Label _octaveLabel = new();
+    private readonly RollToolbar _tools = new() { Dock = DockStyle.Top };
 
     /// <summary>Sits over the list while a name is being typed. One box, moved to whichever parent
     /// the list currently has - it changes homes between the two tabs.</summary>
@@ -414,7 +415,13 @@ internal sealed class DawView : Panel
         _arrangeTop.BackColor = DawPalette.Background;
         _arrangeTop.Controls.Add(_arrange);
 
+        // The roll's tools sit directly above it, under the splitter, so they travel with the roll
+        // when the splitter is dragged rather than with the lanes.
+        _tools.ToolChanged += tool => _pianoRoll.Tool = tool;
+        _pianoRoll.Tool = _tools.Tool;
+
         _arrangePage.Controls.Add(_pianoRoll);
+        _arrangePage.Controls.Add(_tools);
         _arrangePage.Controls.Add(_arrangeSplitter);
         _arrangePage.Controls.Add(_arrangeTop);
 

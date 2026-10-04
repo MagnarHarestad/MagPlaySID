@@ -22,7 +22,10 @@ internal sealed class ArrangeView : Control
     private const int MinLaneHeight = 40;
     private const int LaneGap = 4;
     private const int PixelsPerRow = 5;
-    private const int HintHeight = 26;
+    // The line of shortcut text that used to sit under the lanes is gone - the piano roll's tool
+    // row took its place, and the keys it listed are in About. Kept as a named zero rather than
+    // deleted so the height sums below still say what they are made of.
+    private const int HintHeight = 0;
     private const int ScrollHeight = 12;
 
     /// <summary>Tall enough for the ruler, the three lanes, the hint and the scroll bar - and no
@@ -597,7 +600,6 @@ internal sealed class ArrangeView : Control
         for (int channel = 0; channel < Song.ChannelCount; channel++)
             DrawLane(g, song, channel);
 
-        DrawHint(g);
     }
 
     private void DrawRuler(Graphics g, Song song)
@@ -736,19 +738,5 @@ internal sealed class ArrangeView : Control
             using var ink = new SolidBrush(DawPalette.Effect);
             g.DrawString("↻", font, ink, clipped.Right - 14, clipped.Y + 3);
         }
-    }
-
-    private void DrawHint(Graphics g)
-    {
-        int y = LaneTop(Song.ChannelCount) + 8;
-        if (y > Height - 20)
-            return;
-
-        using var font = new Font("Segoe UI", 7.5f);
-        using var ink = new SolidBrush(DawPalette.TextFaint);
-        g.DrawString(
-            "Click a clip to edit it  ·  type its pattern number  ·  drag its end to resize the pattern  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  Ctrl+R restarts here  ·  mute from the channel name  ·  "
-            + "↻ marks where the channel restarts",
-            font, ink, 12, y);
     }
 }
