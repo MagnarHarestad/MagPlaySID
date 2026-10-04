@@ -257,6 +257,8 @@ public sealed class AboutForm : Form
              "  Knob                  Drag up / down (Shift: fine), wheel, double-click to\n" +
              "                        reset, right-click for Learn MIDI / Forget\n" +
              "  CONT / NO HR          See Retro instruments\n" +
+             "  Envelope graph        While the song plays, a dot follows the instrument's\n" +
+             "                        envelope as the SID plays it (the loudest voice using it)\n" +
              "  Program lanes         Click + to add, wheel or Up / Down to change (Shift: x16),\n" +
              "                        right-click or Delete to remove, Insert to add\n" +
              "  Wavetable step        Double-click to type the control byte in hex ($41, 11),\n" +

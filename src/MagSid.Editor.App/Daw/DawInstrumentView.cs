@@ -115,6 +115,8 @@ internal sealed class DawInstrumentView : Panel
     /// dirty and refreshes anything showing this instrument.</summary>
     public event Action<Instrument>? Edited;
 
+    public void SetEnvelopePlayhead((int Stage, int Level)? at) => _envelope.SetPlayhead(at);
+
     public void LoadInstrument(Instrument? instrument)
     {
         // Another instrument's step 02 is not this one's: a selection carried across would point

@@ -63,6 +63,58 @@ public sealed class SongPlaybackEngine : IWaveProvider
         public int Instrument1, Wave1, Arp1;
         public int Instrument2, Wave2, Arp2;
         public int FilterInstrument, FilterStep;
+
+        // Each voice's envelope as the frame starts: whose it is, its stage and its level.
+        public int EnvInstrument0, EnvState0, EnvLevel0;
+        public int EnvInstrument1, EnvState1, EnvLevel1;
+        public int EnvInstrument2, EnvState2, EnvLevel2;
+    }
+
+    /// <summary>
+    /// Where this instrument's envelope was at that point in the audio: the stage (0 attack,
+    /// 1 decay/sustain, 2 release) and the level, 0-255. False when no voice playing it was
+    /// making any sound. With the instrument on more than one voice, the loudest one.
+    /// </summary>
+    public bool EnvelopeAt(long sample, int instrumentNumber, out int stage, out int level)
+    {
+        stage = -1;
+        level = 0;
+
+        lock (_playheadLock)
+        {
+            int newest = -1;
+            for (int i = 0; i < _playheadCount; i++)
+            {
+                int index = (_playheadNext - _playheadCount + i + _playheads.Length) % _playheads.Length;
+                if (_playheads[index].Samples > sample)
+                {
+                    break;
+                }
+
+                newest = index;
+            }
+
+            if (newest < 0)
+            {
+                return false;
+            }
+
+            ref var frame = ref _playheads[newest];
+            Consider(frame.EnvInstrument0, frame.EnvState0, frame.EnvLevel0, ref stage, ref level);
+            Consider(frame.EnvInstrument1, frame.EnvState1, frame.EnvLevel1, ref stage, ref level);
+            Consider(frame.EnvInstrument2, frame.EnvState2, frame.EnvLevel2, ref stage, ref level);
+        }
+
+        return level > 0;
+
+        void Consider(int instrument, int voiceStage, int voiceLevel, ref int bestStage, ref int bestLevel)
+        {
+            if (instrument == instrumentNumber && voiceLevel > bestLevel)
+            {
+                bestStage = voiceStage;
+                bestLevel = voiceLevel;
+            }
+        }
     }
 
     /// <summary>The program steps this instrument was on at that point in the audio, or nothing
@@ -124,6 +176,9 @@ public sealed class SongPlaybackEngine : IWaveProvider
             (frame.Instrument1, frame.Wave1, frame.Arp1) = _sequencer.VoicePlayhead(1);
             (frame.Instrument2, frame.Wave2, frame.Arp2) = _sequencer.VoicePlayhead(2);
             (frame.FilterInstrument, frame.FilterStep) = _sequencer.FilterPlayhead();
+            (frame.EnvInstrument0, frame.EnvState0, frame.EnvLevel0) = Envelope(0);
+            (frame.EnvInstrument1, frame.EnvState1, frame.EnvLevel1) = Envelope(1);
+            (frame.EnvInstrument2, frame.EnvState2, frame.EnvLevel2) = Envelope(2);
 
             _playheadNext = (_playheadNext + 1) % _playheads.Length;
             if (_playheadCount < _playheads.Length)
@@ -131,6 +186,12 @@ public sealed class SongPlaybackEngine : IWaveProvider
                 _playheadCount++;
             }
         }
+    }
+
+    private (int Instrument, int State, int Level) Envelope(int voice)
+    {
+        var envelope = _sid.Voice(voice).Envelope;
+        return (_sequencer.VoiceInstrument(voice), (int)envelope.State, envelope.Output());
     }
 
     private readonly object _historyLock = new();

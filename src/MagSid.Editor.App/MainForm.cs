@@ -1283,6 +1283,10 @@ public sealed class MainForm : Form
             _playbackEngine.PlayheadAt(LivePlaybackSample(), dawSelected,
                 out int dawWave, out int dawArp, out int dawFilter);
             _dawView.SetProgramPlayheads(dawWave, dawArp, dawFilter);
+            _dawView.SetEnvelopePlayhead(
+                _playbackEngine.EnvelopeAt(LivePlaybackSample(), dawSelected, out int envStage, out int envLevel)
+                    ? (envStage, envLevel)
+                    : null);
         }
         else
         {

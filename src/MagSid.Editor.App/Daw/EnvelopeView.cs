@@ -24,6 +24,7 @@ internal sealed class EnvelopeView : Control
     private int _decay;
     private int _sustain;
     private int _release;
+    private (int Stage, int Level)? _playhead;
 
     public EnvelopeView()
     {
@@ -39,6 +40,17 @@ internal sealed class EnvelopeView : Control
         _decay = Math.Clamp(decay, 0, 15);
         _sustain = Math.Clamp(sustain, 0, 15);
         _release = Math.Clamp(release, 0, 15);
+        Invalidate();
+    }
+
+    /// <summary>Where the instrument's envelope is while the song plays: the SID's own stage (0
+    /// attack, 1 decay/sustain, 2 release) and level, 0-255. Null hides the marker.</summary>
+    public void SetPlayhead((int Stage, int Level)? at)
+    {
+        if (_playhead == at)
+            return;
+
+        _playhead = at;
         Invalidate();
     }
 
@@ -108,6 +120,16 @@ internal sealed class EnvelopeView : Control
         using (var pen = new Pen(DawPalette.Envelope, 1.7f))
             g.DrawLines(pen, curve);
 
+        if (_playhead is { } at && MarkerAt(at, x0, x1, x2, x3, x4, top, bottom) is { } mark)
+        {
+            using (var line = new Pen(DawPalette.WithAlpha(DawPalette.Envelope, 34)))
+                g.DrawLine(line, mark.X, top - 4, mark.X, bottom);
+            using (var halo = new SolidBrush(DawPalette.WithAlpha(DawPalette.Envelope, 45)))
+                g.FillEllipse(halo, mark.X - 5, mark.Y - 5, 10, 10);
+            using (var dot = new SolidBrush(DawPalette.WithAlpha(Color.White, 210)))
+                g.FillEllipse(dot, mark.X - 2.2f, mark.Y - 2.2f, 4.4f, 4.4f);
+        }
+
         g.SmoothingMode = SmoothingMode.Default;
 
         using var font = new Font("Segoe UI", 6.75f, FontStyle.Bold);
@@ -119,6 +141,46 @@ internal sealed class EnvelopeView : Control
         string summary = $"{Describe(attack)} · {Describe(decay)} · {_sustain:X} · {Describe(release)}";
         var right2 = new StringFormat { Alignment = StringAlignment.Far };
         g.DrawString(summary, timeFont, timeInk, new RectangleF(0, 2, Width - 8, 12), right2);
+    }
+
+    /// <summary>
+    /// The marker's place on the drawn shape. Height is the real level; across, attack and
+    /// release go by how far the level has climbed or fallen, and decay by how far it is from peak
+    /// to sustain. Holding at sustain sits where the plateau starts - its width is however long the
+    /// note lasts, which the shape cannot know.
+    /// </summary>
+    private PointF? MarkerAt((int Stage, int Level) at, float x0, float x1, float x2, float x3, float x4,
+                             int top, int bottom)
+    {
+        float level = Math.Clamp(at.Level, 0, 255);
+        float sustainLevel = _sustain * 17f;   // the SID's sustain table: $x -> $xx
+        float y = bottom - ((bottom - top) * (level / 255f));
+
+        float x;
+        switch (at.Stage)
+        {
+            case 0:
+                x = x0 + ((x1 - x0) * (level / 255f));
+                break;
+
+            case 1:
+                x = level > sustainLevel && sustainLevel < 255f
+                    ? x1 + ((x2 - x1) * ((255f - level) / (255f - sustainLevel)))
+                    : x2;
+                break;
+
+            case 2:
+                if (level <= 0f)
+                    return null;
+                float fallen = sustainLevel > 0f ? Math.Clamp(1f - (level / sustainLevel), 0f, 1f) : 1f;
+                x = x3 + ((x4 - x3) * fallen);
+                break;
+
+            default:
+                return null;
+        }
+
+        return new PointF(x, y);
     }
 
     private static string Describe(double milliseconds) =>

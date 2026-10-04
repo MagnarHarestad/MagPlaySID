@@ -1,4 +1,4 @@
-﻿using MagSid.Core.Model;
+using MagSid.Core.Model;
 using MagSid.Core.Validation;
 
 namespace MagSid.Playback;
@@ -216,6 +216,10 @@ public sealed class SongSequencer
             ? (voice.InstrumentNumber, voice.LastWavetableStep, voice.LastArpeggioStep)
             : (-1, -1, -1);
     }
+
+    /// <summary>The instrument a voice last triggered, or -1. Unlike <see cref="VoicePlayhead"/>
+    /// this outlasts the programs: a released note is still that instrument's envelope.</summary>
+    public int VoiceInstrument(int channel) => _channels[channel].Voice.InstrumentNumber;
 
     /// <summary>The shared filter's owner and its last played step.</summary>
     public (int Instrument, int Step) FilterPlayhead() =>

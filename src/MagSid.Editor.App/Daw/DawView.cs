@@ -197,8 +197,13 @@ internal sealed class DawView : Panel
     public void SetProgramPlayheads(int wavetableStep, int arpeggioStep, int filterStep) =>
         _instrument.SetPlayheads(wavetableStep, arpeggioStep, filterStep);
 
+    /// <summary>Where the selected instrument's envelope is in the song - (stage, level), or null
+    /// while it is silent.</summary>
+    public void SetEnvelopePlayhead((int Stage, int Level)? at) => _instrument.SetEnvelopePlayhead(at);
+
     public void ClearPlayback()
     {
+        _instrument.SetEnvelopePlayhead(null);
         _arrange.SetPlayheads(-1, -1, -1);
         _pianoRoll.SetPlayRow(-1, 0);
         _instrument.SetPlayheads(-1, -1, -1);
