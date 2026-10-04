@@ -1,4 +1,4 @@
-namespace MagSid.Sid;
+﻿namespace MagSid.Sid;
 
 /// <summary>
 /// Direct port of reSID's wave.h/wave.cc. A 24-bit accumulator is the basis for
@@ -11,6 +11,31 @@ namespace MagSid.Sid;
 /// </summary>
 public sealed class WaveformGenerator
 {
+    /// <summary>
+    /// The floating waveform DAC. Switch to <c>false</c> to go back to reSID 0.16's behaviour,
+    /// where selecting no waveform drops the output to 0 at once - this one line is the whole of
+    /// reversing it; everything it governs lives in this class, marked "floating DAC".
+    ///
+    /// On a real SID, selecting no waveform does not ground the waveform DAC: its input floats and
+    /// holds the last value, which then fades away. Newer reSID versions model that, and so does
+    /// this. Without it a waveform switched off mid-note - which every hard restart does, writing
+    /// $08 to the control register while the previous note is still releasing - drops to 0 in one
+    /// sample, and the step is heard as a click on every such note.
+    /// </summary>
+    public static bool FloatingWaveformOutput { get; set; } = true;
+
+    // floating DAC: how long the held value lasts, then how often it loses bits while fading, in
+    // cycles. The figures are libsidplayfp's reSIDfp ones, measured on warm 6581R3/R4 and 8580R5
+    // chips; the 8580 holds far longer.
+    private const int FloatingTtl6581 = 54_000;
+    private const int FloatingFade6581 = 1_400;
+    private const int FloatingTtl8580 = 800_000;
+    private const int FloatingFade8580 = 50_000;
+
+    private bool _is6581 = true;
+    private int _floatingOutput;
+    private int _floatingCycles;
+
     private WaveformGenerator? _syncSource;
     private WaveformGenerator? _syncDest;
 
@@ -48,6 +73,8 @@ public sealed class WaveformGenerator
 
     public void SetChipModel(ChipModel model)
     {
+        _is6581 = model == ChipModel.Mos6581;
+
         if (model == ChipModel.Mos6581)
         {
             _waveST = WaveformTables.Wave6581_ST;
@@ -67,6 +94,8 @@ public sealed class WaveformGenerator
     /// <summary>SID clocking - 1 cycle.</summary>
     public void Clock()
     {
+        AgeFloatingOutput(1);
+
         if (_test != 0)
         {
             return;
@@ -89,6 +118,8 @@ public sealed class WaveformGenerator
     /// <summary>SID clocking - delta_t cycles.</summary>
     public void Clock(int deltaT)
     {
+        AgeFloatingOutput(deltaT);
+
         if (_test != 0)
         {
             return;
@@ -163,6 +194,35 @@ public sealed class WaveformGenerator
         _sync = 0;
 
         _msbRising = false;
+
+        _floatingOutput = 0;
+        _floatingCycles = 0;
+    }
+
+    /// <summary>
+    /// floating DAC: holds the value the waveform had when it was switched off, then fades it the
+    /// way reSIDfp does - each step clears every bit that has no set bit above it, so the value
+    /// sinks to 0 in a dozen steps rather than vanishing at once. Runs whatever the test bit says:
+    /// the DAC fades on its own, and a hard restart holds TEST the whole time it is fading.
+    /// </summary>
+    private void AgeFloatingOutput(int cycles)
+    {
+        if (!FloatingWaveformOutput || _waveform != 0 || _floatingCycles == 0)
+        {
+            return;
+        }
+
+        _floatingCycles -= cycles;
+        while (_floatingCycles <= 0 && _floatingOutput != 0)
+        {
+            _floatingOutput &= _floatingOutput >> 1;
+            _floatingCycles += _is6581 ? FloatingFade6581 : FloatingFade8580;
+        }
+
+        if (_floatingOutput == 0)
+        {
+            _floatingCycles = 0;
+        }
     }
 
     public void WriteFreqLo(int freqLo) => _freq = (_freq & 0xff00) | (freqLo & 0x00ff);
@@ -175,7 +235,17 @@ public sealed class WaveformGenerator
 
     public void WriteControlReg(int control)
     {
-        _waveform = (control >> 4) & 0x0f;
+        int waveformNext = (control >> 4) & 0x0f;
+
+        // floating DAC: switching the waveform off keeps what it was putting out at this moment,
+        // measured before the test bit below can clear the accumulator it comes from.
+        if (FloatingWaveformOutput && waveformNext == 0 && _waveform != 0)
+        {
+            _floatingOutput = Output();
+            _floatingCycles = _is6581 ? FloatingTtl6581 : FloatingTtl8580;
+        }
+
+        _waveform = waveformNext;
         _ringMod = control & 0x04;
         _sync = control & 0x02;
 
@@ -219,7 +289,8 @@ public sealed class WaveformGenerator
         _ => 0,
     };
 
-    private int OutputNone() => 0x000;
+    // floating DAC: the held, fading value - or reSID 0.16's hard 0 with the switch off.
+    private int OutputNone() => FloatingWaveformOutput ? _floatingOutput : 0x000;
 
     // Triangle: the upper 12 bits of the accumulator are used. The MSB creates the
     // falling edge by inverting the lower 11 bits, then is thrown away (left-shifted,
