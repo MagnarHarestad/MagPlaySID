@@ -201,9 +201,14 @@ internal sealed class DawView : Panel
     /// while it is silent.</summary>
     public void SetEnvelopePlayhead((int Stage, int Level)? at) => _instrument.SetEnvelopePlayhead(at);
 
+    /// <summary>Where the selected instrument's filter program is in the song - (frame, cutoff),
+    /// or null while the filter is not its own.</summary>
+    public void SetCutoffPlayhead((int Frame, int Cutoff)? at) => _instrument.SetCutoffPlayhead(at);
+
     public void ClearPlayback()
     {
         _instrument.SetEnvelopePlayhead(null);
+        _instrument.SetCutoffPlayhead(null);
         _arrange.SetPlayheads(-1, -1, -1);
         _pianoRoll.SetPlayRow(-1, 0);
         _instrument.SetPlayheads(-1, -1, -1);

@@ -1287,6 +1287,10 @@ public sealed class MainForm : Form
                 _playbackEngine.EnvelopeAt(LivePlaybackSample(), dawSelected, out int envStage, out int envLevel)
                     ? (envStage, envLevel)
                     : null);
+            _dawView.SetCutoffPlayhead(
+                _playbackEngine.FilterAt(LivePlaybackSample(), dawSelected, out int filterFrame, out int cutoff)
+                    ? (filterFrame, cutoff)
+                    : null);
         }
         else
         {

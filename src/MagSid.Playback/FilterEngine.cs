@@ -20,6 +20,12 @@ public sealed class FilterEngine
     public int LastStep { get; private set; } = -1;
     public int OwnerInstrumentNumber { get; private set; } = -1;
 
+    /// <summary>Frames stepped since the owner claimed the filter - 1 on the frame its first step
+    /// plays - and the cutoff last written to $D416, by a step or by the sweep. For showing where
+    /// the filter is, not used by the stepping itself.</summary>
+    public int FramesSinceClaim { get; private set; }
+    public int Cutoff { get; private set; } = -1;
+
     // The sweep outlives the program that started it, so it lives here rather than being reset
     // by Claim. A free-running phase, not a cutoff with bounds - see StepSweep.
     private int _phase;
@@ -35,6 +41,7 @@ public sealed class FilterEngine
         _stepIndex = 0;
         LastStep = -1;
         OwnerInstrumentNumber = instrumentNumber;
+        FramesSinceClaim = 0;
     }
 
     /// <summary>One frame: the program step, then the sweep - the same order SongSequencer.Frame
@@ -42,6 +49,9 @@ public sealed class FilterEngine
     /// stands.</summary>
     public void StepFrame(Action<int, int> write)
     {
+        if (_program is not null)
+            FramesSinceClaim++;
+
         StepProgram(write);
         StepSweep(write);
     }
@@ -66,6 +76,7 @@ public sealed class FilterEngine
         }
 
         write(0x16, step.Cutoff);
+        Cutoff = step.Cutoff;
     }
 
     /// <summary>
@@ -85,5 +96,6 @@ public sealed class FilterEngine
 
         int folded = _phase >= 0x80 ? _phase ^ 0xFF : _phase;
         write(0x16, folded << 1);
+        Cutoff = folded << 1;
     }
 }

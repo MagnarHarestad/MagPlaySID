@@ -221,6 +221,11 @@ public sealed class SongSequencer
     /// this outlasts the programs: a released note is still that instrument's envelope.</summary>
     public int VoiceInstrument(int channel) => _channels[channel].Voice.InstrumentNumber;
 
+    /// <summary>The shared filter's owner, the frames since it claimed the filter, and the cutoff
+    /// last written - see FilterEngine.</summary>
+    public (int Instrument, int Frames, int Cutoff) FilterState() =>
+        (_filter.OwnerInstrumentNumber, _filter.FramesSinceClaim, _filter.Cutoff);
+
     /// <summary>The shared filter's owner and its last played step.</summary>
     public (int Instrument, int Step) FilterPlayhead() =>
         (_filter.OwnerInstrumentNumber, _filter.LastStep);

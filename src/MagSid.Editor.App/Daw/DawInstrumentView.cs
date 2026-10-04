@@ -117,6 +117,8 @@ internal sealed class DawInstrumentView : Panel
 
     public void SetEnvelopePlayhead((int Stage, int Level)? at) => _envelope.SetPlayhead(at);
 
+    public void SetCutoffPlayhead((int Frame, int Cutoff)? at) => _filterStep.SetPlayhead(at);
+
     public void LoadInstrument(Instrument? instrument)
     {
         // Another instrument's step 02 is not this one's: a selection carried across would point

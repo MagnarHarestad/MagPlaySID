@@ -270,7 +270,9 @@ public sealed class AboutForm : Form
              "                        in hex ($40 or 40). SETUP makes it a setup record\n" +
              "                        with mode, volume, resonance, routing and sweep\n" +
              "  Cutoff graph          The filter program played frame by frame, sweep included.\n" +
-             "                        Scaled to its highest cutoff (shown top left)\n\n");
+             "                        Scaled to its highest cutoff (shown top left). While the\n" +
+             "                        song plays, a dot shows the frame and the real cutoff\n" +
+             "                        (a running sweep can put it off the drawn curve)\n\n");
 
         // ------------------------------------------------------------------------------------
         Heading("Tools");

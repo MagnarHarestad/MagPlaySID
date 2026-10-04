@@ -50,6 +50,8 @@ internal sealed class FilterStepEditor : Panel
 
     public event Action? Edited;
 
+    public void SetPlayhead((int Frame, int Cutoff)? at) => _cutoffGraph.SetPlayhead(at);
+
     public void ShowStep(Instrument? instrument, int step)
     {
         _instrument = instrument;

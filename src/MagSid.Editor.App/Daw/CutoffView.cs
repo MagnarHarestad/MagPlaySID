@@ -16,6 +16,8 @@ internal sealed class CutoffView : Control
     private IReadOnlyList<FilterStep> _program = [];
     private int[] _cutoffs = [];
     private int _selected = -1;
+    private int _sweep;
+    private (int Frame, int Cutoff)? _playhead;
 
     public CutoffView()
     {
@@ -31,13 +33,23 @@ internal sealed class CutoffView : Control
         _program = [.. program];
         _cutoffs = Play(_program);
         _selected = selectedStep;
+        _sweep = SweepOf(_program);
         Invalidate();
     }
 
-    /// <summary>The cutoff each frame ends on, -1 before anything has been written. The program
-    /// takes one frame per step; after it, a running sweep gets long enough to show one full
-    /// triangle and a still cutoff a short tail.</summary>
-    private static int[] Play(IReadOnlyList<FilterStep> program)
+    /// <summary>Where the program is while the song plays: the frame counted from its first step,
+    /// and the cutoff the SID was actually given then. Null hides the marker.</summary>
+    public void SetPlayhead((int Frame, int Cutoff)? at)
+    {
+        if (_playhead == at)
+            return;
+
+        _playhead = at;
+        Invalidate();
+    }
+
+    /// <summary>The sweep left running when the program ends - the last setup step's.</summary>
+    private static int SweepOf(IReadOnlyList<FilterStep> program)
     {
         int sweep = 0;
         foreach (var step in program)
@@ -46,6 +58,30 @@ internal sealed class CutoffView : Control
                 sweep = step.SweepRate;
         }
 
+        return sweep;
+    }
+
+    /// <summary>The graph frame a played frame lands on. Past the end, a running sweep goes round
+    /// its period again when the graph holds a whole one; anything else stays on the last frame,
+    /// where the cutoff has settled.</summary>
+    private int GraphFrame(int frame)
+    {
+        if (frame < _cutoffs.Length)
+            return frame;
+
+        int period = _sweep == 0 ? 0 : 512 / Math.Abs(_sweep);
+        int tail = _cutoffs.Length - _program.Count;
+        return period > 0 && period <= tail
+            ? _program.Count + ((frame - _program.Count) % period)
+            : _cutoffs.Length - 1;
+    }
+
+    /// <summary>The cutoff each frame ends on, -1 before anything has been written. The program
+    /// takes one frame per step; after it, a running sweep gets long enough to show one full
+    /// triangle and a still cutoff a short tail.</summary>
+    private static int[] Play(IReadOnlyList<FilterStep> program)
+    {
+        int sweep = SweepOf(program);
         int tail = sweep == 0 ? 16 : Math.Min(256, 512 / Math.Abs(sweep));
         int frames = Math.Clamp(program.Count + tail, 32, 384);
 
@@ -136,6 +172,23 @@ internal sealed class CutoffView : Control
             using (var pen = new Pen(DawPalette.Filter, 1.7f))
                 g.DrawLines(pen, curve.ToArray());
 
+            g.SmoothingMode = SmoothingMode.Default;
+        }
+
+        // The playing frame, at the cutoff the SID really has: a sweep runs on from wherever its
+        // phase is, so the dot can sit off a curve drawn from a sweep started at zero.
+        if (_playhead is { } at && at.Frame >= 0)
+        {
+            float x = X(GraphFrame(at.Frame)) + (frameWidth / 2);
+            float y = Y(Math.Min(at.Cutoff, ceiling));
+
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var line = new Pen(DawPalette.WithAlpha(DawPalette.Filter, 34)))
+                g.DrawLine(line, x, top - 4, x, bottom);
+            using (var halo = new SolidBrush(DawPalette.WithAlpha(DawPalette.Filter, 45)))
+                g.FillEllipse(halo, x - 5, y - 5, 10, 10);
+            using (var dot = new SolidBrush(DawPalette.WithAlpha(Color.White, 210)))
+                g.FillEllipse(dot, x - 2.2f, y - 2.2f, 4.4f, 4.4f);
             g.SmoothingMode = SmoothingMode.Default;
         }
 

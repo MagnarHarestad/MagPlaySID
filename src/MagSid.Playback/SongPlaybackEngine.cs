@@ -63,11 +63,53 @@ public sealed class SongPlaybackEngine : IWaveProvider
         public int Instrument1, Wave1, Arp1;
         public int Instrument2, Wave2, Arp2;
         public int FilterInstrument, FilterStep;
+        public int FilterFrames, FilterCutoff;
 
         // Each voice's envelope as the frame starts: whose it is, its stage and its level.
         public int EnvInstrument0, EnvState0, EnvLevel0;
         public int EnvInstrument1, EnvState1, EnvLevel1;
         public int EnvInstrument2, EnvState2, EnvLevel2;
+    }
+
+    /// <summary>
+    /// Where this instrument's filter program was at that point in the audio: the frame of it,
+    /// counted from its first step as 0, and the cutoff actually written then. False when the
+    /// filter belonged to another instrument, or this one had claimed it but not yet stepped.
+    /// </summary>
+    public bool FilterAt(long sample, int instrumentNumber, out int frame, out int cutoff)
+    {
+        frame = -1;
+        cutoff = -1;
+
+        lock (_playheadLock)
+        {
+            int newest = -1;
+            for (int i = 0; i < _playheadCount; i++)
+            {
+                int index = (_playheadNext - _playheadCount + i + _playheads.Length) % _playheads.Length;
+                if (_playheads[index].Samples > sample)
+                {
+                    break;
+                }
+
+                newest = index;
+            }
+
+            if (newest < 0)
+            {
+                return false;
+            }
+
+            ref var at = ref _playheads[newest];
+            if (at.FilterInstrument != instrumentNumber || at.FilterFrames < 1 || at.FilterCutoff < 0)
+            {
+                return false;
+            }
+
+            frame = at.FilterFrames - 1;
+            cutoff = at.FilterCutoff;
+            return true;
+        }
     }
 
     /// <summary>
@@ -176,6 +218,7 @@ public sealed class SongPlaybackEngine : IWaveProvider
             (frame.Instrument1, frame.Wave1, frame.Arp1) = _sequencer.VoicePlayhead(1);
             (frame.Instrument2, frame.Wave2, frame.Arp2) = _sequencer.VoicePlayhead(2);
             (frame.FilterInstrument, frame.FilterStep) = _sequencer.FilterPlayhead();
+            (_, frame.FilterFrames, frame.FilterCutoff) = _sequencer.FilterState();
             (frame.EnvInstrument0, frame.EnvState0, frame.EnvLevel0) = Envelope(0);
             (frame.EnvInstrument1, frame.EnvState1, frame.EnvLevel1) = Envelope(1);
             (frame.EnvInstrument2, frame.EnvState2, frame.EnvLevel2) = Envelope(2);
