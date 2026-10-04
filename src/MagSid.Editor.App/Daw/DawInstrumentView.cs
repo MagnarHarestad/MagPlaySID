@@ -53,9 +53,9 @@ internal sealed class DawInstrumentView : Panel
     private readonly ToggleButton _endingRoot = new("ROOT");
     private readonly KnobControl _arpLoopFrom = new();
 
-    /// <summary>Opened over a note program step on a double-click, for typing the note rather than
-    /// walking to it with the wheel.</summary>
-    private readonly TextBox _noteEntry = new()
+    /// <summary>Opened over a note program or filter program step on a double-click, for typing
+    /// the value rather than walking to it with the wheel.</summary>
+    private readonly TextBox _stepEntry = new()
     {
         Visible = false,
         BorderStyle = BorderStyle.FixedSingle,
@@ -67,7 +67,10 @@ internal sealed class DawInstrumentView : Panel
         MaxLength = 3,
     };
 
-    private int _noteEntryStep = -1;
+    /// <summary>The lane the entry box is over, and what turns its text into an edit - null for
+    /// text that is not a value, which keeps the box open.</summary>
+    private ProgramLaneControl? _entryLane;
+    private Func<string, Action<Instrument>?>? _entryParse;
 
     private readonly ProgramLaneControl _wavetable = new();
     private readonly ProgramLaneControl _noteProgram = new();
@@ -228,57 +231,90 @@ internal sealed class DawInstrumentView : Panel
 
     private void BeginNoteEntry(int step, Rectangle cell)
     {
+        // The cell after the last note is the LOOP / HOLD / ROOT ending, not a note.
         if (_instrument is not { } instrument || step >= instrument.Arpeggio.Count)
             return;
 
-        if (_noteEntry.Parent != _noteProgram)
-        {
-            _noteEntry.Parent?.Controls.Remove(_noteEntry);
-            _noteProgram.Controls.Add(_noteEntry);
-        }
-
-        _noteEntryStep = step;
-        _noteEntry.Text = instrument.Arpeggio[step].ToString();
-        _noteEntry.ForeColor = DawPalette.Text;
-        _noteEntry.Bounds = new Rectangle(cell.X + 2, cell.Y + (cell.Height / 2) - 12, cell.Width - 4, 24);
-        _noteEntry.Visible = true;
-        _noteEntry.BringToFront();
-        _noteEntry.Focus();
-        _noteEntry.SelectAll();
+        var was = instrument.Arpeggio[step];
+        BeginStepEntry(_noteProgram, cell, was.ToString(), text =>
+            ParseTypedNote(text) is { } note
+                ? i => { if (step < i.Arpeggio.Count) i.Arpeggio[step] = note; }
+                : null);
     }
 
-    private void EndNoteEntry(bool keep)
+    private void BeginCutoffEntry(int step, Rectangle cell)
     {
-        // Hiding a focused box moves the focus, and LostFocus comes back in here before the box
-        // counts as hidden - the step is let go of first, so that second call finds nothing open.
-        if (!_noteEntry.Visible || _noteEntryStep < 0)
+        if (_instrument is not { } instrument || step >= instrument.Filter.Count)
             return;
 
-        int step = _noteEntryStep;
-        if (keep && ParseTypedNote(_noteEntry.Text) is not { } note)
+        BeginStepEntry(_filter, cell, $"${instrument.Filter[step].Cutoff:X2}", text =>
+            ParseTypedCutoff(text) is { } cutoff
+                ? i => { if (step < i.Filter.Count) i.Filter[step] = WithCutoff(i.Filter[step], cutoff); }
+                : null);
+    }
+
+    /// <summary>A step with a new cutoff and everything else as it was - a setup step stays one.</summary>
+    private static FilterStep WithCutoff(FilterStep step, byte cutoff) => step.IsSetup
+        ? FilterStep.Setup(step.ModeVolume!.Value, step.ResonanceRouting!.Value, cutoff, step.SweepRate)
+        : FilterStep.Sweep(cutoff);
+
+    private void BeginStepEntry(ProgramLaneControl lane, Rectangle cell, string text,
+                                Func<string, Action<Instrument>?> parse)
+    {
+        if (_stepEntry.Parent != lane)
         {
-            // Not a note: say so and stay open, rather than throwing the typing away or keeping
+            _stepEntry.Parent?.Controls.Remove(_stepEntry);
+            lane.Controls.Add(_stepEntry);
+        }
+
+        _entryLane = lane;
+        _entryParse = parse;
+        _stepEntry.Text = text;
+        _stepEntry.ForeColor = DawPalette.Text;
+        _stepEntry.Bounds = new Rectangle(cell.X + 2, cell.Y + (cell.Height / 2) - 12, cell.Width - 4, 24);
+        _stepEntry.Visible = true;
+        _stepEntry.BringToFront();
+        _stepEntry.Focus();
+        _stepEntry.SelectAll();
+    }
+
+    private void EndStepEntry(bool keep)
+    {
+        // Hiding a focused box moves the focus, and LostFocus comes back in here before the box
+        // counts as hidden - the entry is let go of first, so that second call finds nothing open.
+        if (!_stepEntry.Visible || _entryParse is not { } parse || _entryLane is not { } lane)
+            return;
+
+        var edit = keep ? parse(_stepEntry.Text) : null;
+        if (keep && edit is null && _stepEntry.Focused)
+        {
+            // Not a value: say so and stay open, rather than throwing the typing away or keeping
             // something that is not one. Escape is always the way out.
-            if (_noteEntry.Focused)
-            {
-                System.Media.SystemSounds.Beep.Play();
-                _noteEntry.ForeColor = Color.FromArgb(0xFF, 0x66, 0x66);
-                _noteEntry.SelectAll();
-                return;
-            }
-
-            keep = false;
+            System.Media.SystemSounds.Beep.Play();
+            _stepEntry.ForeColor = Color.FromArgb(0xFF, 0x66, 0x66);
+            _stepEntry.SelectAll();
+            return;
         }
 
-        _noteEntryStep = -1;
-        _noteEntry.Visible = false;
-        _noteProgram.Focus();
+        _entryParse = null;
+        _entryLane = null;
+        _stepEntry.Visible = false;
+        lane.Focus();
 
-        if (keep && _instrument is { } instrument && step >= 0 && step < instrument.Arpeggio.Count
-            && ParseTypedNote(_noteEntry.Text) is { } typed && typed != instrument.Arpeggio[step])
-        {
-            Commit(i => i.Arpeggio[step] = typed);
-        }
+        if (edit is not null)
+            Commit(edit);
+    }
+
+    /// <summary>A cutoff as someone would type it: hex, with or without the $ - "40", "$4A".
+    /// $00 and $FF are the stream's end and setup markers, so not cutoffs.</summary>
+    private static byte? ParseTypedCutoff(string text)
+    {
+        string trimmed = text.Trim().TrimStart('$');
+        return trimmed.Length is >= 1 and <= 2
+               && byte.TryParse(trimmed, System.Globalization.NumberStyles.HexNumber, null, out byte cutoff)
+               && cutoff is >= FilterStep.MinCutoff and <= FilterStep.MaxCutoff
+            ? cutoff
+            : null;
     }
 
     /// <summary>A note as someone would type it: "D#4", "c-5", or "C4" for C-4. Flats are not
@@ -360,19 +396,20 @@ internal sealed class DawInstrumentView : Panel
         _waveform.WaveformChanged += w => Commit(i => ApplyWaveform(i, w));
         _wavetable.StepSelected += _ => ShowWaveformTarget(_instrument);
 
-        // Typing a note into the note program: Enter keeps it, Escape throws it away, and clicking
-        // elsewhere keeps it if it is a note at all. "C4" is taken as "C-4" - the dash is how the
-        // file writes a natural, not something anyone should have to type.
+        // Typing a note or a cutoff: Enter keeps it, Escape throws it away, and clicking elsewhere
+        // keeps it if it is a value at all. "C4" is taken as "C-4" - the dash is how the file
+        // writes a natural, not something anyone should have to type.
         _noteProgram.StepDoubleClicked += BeginNoteEntry;
-        _noteEntry.KeyDown += (_, e) =>
+        _filter.StepDoubleClicked += BeginCutoffEntry;
+        _stepEntry.KeyDown += (_, e) =>
         {
             if (e.KeyCode is not (Keys.Enter or Keys.Escape))
                 return;
 
-            EndNoteEntry(keep: e.KeyCode == Keys.Enter);
+            EndStepEntry(keep: e.KeyCode == Keys.Enter);
             e.Handled = e.SuppressKeyPress = true;
         };
-        _noteEntry.LostFocus += (_, _) => EndNoteEntry(keep: true);
+        _stepEntry.LostFocus += (_, _) => EndStepEntry(keep: true);
 
         WireProgram(
             _wavetable,

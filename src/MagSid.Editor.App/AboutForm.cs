@@ -258,7 +258,8 @@ public sealed class AboutForm : Form
              "  Note program step     Double-click to type the note (C-4, D#5, C4). Enter keeps,\n" +
              "                        Escape cancels\n" +
              "  LOOP / HOLD / ROOT    What happens after the last note step (FROM: loop start)\n" +
-             "  Filter step           Click a step to edit it. SETUP makes it a setup record\n" +
+             "  Filter step           Click a step to edit it, double-click to type the cutoff\n" +
+             "                        in hex ($40 or 40). SETUP makes it a setup record\n" +
              "                        with mode, volume, resonance, routing and sweep\n" +
              "  Cutoff graph          The filter program played frame by frame, sweep included.\n" +
              "                        Scaled to its highest cutoff (shown top left)\n\n");

@@ -54,8 +54,8 @@ internal sealed class ProgramLaneControl : Control
     /// <summary>The step clicked, or -1 for the trailing add cell.</summary>
     public event Action<int>? StepSelected;
 
-    /// <summary>A real step was double-clicked, with where its cell is - for a host that wants to
-    /// put an editor over it. Not raised for a marker cell, which has no value to type.</summary>
+    /// <summary>A cell was double-clicked, with where it is - for a host that wants to put an
+    /// editor over it. The host knows which cells hold a value worth typing; the lane does not.</summary>
     public event Action<int, Rectangle>? StepDoubleClicked;
 
     /// <summary>Nudge a step's value. Arrow keys and the wheel, never typing - the same choice the
@@ -231,7 +231,7 @@ internal sealed class ProgramLaneControl : Control
     protected override void OnMouseDoubleClick(MouseEventArgs e)
     {
         int at = CellAt(e.X, e.Y);
-        if (e.Button == MouseButtons.Left && at >= 0 && !_steps[at].Marker)
+        if (e.Button == MouseButtons.Left && at >= 0)
         {
             // The first click of the pair let go of the step if it was already selected; the
             // step being typed into is the selected one.
