@@ -277,7 +277,9 @@ public sealed class AboutForm : Form
         // ------------------------------------------------------------------------------------
         Heading("Tools");
         Body("Optimize removes dead loop markers, turns repeated rows into loops where that saves " +
-             "bytes, and trims program steps the song never reaches. It shows what it will do " +
+             "bytes, makes a pattern the song order repeats in a row loop itself instead (when the " +
+             "order bytes saved beat the loop's three), and trims program steps the song never " +
+             "reaches. It shows what it will do " +
              "first, and Ctrl+Z undoes it.\n\n" +
              "Signal Path traces one instrument frame by frame - register writes, gate, envelope " +
              "and output - and plays it while a marker follows along.\n\n" +

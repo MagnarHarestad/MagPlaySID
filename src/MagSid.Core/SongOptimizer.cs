@@ -14,9 +14,10 @@ public sealed record InstrumentUsage(
     int HighestWavetableStep, int HighestArpeggioStep, int HighestFilterStep);
 
 /// <summary>
-/// Shrinks a song's pattern data without changing a note of what it plays. Two things only:
-/// dead LS markers go, and a run of identical rows becomes an LS/LE loop where that is actually
-/// cheaper.
+/// Shrinks a song's pattern data without changing a note of what it plays: dead LS markers go, a
+/// run of identical rows becomes an LS/LE loop, and a pattern the song order plays several times
+/// in a row becomes one order entry over a pattern that loops itself - each only where that is
+/// actually cheaper.
 ///
 /// Every loop is scored by re-encoding the pattern through <see cref="SongSizeCalculator"/>, not
 /// estimated, and one is applied only when the byte count really drops - so the result can never
@@ -85,7 +86,123 @@ public static class SongOptimizer
             }
         }
 
+        // After the in-pattern loops, not before: loops cannot nest, so a pattern that just got
+        // one is no longer a candidate here, and the in-pattern loop is the one that can save more.
+        LoopOrderRuns(song, findings);
+
         return new Result(findings, before, SongSizeCalculator.Measure(song));
+    }
+
+    /// <summary>A stretch of one channel's order playing the same pattern entry after entry.</summary>
+    private sealed record OrderRun(int Channel, int Start, int Length);
+
+    /// <summary>
+    /// The song order playing a pattern several times in a row - 07, 07, 07, 07 - becomes one entry
+    /// whose pattern loops itself: LS on its first row, LE with the count after its last. Each order
+    /// entry is a byte and the LE three, so it pays from five in a row; fewer cost as much or more,
+    /// and the measurement below turns them down.
+    ///
+    /// Only where every place the pattern is played is such a run - in any channel - and all of
+    /// them are whole multiples of the same block, since the pattern itself changes: a lone entry
+    /// elsewhere would start looping too. Two runs of two and one of four all work, as block 2. A
+    /// restart position has to land on a block boundary, or the collapsed order would restart
+    /// part-way through a pass that no longer exists as an entry.
+    /// </summary>
+    private static void LoopOrderRuns(Song song, List<Finding> findings)
+    {
+        foreach (int number in song.Patterns.Select(p => p.Number).ToList())
+        {
+            var pattern = song.Patterns.First(p => p.Number == number);
+            if (pattern.Rows.Count == 0 || pattern.Rows.Any(r => r is LoopStartRow or LoopEndRow))
+                continue;
+
+            var runs = RunsOf(song, number);
+            if (runs.Count == 0)
+                continue;
+
+            int block = runs.Min(r => r.Length);
+            if (block < 2 || block > 255 || runs.Any(r => r.Length % block != 0))
+                continue;
+
+            if (runs.Any(r => !RestartOnBlockBoundary(song.ChannelOrders[r.Channel], r, block)))
+                continue;
+
+            var trial = SongCloner.Clone(song);
+            CollapseRuns(trial, number, runs, block);
+            int saved = SongSizeCalculator.Measure(song).TotalBytes - SongSizeCalculator.Measure(trial).TotalBytes;
+            if (saved <= 0)
+                continue;
+
+            CollapseRuns(song, number, runs, block);
+
+            int entries = runs.Sum(r => r.Length);
+            string where = string.Join(", ", runs.Select(r => $"CH{r.Channel + 1}").Distinct());
+            findings.Add(new Finding(number,
+                $"song order {where}: {entries} entries in {runs.Count} run{(runs.Count == 1 ? "" : "s")} " +
+                $"-> {entries / block}, the pattern loops itself (LS/LE{block:00})",
+                saved));
+        }
+    }
+
+    /// <summary>Every maximal stretch of entries playing this pattern, in every channel - lone
+    /// entries included, as runs of one, so a pattern also played singly is never a candidate.</summary>
+    private static List<OrderRun> RunsOf(Song song, int patternNumber)
+    {
+        var runs = new List<OrderRun>();
+        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        {
+            var tokens = song.ChannelOrders[channel].Tokens;
+            for (int i = 0; i < tokens.Count; i++)
+            {
+                if (tokens[i] is not PatternRefToken(var n) || n != patternNumber)
+                    continue;
+
+                int start = i;
+                while (i + 1 < tokens.Count && tokens[i + 1] is PatternRefToken(var next) && next == patternNumber)
+                    i++;
+
+                runs.Add(new OrderRun(channel, start, i - start + 1));
+            }
+        }
+
+        return runs;
+    }
+
+    private static bool RestartOnBlockBoundary(ChannelOrder order, OrderRun run, int block)
+    {
+        int restart = order.RestartPosition - 1;
+        return restart < run.Start || restart >= run.Start + run.Length || (restart - run.Start) % block == 0;
+    }
+
+    /// <summary>Loops the pattern and shortens every run to one entry per block, carrying each
+    /// channel's restart position to the entry it pointed at.</summary>
+    private static void CollapseRuns(Song song, int patternNumber, List<OrderRun> runs, int block)
+    {
+        var pattern = song.Patterns.First(p => p.Number == patternNumber);
+        pattern.Rows.Insert(0, new LoopStartRow());
+        pattern.Rows.Add(new LoopEndRow(block));
+
+        foreach (var channelRuns in runs.GroupBy(r => r.Channel))
+        {
+            var order = song.ChannelOrders[channelRuns.Key];
+            int restart = order.RestartPosition - 1;
+            var kept = new List<OrderToken>();
+            int newRestart = 0;
+
+            for (int i = 0; i < order.Tokens.Count; i++)
+            {
+                if (i == restart)
+                    newRestart = kept.Count;
+
+                var run = channelRuns.FirstOrDefault(r => i >= r.Start && i < r.Start + r.Length);
+                if (run is null || (i - run.Start) % block == 0)
+                    kept.Add(order.Tokens[i]);
+            }
+
+            order.Tokens.Clear();
+            order.Tokens.AddRange(kept);
+            order.RestartPosition = newRestart + 1;
+        }
     }
 
     /// <summary>

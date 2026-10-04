@@ -229,25 +229,123 @@ public class SongOptimizerTests
         Assert.Equal(Render(original, 400), Render(trimmed, 400));
     }
 
+    /// <summary>A song whose channel 1 plays pattern 1 <paramref name="runs"/> times in a row,
+    /// then pattern 2 once, restarting at <paramref name="restart"/>.</summary>
+    private static Song OrderedSong(int runs, int restart = 1)
+    {
+        var song = SongWith(N("C-4"), new HoldRow(), N("E-4", 2), new HoldRow());
+        var second = new Pattern { Number = 2 };
+        second.Rows.AddRange([N("G-4", 3), new HoldRow(), new HoldRow(), N("C-5")]);
+        song.Patterns.Add(second);
+
+        var order = song.ChannelOrders[0];
+        order.Tokens.Clear();
+        for (int i = 0; i < runs; i++)
+            order.Tokens.Add(new PatternRefToken(1));
+        order.Tokens.Add(new PatternRefToken(2));
+        order.RestartPosition = restart;
+
+        // The other two channels play pattern 2 only, so pattern 1 lives in channel 1's run alone.
+        song.ChannelOrders[1].Tokens[0] = new PatternRefToken(2);
+        song.ChannelOrders[2].Tokens[0] = new PatternRefToken(2);
+        return song;
+    }
+
+    [Fact]
+    public void A_pattern_the_order_repeats_five_times_becomes_one_looping_entry()
+    {
+        var original = OrderedSong(runs: 5);
+        var optimized = SongCloner.Clone(original);
+
+        var result = SongOptimizer.Apply(optimized);
+
+        Assert.Equal([new PatternRefToken(1), new PatternRefToken(2)], optimized.ChannelOrders[0].Tokens);
+        Assert.IsType<LoopStartRow>(optimized.Patterns[0].Rows[0]);
+        Assert.Equal(new LoopEndRow(5), optimized.Patterns[0].Rows[^1]);
+        Assert.Contains(result.Findings, f => f.Description.Contains("song order CH1"));
+        Assert.True(result.BytesSaved > 0);
+
+        // Well past the first wrap, so the restart is exercised too.
+        Assert.Equal(Render(original, 600), Render(optimized, 600));
+    }
+
+    [Fact]
+    public void Four_in_a_row_cost_as_much_as_a_loop_and_are_left_alone()
+    {
+        // Three order bytes saved, three LE bytes spent - not a saving, so not a change.
+        var song = OrderedSong(runs: 4);
+        var original = SongCloner.Clone(song);
+
+        SongOptimizer.Apply(song);
+
+        Assert.Equal(original.ChannelOrders[0].Tokens, song.ChannelOrders[0].Tokens);
+        Assert.Equal(original.Patterns[0].Rows, song.Patterns[0].Rows);
+    }
+
+    [Fact]
+    public void A_pattern_also_played_on_its_own_elsewhere_is_left_alone()
+    {
+        // Looping the pattern would make that single entry play five times too.
+        var song = OrderedSong(runs: 6);
+        song.ChannelOrders[1].Tokens.Add(new PatternRefToken(1));
+        var original = SongCloner.Clone(song);
+
+        SongOptimizer.Apply(song);
+
+        Assert.Equal(original.ChannelOrders[0].Tokens, song.ChannelOrders[0].Tokens);
+        Assert.Equal(original.Patterns[0].Rows, song.Patterns[0].Rows);
+    }
+
+    [Fact]
+    public void A_restart_into_the_middle_of_a_run_is_left_alone()
+    {
+        // Restarting at the third of six passes has no entry to land on once they are one.
+        var song = OrderedSong(runs: 6, restart: 3);
+        var original = SongCloner.Clone(song);
+
+        SongOptimizer.Apply(song);
+
+        Assert.Equal(original.ChannelOrders[0].Tokens, song.ChannelOrders[0].Tokens);
+    }
+
+    [Fact]
+    public void A_restart_after_a_run_moves_with_the_entry_it_pointed_at()
+    {
+        var original = OrderedSong(runs: 6, restart: 7);   // the pattern 2 entry
+        var optimized = SongCloner.Clone(original);
+
+        SongOptimizer.Apply(optimized);
+
+        Assert.Equal(2, optimized.ChannelOrders[0].RestartPosition);
+        Assert.Equal(Render(original, 800), Render(optimized, 800));
+    }
+
     [Theory]
     [InlineData("BellaCiao.s")]
-    [InlineData("Breakdance.s")]   // the one song the optimizer actually rewrites
+    [InlineData("Breakdance.s")]
     [InlineData("Airstrike.s")]
     [InlineData("Magnificent.s")]
     [InlineData("SOS.s")]
     [InlineData("Lightforce.s")]
-    [InlineData("Megastyle.s")]
+    [InlineData("CityBomber4k(Megastyle).s")]
+    [InlineData("MysData2026 - Clarity.s")]
     public void Real_songs_still_play_identically_after_optimizing(string file)
     {
         string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "SongData", file));
-        if (!File.Exists(path)) return;   // sibling asm project not checked out
+
+        // Loudly, not a quiet return: a renamed song once skipped this check without anyone
+        // noticing, which is the same as not having it.
+        Assert.True(File.Exists(path), $"song file missing: {path}");
 
         var original = PatternsFileReader.Parse(File.ReadAllText(path), file);
         var optimized = PatternsFileReader.Parse(File.ReadAllText(path), file);
         var result = SongOptimizer.Apply(optimized);
 
         Assert.True(result.After.TotalBytes <= result.Before.TotalBytes);
-        Assert.Equal(Render(original, 1500), Render(optimized, 1500));
+
+        // Long enough for every channel to run through its whole order and restart at least once,
+        // which is what the order rewrite needs covering.
+        Assert.Equal(Render(original, 12000), Render(optimized, 12000));
     }
 }
