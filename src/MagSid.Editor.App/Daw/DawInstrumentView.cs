@@ -428,10 +428,10 @@ internal sealed class DawInstrumentView : Panel
             Padding = new Padding(8, 8, 4, 8),
             WrapContents = false,
         };
-        Knob(_vibratoDelay, "DELAY", DawPalette.Effect, 0, 15, Hex1);
-        Knob(_vibratoSpeed, "SPEED", DawPalette.Effect, 0, 15, Hex1);
-        Knob(_vibratoDepth, "DEPTH", DawPalette.Effect, 0, 255, Hex2);
-        Knob(_slide, "SLIDE", DawPalette.Effect, -128, 127, v => v.ToString("+#;-#;0"));
+        Knob(_vibratoDelay, "Delay", DawPalette.Effect, 0, 15, Hex1);
+        Knob(_vibratoSpeed, "Speed", DawPalette.Effect, 0, 15, Hex1);
+        Knob(_vibratoDepth, "Depth", DawPalette.Effect, 0, 255, Hex2);
+        Knob(_slide, "Slide", DawPalette.Effect, -128, 127, v => v.ToString("+#;-#;0"));
         effectKnobs.Controls.AddRange([_vibratoDelay, _vibratoSpeed, _vibratoDepth, _slide]);
 
         var effectNote = new Label
@@ -455,11 +455,11 @@ internal sealed class DawInstrumentView : Panel
 
         // --- the three programs -----------------------------------------------------------
         _wavetable.Title = "WAVETABLE";
-        _wavetable.Hint = "one control byte per frame · the last value holds";
+        _wavetable.Hint = "One per frame - last holds unless loop activated.";
         _wavetable.Accent = DawPalette.Envelope;
 
         _noteProgram.Title = "NOTE PROGRAM";
-        _noteProgram.Hint = "absolute notes · ROOT returns to the row's own note";
+        _noteProgram.Hint = "Absolute notes. Mouseclick to write note or use Mousewheel to change. Right-click to delete.";
         _noteProgram.Accent = DawPalette.Oscillator;
 
         // The lane picks a step; the editor below shows everything that step carries. Mode,
@@ -470,7 +470,7 @@ internal sealed class DawInstrumentView : Panel
         _filterStep.Dock = DockStyle.Bottom;
 
         _filter.Title = "FILTER PROGRAM";
-        _filter.Hint = "a setup record opens with $FF · $00 ends and holds the cutoff";
+        _filter.Hint = "Click on entry to edit filter value or Filter setups";
         _filter.Accent = DawPalette.Filter;
 
         var programs = new TableLayoutPanel
@@ -553,7 +553,7 @@ internal sealed class DawInstrumentView : Panel
             strip.Controls.Add(button);
         }
 
-        Knob(_arpLoopFrom, "FROM", DawPalette.Oscillator, 0, 63, value => value.ToString());
+        Knob(_arpLoopFrom, "From", DawPalette.Oscillator, 0, 63, value => value.ToString());
         _arpLoopFrom.Size = new Size(50, 62);
         _arpLoopFrom.Location = new Point(56, 56);
         _arpLoopFrom.ValueChanged += value => Commit(instrument => instrument.ArpeggioLoopPoint = value);

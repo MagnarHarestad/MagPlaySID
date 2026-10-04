@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -151,10 +151,10 @@ internal sealed class FilterStepEditor : Panel
         _caption.AutoSize = true;
         _caption.Location = new Point(12, 8);
 
-        Knob(_cutoff, "CUTOFF", FilterStep.MinCutoff, FilterStep.MaxCutoff, v => $"${v:X2}", 0x40, 12);
-        Knob(_volume, "VOL", 0, 15, v => $"${v:X}", 15, 78);
-        Knob(_resonance, "RES", 0, 15, v => $"${v:X}", 15, 144);
-        Knob(_sweep, "SWEEP", -128, 127, v => v.ToString("+#;-#;0"), 0, 210);
+        Knob(_cutoff, "Cutoff", FilterStep.MinCutoff, FilterStep.MaxCutoff, v => $"${v:X2}", 0x40, 12);
+        Knob(_volume, "Vol", 0, 15, v => $"${v:X}", 15, 78);
+        Knob(_resonance, "Res", 0, 15, v => $"${v:X}", 15, 144);
+        Knob(_sweep, "Sweep", -128, 127, v => v.ToString("+#;-#;0"), 0, 210);
 
         // The three filter modes are independent bits in $D418 and really can be combined - a
         // notch is LP and HP together - so these latch rather than choosing one.
