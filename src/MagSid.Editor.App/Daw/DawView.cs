@@ -418,6 +418,7 @@ internal sealed class DawView : Panel
         // The roll's tools sit directly above it, under the splitter, so they travel with the roll
         // when the splitter is dragged rather than with the lanes.
         _tools.ToolChanged += tool => _pianoRoll.Tool = tool;
+        _pianoRoll.ToolRequested += tool => _tools.Tool = tool;
         _pianoRoll.Tool = _tools.Tool;
 
         _arrangePage.Controls.Add(_pianoRoll);

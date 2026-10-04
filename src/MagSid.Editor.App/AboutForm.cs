@@ -218,7 +218,8 @@ public sealed class AboutForm : Form
              "  Glue               Click a note to join it to the next\n" +
              "  Line               Drag to draw a run of notes\n\n");
         Body("With notes selected:\n\n");
-        Mono("  Ctrl+X    Cut\n" +
+        Mono("  Ctrl+A    Select every note in the pattern\n" +
+             "  Ctrl+X    Cut\n" +
              "  Ctrl+C    Copy\n" +
              "  Ctrl+V    Paste at the selected row - click the beat bar to pick it\n" +
              "  Delete    Remove\n" +
@@ -228,7 +229,7 @@ public sealed class AboutForm : Form
         Mono("  Right-click        Delete the note\n" +
              "  Drag a note's end  Resize it\n" +
              "  Ctrl+click         Note off (Draw tool)\n" +
-             "  Up / Down          Transpose the selected note\n" +
+             "  Up / Down          Transpose the selected note (it plays while held)\n" +
              "  Left / Right       Move it a beat\n" +
              "  Ctrl+Left / Right  Shorten / lengthen it\n" +
              "  Return             Note off on the selected row\n" +

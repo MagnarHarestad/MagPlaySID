@@ -63,6 +63,11 @@ internal sealed class PianoRollView : Control
 
     private RollTool _tool = RollTool.Draw;
 
+    /// <summary>The roll wants another tool - Ctrl+A asks for Object Selection, since a selection
+    /// is only acted on there. The tool row owns which tool is chosen, so it is asked rather than
+    /// told, and answers by setting <see cref="Tool"/>.</summary>
+    public event Action<RollTool>? ToolRequested;
+
     // Object selection: the notes chosen, a rubber band being dragged, and a move in progress
     // measured in beat columns and keys from where the drag began.
     private readonly HashSet<int> _selection = [];
@@ -381,7 +386,8 @@ internal sealed class PianoRollView : Control
     }
 
     /// <summary>
-    /// Keys that act on the selected notes rather than on the selected row: Ctrl+X cuts them,
+    /// Keys that act on the selected notes rather than on the selected row: Ctrl+A selects them all,
+    /// Ctrl+X cuts them,
     /// Ctrl+C copies them, Delete removes them and Escape lets go of them. Ctrl+V pastes what was
     /// copied, starting at the selected row - which a click in the beat bar sets without writing
     /// anything, so an empty spot can be aimed at. Returns true when the key belonged here.
@@ -392,6 +398,22 @@ internal sealed class PianoRollView : Control
 
         switch (e.KeyCode)
         {
+            // Every note in the pattern, under Object Selection so the selection can be cut,
+            // copied, moved or deleted at once.
+            case Keys.A when e.Control:
+                if (_tool != RollTool.Select)
+                    ToolRequested?.Invoke(RollTool.Select);
+
+                if (_tool != RollTool.Select)
+                    Tool = RollTool.Select;
+
+                _selection.Clear();
+                foreach (var note in _notes)
+                    _selection.Add(note.Row);
+
+                Invalidate();
+                break;
+
             case Keys.Escape when _selection.Count > 0:
                 _selection.Clear();
                 Invalidate();
@@ -567,6 +589,16 @@ internal sealed class PianoRollView : Control
 
         _sounding = null;
         NotePreviewReleased?.Invoke(note);
+    }
+
+    /// <summary>Letting go of the arrow that moved a note up or down lets go of the note, as
+    /// lifting a finger off its key would.</summary>
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Up or Keys.Down)
+            ReleaseAudition();
+
+        base.OnKeyUp(e);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -1360,9 +1392,13 @@ internal sealed class PianoRollView : Control
                 int key = KeyForNote(note.Note);
                 if (key >= 0)
                 {
-                    PatternNotes.Move(pattern, _selectedRow, _selectedRow,
-                        NoteForKey(key + (e.KeyCode == Keys.Up ? -1 : 1)));
+                    var moved = NoteForKey(key + (e.KeyCode == Keys.Up ? -1 : 1));
+                    PatternNotes.Move(pattern, _selectedRow, _selectedRow, moved);
                     Commit();
+
+                    // Sounds at its new pitch for as long as the arrow is held, the same as a
+                    // note dragged up or down - and a held arrow walking it along plays each step.
+                    Audition(moved, note.InstrumentNumber);
                 }
 
                 e.Handled = true;
