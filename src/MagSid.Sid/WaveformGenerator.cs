@@ -1,4 +1,4 @@
-﻿namespace MagSid.Sid;
+namespace MagSid.Sid;
 
 /// <summary>
 /// Direct port of reSID's wave.h/wave.cc. A 24-bit accumulator is the basis for

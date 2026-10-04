@@ -1,4 +1,4 @@
-﻿namespace MagSid.Editor.App.Daw;
+namespace MagSid.Editor.App.Daw;
 
 /// <summary>
 /// The DAW view's colours: one scheme across the arrangement, the piano roll and the instrument, so
