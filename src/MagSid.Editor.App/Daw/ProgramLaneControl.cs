@@ -100,6 +100,14 @@ internal sealed class ProgramLaneControl : Control
 
     public int SelectedStep => _selected;
 
+    /// <summary>Selects a step without announcing it - for the host choosing a starting point,
+    /// which is not the user picking one.</summary>
+    public void SelectStep(int step)
+    {
+        _selected = step >= 0 && step < _steps.Count ? step : -1;
+        Invalidate();
+    }
+
     /// <summary>Lets go of the selected step without announcing it - for when the lane is given a
     /// different instrument's program, whose step of the same number is a different step.</summary>
     public void ClearSelection()

@@ -119,7 +119,8 @@ internal sealed class DawInstrumentView : Panel
     {
         // Another instrument's step 02 is not this one's: a selection carried across would point
         // the waveform tabs at a step nobody picked.
-        if (!ReferenceEquals(instrument, _instrument))
+        bool changed = !ReferenceEquals(instrument, _instrument);
+        if (changed)
             _wavetable.ClearSelection();
 
         _instrument = instrument;
@@ -164,6 +165,11 @@ internal sealed class DawInstrumentView : Panel
             ShowEnding(instrument);
 
             RefreshDerived(instrument);
+
+            // A newly shown instrument opens on its first filter step, so the step editor and the
+            // cutoff graph below have something in them from the start.
+            if (changed)
+                _filter.SelectStep(instrument.Filter.Count > 0 ? 0 : -1);
             _filterStep.ShowStep(instrument, _filter.SelectedStep);
         }
         finally

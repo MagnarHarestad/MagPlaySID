@@ -62,9 +62,11 @@ internal sealed class FilterStepEditor : Panel
             foreach (Control control in Controls)
                 control.Visible = has || control == _caption;
 
-            // The graph is of the whole program, so it stays while no step is picked.
-            _cutoffGraph.Visible = instrument is not null && instrument.Filter.Count > 0;
-            if (_cutoffGraph.Visible)
+            // The graph is of the whole program, so it stays while no step is picked. Decided in
+            // a local: Visible reads false while the page is hidden, whatever it was set to.
+            bool graph = instrument is not null && instrument.Filter.Count > 0;
+            _cutoffGraph.Visible = graph;
+            if (graph)
                 _cutoffGraph.SetProgram(instrument!.Filter, has ? step : -1);
 
             if (!has)
