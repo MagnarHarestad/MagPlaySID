@@ -54,6 +54,10 @@ internal sealed class ProgramLaneControl : Control
     /// <summary>The step clicked, or -1 for the trailing add cell.</summary>
     public event Action<int>? StepSelected;
 
+    /// <summary>A real step was double-clicked, with where its cell is - for a host that wants to
+    /// put an editor over it. Not raised for a marker cell, which has no value to type.</summary>
+    public event Action<int, Rectangle>? StepDoubleClicked;
+
     /// <summary>Nudge a step's value. Arrow keys and the wheel, never typing - the same choice the
     /// knobs make, so the whole view is edited one way.</summary>
     public event Action<int, int>? StepNudged;
@@ -222,6 +226,33 @@ internal sealed class ProgramLaneControl : Control
     {
         Invalidate();
         base.OnLostFocus(e);
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        int at = CellAt(e.X, e.Y);
+        if (e.Button == MouseButtons.Left && at >= 0 && !_steps[at].Marker)
+        {
+            // The first click of the pair let go of the step if it was already selected; the
+            // step being typed into is the selected one.
+            if (_selected != at)
+            {
+                _selected = at;
+                Invalidate();
+                StepSelected?.Invoke(at);
+            }
+
+            StepDoubleClicked?.Invoke(at, CellBounds(at));
+        }
+
+        base.OnMouseDoubleClick(e);
+    }
+
+    /// <summary>Where a step's cell is drawn.</summary>
+    public Rectangle CellBounds(int step)
+    {
+        int top = HeaderHeight + CellGap;
+        return new Rectangle(CellGap + (step * (CellWidth + CellGap)), top, CellWidth, Math.Max(0, Height - top - CellGap));
     }
 
     /// <summary>The step under a point, -1 for the add cell, -2 for neither.</summary>

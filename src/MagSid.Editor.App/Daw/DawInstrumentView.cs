@@ -53,6 +53,22 @@ internal sealed class DawInstrumentView : Panel
     private readonly ToggleButton _endingRoot = new("ROOT");
     private readonly KnobControl _arpLoopFrom = new();
 
+    /// <summary>Opened over a note program step on a double-click, for typing the note rather than
+    /// walking to it with the wheel.</summary>
+    private readonly TextBox _noteEntry = new()
+    {
+        Visible = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = DawPalette.Inset,
+        ForeColor = DawPalette.Text,
+        Font = new Font("Consolas", 10f, FontStyle.Bold),
+        TextAlign = HorizontalAlignment.Center,
+        CharacterCasing = CharacterCasing.Upper,
+        MaxLength = 3,
+    };
+
+    private int _noteEntryStep = -1;
+
     private readonly ProgramLaneControl _wavetable = new();
     private readonly ProgramLaneControl _noteProgram = new();
     private readonly ProgramLaneControl _filter = new();
@@ -210,6 +226,72 @@ internal sealed class DawInstrumentView : Panel
         ShowWaveformTarget(instrument);
     }
 
+    private void BeginNoteEntry(int step, Rectangle cell)
+    {
+        if (_instrument is not { } instrument || step >= instrument.Arpeggio.Count)
+            return;
+
+        if (_noteEntry.Parent != _noteProgram)
+        {
+            _noteEntry.Parent?.Controls.Remove(_noteEntry);
+            _noteProgram.Controls.Add(_noteEntry);
+        }
+
+        _noteEntryStep = step;
+        _noteEntry.Text = instrument.Arpeggio[step].ToString();
+        _noteEntry.ForeColor = DawPalette.Text;
+        _noteEntry.Bounds = new Rectangle(cell.X + 2, cell.Y + (cell.Height / 2) - 12, cell.Width - 4, 24);
+        _noteEntry.Visible = true;
+        _noteEntry.BringToFront();
+        _noteEntry.Focus();
+        _noteEntry.SelectAll();
+    }
+
+    private void EndNoteEntry(bool keep)
+    {
+        // Hiding a focused box moves the focus, and LostFocus comes back in here before the box
+        // counts as hidden - the step is let go of first, so that second call finds nothing open.
+        if (!_noteEntry.Visible || _noteEntryStep < 0)
+            return;
+
+        int step = _noteEntryStep;
+        if (keep && ParseTypedNote(_noteEntry.Text) is not { } note)
+        {
+            // Not a note: say so and stay open, rather than throwing the typing away or keeping
+            // something that is not one. Escape is always the way out.
+            if (_noteEntry.Focused)
+            {
+                System.Media.SystemSounds.Beep.Play();
+                _noteEntry.ForeColor = Color.FromArgb(0xFF, 0x66, 0x66);
+                _noteEntry.SelectAll();
+                return;
+            }
+
+            keep = false;
+        }
+
+        _noteEntryStep = -1;
+        _noteEntry.Visible = false;
+        _noteProgram.Focus();
+
+        if (keep && _instrument is { } instrument && step >= 0 && step < instrument.Arpeggio.Count
+            && ParseTypedNote(_noteEntry.Text) is { } typed && typed != instrument.Arpeggio[step])
+        {
+            Commit(i => i.Arpeggio[step] = typed);
+        }
+    }
+
+    /// <summary>A note as someone would type it: "D#4", "c-5", or "C4" for C-4. Flats are not
+    /// notes in this format, and neither is anything outside C-0..B-7.</summary>
+    private static NoteName? ParseTypedNote(string text)
+    {
+        string trimmed = text.Trim().ToUpperInvariant();
+        if (trimmed.Length == 2)
+            trimmed = $"{trimmed[0]}-{trimmed[1]}";
+
+        return NoteName.TryParse(trimmed, out var note) ? note : null;
+    }
+
     /// <summary>The wavetable step the waveform tabs are editing, or -1 for the instrument's own
     /// waveform.</summary>
     private int WaveformStep(Instrument instrument) =>
@@ -277,6 +359,20 @@ internal sealed class DawInstrumentView : Panel
 
         _waveform.WaveformChanged += w => Commit(i => ApplyWaveform(i, w));
         _wavetable.StepSelected += _ => ShowWaveformTarget(_instrument);
+
+        // Typing a note into the note program: Enter keeps it, Escape throws it away, and clicking
+        // elsewhere keeps it if it is a note at all. "C4" is taken as "C-4" - the dash is how the
+        // file writes a natural, not something anyone should have to type.
+        _noteProgram.StepDoubleClicked += BeginNoteEntry;
+        _noteEntry.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode is not (Keys.Enter or Keys.Escape))
+                return;
+
+            EndNoteEntry(keep: e.KeyCode == Keys.Enter);
+            e.Handled = e.SuppressKeyPress = true;
+        };
+        _noteEntry.LostFocus += (_, _) => EndNoteEntry(keep: true);
 
         WireProgram(
             _wavetable,

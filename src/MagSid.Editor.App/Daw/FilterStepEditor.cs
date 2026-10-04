@@ -31,6 +31,8 @@ internal sealed class FilterStepEditor : Panel
     private readonly ToggleButton _voice2 = new("V2");
     private readonly ToggleButton _voice3 = new("V3");
 
+    private readonly CutoffView _cutoffGraph = new();
+
     private Instrument? _instrument;
     private int _step = -1;
     private bool _loading;
@@ -59,6 +61,11 @@ internal sealed class FilterStepEditor : Panel
             bool has = instrument is not null && step >= 0 && step < instrument.Filter.Count;
             foreach (Control control in Controls)
                 control.Visible = has || control == _caption;
+
+            // The graph is of the whole program, so it stays while no step is picked.
+            _cutoffGraph.Visible = instrument is not null && instrument.Filter.Count > 0;
+            if (_cutoffGraph.Visible)
+                _cutoffGraph.SetProgram(instrument!.Filter, has ? step : -1);
 
             if (!has)
             {
@@ -167,6 +174,15 @@ internal sealed class FilterStepEditor : Panel
 
         Controls.Add(_caption);
         Controls.Add(_setup);
+        Controls.Add(_cutoffGraph);
+    }
+
+    /// <summary>The cutoff graph takes everything right of SETUP.</summary>
+    protected override void OnLayout(LayoutEventArgs levent)
+    {
+        const int left = 512;
+        _cutoffGraph.Bounds = new Rectangle(left, 8, Math.Max(0, Width - left - 12), Math.Max(0, Height - 16));
+        base.OnLayout(levent);
     }
 
     private void Knob(KnobControl knob, string caption, int minimum, int maximum,

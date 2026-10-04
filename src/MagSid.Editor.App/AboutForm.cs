@@ -255,9 +255,13 @@ public sealed class AboutForm : Form
              "  CONT / NO HR          See Retro instruments\n" +
              "  Program lanes         Click + to add, wheel or Up / Down to change (Shift: x16),\n" +
              "                        right-click or Delete to remove, Insert to add\n" +
+             "  Note program step     Double-click to type the note (C-4, D#5, C4). Enter keeps,\n" +
+             "                        Escape cancels\n" +
              "  LOOP / HOLD / ROOT    What happens after the last note step (FROM: loop start)\n" +
              "  Filter step           Click a step to edit it. SETUP makes it a setup record\n" +
-             "                        with mode, volume, resonance, routing and sweep\n\n");
+             "                        with mode, volume, resonance, routing and sweep\n" +
+             "  Cutoff graph          The filter program played frame by frame, sweep included.\n" +
+             "                        Scaled to its highest cutoff (shown top left)\n\n");
 
         // ------------------------------------------------------------------------------------
         Heading("Tools");
