@@ -17,6 +17,16 @@ namespace MagSid.Editor.App.Daw;
 internal sealed class DawInstrumentView : Panel
 {
     private readonly Label _title = new();
+
+    /// <summary>Takes the title's place while the name is being typed. Edits the name only - the
+    /// number in front of it is the instrument's slot, not part of what it is called.</summary>
+    private readonly TextBox _nameEditor = new()
+    {
+        Visible = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = DawPalette.Inset,
+        Font = new Font("Segoe UI", 13f),
+    };
     private readonly Label _subtitle = new();
 
     private readonly WaveformSelector _waveform = new();
@@ -105,9 +115,7 @@ internal sealed class DawInstrumentView : Panel
             }
 
             var accent = DawPalette.ForInstrument(instrument.Number);
-            _title.Text = string.IsNullOrWhiteSpace(instrument.Name)
-                ? $"Instrument {instrument.Number:00}"
-                : $"{instrument.Number:00}  {instrument.Name}";
+            _title.Text = TitleOf(instrument);
             _title.ForeColor = accent;
             _subtitle.Text = Describe(instrument);
 
@@ -331,6 +339,21 @@ internal sealed class DawInstrumentView : Panel
         _title.AutoSize = true;
         _title.Location = new Point(16, 12);
 
+        // The name is edited where it is read. A click on it opens it, Enter keeps what was typed,
+        // Escape throws it away, and clicking elsewhere keeps it - the same rules as renaming in
+        // the instrument strip, since it is the same edit.
+        _title.Cursor = Cursors.IBeam;
+        _title.Click += (_, _) => BeginRename();
+        _nameEditor.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode is not (Keys.Enter or Keys.Escape))
+                return;
+
+            EndRename(keep: e.KeyCode == Keys.Enter);
+            e.Handled = e.SuppressKeyPress = true;
+        };
+        _nameEditor.LostFocus += (_, _) => EndRename(keep: true);
+
         _subtitle.Font = new Font("Consolas", 8f);
         _subtitle.ForeColor = DawPalette.TextDim;
         _subtitle.AutoSize = true;
@@ -339,6 +362,7 @@ internal sealed class DawInstrumentView : Panel
         var header = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = DawPalette.Background };
         header.Controls.Add(_title);
         header.Controls.Add(_subtitle);
+        header.Controls.Add(_nameEditor);
 
         // --- oscillator -------------------------------------------------------------------
         var oscillator = Section("OSCILLATOR", DawPalette.Oscillator);
@@ -551,6 +575,73 @@ internal sealed class DawInstrumentView : Panel
         {
             _loading = loading;
         }
+    }
+
+    private static string TitleOf(Instrument instrument) =>
+        string.IsNullOrWhiteSpace(instrument.Name)
+            ? $"Instrument {instrument.Number:00}"
+            : $"{instrument.Number:00}  {instrument.Name}";
+
+    // The instrument the open editor belongs to, caught when it opened - the view can be handed
+    // another instrument while it is open, and the typed name belongs to the one it was opened on.
+    private Instrument? _renaming;
+
+    private void BeginRename()
+    {
+        if (_instrument is not { } instrument || _nameEditor.Visible)
+        {
+            return;
+        }
+
+        _renaming = instrument;
+        _nameEditor.Text = instrument.Name;
+        _nameEditor.ForeColor = _title.ForeColor;
+        _nameEditor.Bounds = new Rectangle(
+            _title.Left, _title.Top - 2, Math.Max(320, _title.Width + 60), _nameEditor.PreferredHeight);
+
+        _title.Visible = false;
+        _nameEditor.Visible = true;
+        _nameEditor.BringToFront();
+        _nameEditor.Focus();
+        _nameEditor.SelectAll();
+    }
+
+    /// <summary>Commits verbatim, the same as the strip and the retro grid: a name that happens to
+    /// match a placeholder is still a name someone chose.</summary>
+    private void EndRename(bool keep)
+    {
+        if (!_nameEditor.Visible)
+        {
+            return;
+        }
+
+        var instrument = _renaming;
+        _renaming = null;
+        _nameEditor.Visible = false;
+        _title.Visible = true;
+
+        if (!keep || instrument is null)
+        {
+            return;
+        }
+
+        string name = _nameEditor.Text.Trim();
+        if (name == instrument.Name)
+        {
+            return;
+        }
+
+        if (instrument == _instrument)
+        {
+            Commit(i => i.Name = name);
+            _title.Text = TitleOf(instrument);
+            return;
+        }
+
+        // Opened on one instrument and closed after the view moved to another: still that first
+        // instrument's name, and still an edit the host has to hear about.
+        instrument.Name = name;
+        Edited?.Invoke(instrument);
     }
 
     private static string Hex1(int value) => $"${value:X}";

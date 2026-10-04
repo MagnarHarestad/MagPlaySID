@@ -300,7 +300,8 @@ public sealed class AboutForm : Form
              "clip of that pattern changes with it.\n\n" +
              "In the arrange lanes, Ctrl+R makes the selected clip the one the channel restarts " +
              "at, and clicking a channel's name mutes it - the same mute the pattern view shows, " +
-             "not a second one. F2 or a double-click renames an instrument in the strip.\n\n");
+             "not a second one. F2 or a double-click renames an instrument in the strip, and so " +
+             "does a click on its name at the top of the instrument page.\n\n");
         Body("Piano keys across two octaves:\n\n");
         Mono("  Q 2 W 3 E R 5 T 6 Y 7 U     octave +1\n" +
              "  Z S X D C V G B H N J M     selected octave\n" +
