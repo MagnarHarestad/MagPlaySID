@@ -162,19 +162,40 @@ internal sealed class ArrangeView : Control
         _playheads[0] = channel1;
         _playheads[1] = channel2;
         _playheads[2] = channel3;
+
+        // Stopped: the next start is a clip to follow, even if it is the one followed last.
+        for (int ch = 0; ch < Song.ChannelCount; ch++)
+        {
+            if (_playheads[ch] < 0)
+                _followed[ch] = -1;
+        }
+
         Invalidate();
     }
 
+    /// <summary>Each channel's playhead as autoscroll last saw it, or -1.</summary>
+    private readonly int[] _followed = [-1, -1, -1];
+
     /// <summary>Autoscroll: moves the selection to whatever the selected channel is playing, which
-    /// takes the roll below along with it, and scrolls the lanes so that clip is in view.</summary>
+    /// takes the roll below along with it, and scrolls the lanes so that clip is in view.
+    ///
+    /// Only when the channel reaches a clip it has not been followed to yet - not on every tick -
+    /// so a clip clicked during playback stays selected until the channel moves on, instead of
+    /// being snatched back to the one playing before the click has shown anything.</summary>
     public void FollowPlayhead()
     {
         if (_song is not { } song)
             return;
 
+        // Every channel's playhead is noted, not only the selected one's: a click on another lane
+        // must not count as that lane having just moved.
+        bool moved = _playheads[_selectedChannel] != _followed[_selectedChannel];
+        for (int ch = 0; ch < Song.ChannelCount; ch++)
+            _followed[ch] = _playheads[ch];
+
         int playing = _playheads[_selectedChannel];
-        if (playing < 0 || playing == _selectedIndex
-            || playing >= song.ChannelOrders[_selectedChannel].Tokens.Count)
+        if (!moved || playing < 0 || playing >= song.ChannelOrders[_selectedChannel].Tokens.Count
+            || (playing == _selectedIndex && !_onRestart))
             return;
 
         _selectedIndex = playing;

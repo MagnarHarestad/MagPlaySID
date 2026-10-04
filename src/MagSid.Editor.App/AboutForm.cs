@@ -187,7 +187,8 @@ public sealed class AboutForm : Form
         // ------------------------------------------------------------------------------------
         Heading("DAW view");
         Mono("  ARRANGE / INSTRUMENT   The two pages\n" +
-             "  AUTOSCROLL             Let the roll follow playback\n" +
+             "  AUTOSCROLL             Let the roll follow playback. A clip clicked while\n" +
+             "                         playing stays until its channel reaches the next clip\n" +
              "  OCT                    Octave the typing keys play in\n\n");
         Body("Notes are written into the piano roll only in Edit mode, and only after you clicked " +
              "the roll or its beat bar. Anywhere else they just sound.\n\n");
