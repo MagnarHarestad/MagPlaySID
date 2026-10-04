@@ -250,6 +250,40 @@ internal sealed class DawView : Panel
             _instrumentList.SelectedIndex = Math.Clamp(previous, 0, _instrumentList.Items.Count - 1);
     }
 
+    /// <summary>One row of the instrument list: the text exactly where the plain list put it, and
+    /// the instrument's colour in the gap after the number.</summary>
+    private void DrawInstrumentItem(object? sender, DrawItemEventArgs e)
+    {
+        e.DrawBackground();
+        if (e.Index < 0 || e.Index >= _instrumentList.Items.Count)
+            return;
+
+        bool selected = (e.State & DrawItemState.Selected) != 0;
+        var ink = selected ? SystemColors.HighlightText : _instrumentList.ForeColor;
+        string text = _instrumentList.Items[e.Index]?.ToString() ?? string.Empty;
+        const TextFormatFlags flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+        TextRenderer.DrawText(e.Graphics, text, e.Font ?? _instrumentList.Font, e.Bounds with { X = e.Bounds.X - 1 }, ink, flags);
+
+        if (_song is not { } song || e.Index >= song.Instruments.Count)
+            return;
+
+        // Centred in the spaces between "01" and the name, measured in the list's own font.
+        var font = e.Font ?? _instrumentList.Font;
+        int numberEnd = TextRenderer.MeasureText(e.Graphics, "01", font, Size.Empty, flags).Width;
+        int nameStart = TextRenderer.MeasureText(e.Graphics, "01   ", font, Size.Empty, flags).Width;
+        int size = Math.Max(6, e.Bounds.Height - 6);
+        var swatch = new Rectangle(
+            e.Bounds.X + ((numberEnd + nameStart - size) / 2) - 2,
+            e.Bounds.Y + ((e.Bounds.Height - size) / 2),
+            size,
+            size);
+
+        using (var fill = new SolidBrush(DawPalette.ForInstrument(song.Instruments[e.Index].Number)))
+            e.Graphics.FillRectangle(fill, swatch);
+        using (var edge = new Pen(Color.FromArgb(90, 0, 0, 0)))
+            e.Graphics.DrawRectangle(edge, swatch.X, swatch.Y, swatch.Width - 1, swatch.Height - 1);
+    }
+
     private void BuildLayout()
     {
         _tabs.Dock = DockStyle.Top;
@@ -294,7 +328,13 @@ internal sealed class DawView : Panel
         _instrumentList.BorderStyle = BorderStyle.None;
         _instrumentList.Font = new Font("Consolas", 9f);
         _instrumentList.IntegralHeight = false;
-        _instrumentList.ItemHeight = 22;
+
+        // Drawn by hand for the colour square between number and name - the colour the roll
+        // gives that instrument's notes. Rows stay the GDI text height, what the list had
+        // before it was owner-drawn - the arrange strip's height is measured from it.
+        _instrumentList.DrawMode = DrawMode.OwnerDrawFixed;
+        _instrumentList.ItemHeight = TextRenderer.MeasureText("01", _instrumentList.Font, Size.Empty, TextFormatFlags.NoPadding).Height;
+        _instrumentList.DrawItem += DrawInstrumentItem;
         _instrumentList.SelectedIndexChanged += (_, _) =>
         {
             CommitRename(keep: true);
