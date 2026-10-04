@@ -121,7 +121,8 @@ public sealed class AboutForm : Form
              "like F1). Edit / Jam then stays on F5.\n\n" +
              "Song Length is the exported size. Rastertime is what the player costs per frame in " +
              "raster lines, average / worst, measured by running its own 6502 code over one pass " +
-             "of the song; hover it for cycles and where the worst frame is.\n\n");
+             "of the song; hover it for cycles and where the worst frame is. While the song plays, " +
+             "the first figure is live: the dearest of the frames just heard.\n\n");
 
         Heading("The menu bar");
         Mono("  Menu              About, New, Open, Save, Save As, Export to .sid,\n" +

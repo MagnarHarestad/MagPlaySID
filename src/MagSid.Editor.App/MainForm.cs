@@ -77,6 +77,13 @@ public sealed class MainForm : Form
     private readonly ToolStripLabel _rasterLabel = new("Rastertime: $-- / $-- (Max)");
     private readonly System.Windows.Forms.Timer _rasterDelay = new() { Interval = 400 };
     private CancellationTokenSource? _rasterCancel;
+
+    /// <summary>The last whole-song measurement, shown again when playback stops.</summary>
+    private RasterTimeResult? _rasterResult;
+
+    /// <summary>The player's 6502 code running alongside playback, for the live first figure.
+    /// Null while stopped, or when the song cannot be built into a player.</summary>
+    private LiveRasterTime? _liveRaster;
     private readonly ToolStripButton _nextPosition = new("▶");
     // Only needs to be fast enough to notice a new pattern/row-boundary reasonably promptly for
     // labels (PAT NN, marker prefixes) - the actual smooth-scroll animation no longer depends on
@@ -373,8 +380,45 @@ public sealed class MainForm : Form
         }
     }
 
+    /// <summary>Starts the 6502 player alongside a playback starting <paramref name="startFrame"/>
+    /// frames into the song. A song that cannot be built simply gets no live figure.</summary>
+    private void StartLiveRaster(int startFrame)
+    {
+        try
+        {
+            _liveRaster = new LiveRasterTime(SongCloner.Clone(_session.Song), EditorSettings.SidLoadAddress, startFrame);
+        }
+        catch (Exception)
+        {
+            _liveRaster = null;
+        }
+    }
+
+    private void StopLiveRaster()
+    {
+        _liveRaster = null;
+        if (_rasterResult is { } result)
+            ShowRasterTime(result);
+    }
+
+    /// <summary>The first figure follows the music while it plays: the dearest of the last few
+    /// frames heard. The second stays the whole song's worst.</summary>
+    private void ShowLiveRaster(int heardFrame)
+    {
+        if (_liveRaster?.Advance(heardFrame) is not { } cycles)
+            return;
+
+        int lines = (int)Math.Ceiling(cycles / (double)RasterTimeResult.CyclesPerLine);
+        string max = _rasterResult is { } result ? $"${result.MaxLines:X2}" : "$--";
+        _rasterLabel.Text = $"Rastertime: ${lines:X2} / {max} (Max)";
+    }
+
     private void ShowRasterTime(RasterTimeResult result)
     {
+        _rasterResult = result;
+        if (_liveRaster is not null)
+            return; // the live figure owns the label until playback stops
+
         _rasterLabel.Text = $"Rastertime: ${result.AverageLines:X2} / ${result.MaxLines:X2} (Max)";
 
         static string At(int frame) => TimeSpan.FromSeconds(frame / 50.0).ToString(@"m\:ss\.ff");
@@ -1083,7 +1127,9 @@ public sealed class MainForm : Form
             _jamEngine?.Dispose();
             _jamEngine = null;
 
-            var engine = new SongPlaybackEngine(_session.Song, _chipModel, ResumePosition());
+            var resume = ResumePosition();
+            var engine = new SongPlaybackEngine(_session.Song, _chipModel, resume);
+            StartLiveRaster(resume?.Frame ?? 0);
             ApplyChannelMutes(engine);
             _waveOut = new WaveOutEvent();
             _waveOut.PlaybackStopped += (_, _) => BeginInvoke(StopPlayback);
@@ -1288,6 +1334,7 @@ public sealed class MainForm : Form
 
         _playbackPollTimer.Stop();
         _playbackEngine = null;
+        StopLiveRaster();
         _trackerGrid.SetPlaybackActive(false);
         _playStopButton.Text = "▶ Play";
         _instrumentEditorPanel.SetPlaybackCoverage(null);
@@ -1312,6 +1359,8 @@ public sealed class MainForm : Form
         long heard = LivePlaybackSample();
         if (_playbackEngine.PositionAt(heard, out long capturedAt) is { Channels.Count: 3 } position)
         {
+            ShowLiveRaster(position.Frame);
+
             _dawView.SetPlayheads(
                 position.Channels[0].PlayingEntry, position.Channels[1].PlayingEntry, position.Channels[2].PlayingEntry);
 

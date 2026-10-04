@@ -31,11 +31,8 @@ public static class RasterTime
     public static RasterTimeResult Measure(Song song, int frames,
         int loadAddress = Core.SidLoadAddress.Default, CancellationToken cancel = default)
     {
-        var image = SongImageBuilder.Build(song, loadAddress);
-        var cpu = new PlayerCpu();
-        Array.Copy(image, 0, cpu.Memory, loadAddress, image.Length);
-
-        long init = cpu.Call(loadAddress, a: 0);
+        var player = new EmulatedPlayer(song, loadAddress);
+        long init = player.Init();
 
         long sum = 0, max = 0;
         int maxFrame = 0;
@@ -44,7 +41,7 @@ public static class RasterTime
             if ((frame & 1023) == 0)
                 cancel.ThrowIfCancellationRequested();
 
-            long cycles = cpu.Call(loadAddress + 3);
+            long cycles = player.Play();
             sum += cycles;
             if (cycles > max)
             {
