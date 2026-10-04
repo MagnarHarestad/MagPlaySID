@@ -28,6 +28,11 @@ internal sealed class ArrangeView : Control
     private const int HintHeight = 0;
     private const int ScrollHeight = 12;
 
+    // The RST block after a lane's last clip: where the channel's order runs out, and which entry
+    // it goes back to.
+    private const int RestartGap = 6;
+    private const int RestartWidth = 46;
+
     /// <summary>Tall enough for the ruler, the three lanes, the hint and the scroll bar - and no
     /// taller, because the piano roll below wants every pixel it can get.</summary>
     public const int PreferredHeight =
@@ -53,6 +58,25 @@ internal sealed class ArrangeView : Control
     private (int Channel, int Index) _hovered = (-1, -1);
     private readonly int[] _playheads = [-1, -1, -1];
 
+    /// <summary>The selected channel's RST block is selected rather than a clip. _selectedIndex
+    /// stays on the last clip meanwhile, so everything that reads it still finds a clip.</summary>
+    private bool _onRestart;
+    private int _hoveredRestart = -1;
+
+    /// <summary>Opened over an RST block on a double-click, for typing the restart entry.</summary>
+    private readonly TextBox _restartEntry = new()
+    {
+        Visible = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = DawPalette.Inset,
+        ForeColor = DawPalette.Text,
+        Font = new Font("Consolas", 10f, FontStyle.Bold),
+        TextAlign = HorizontalAlignment.Center,
+        MaxLength = 3,
+    };
+
+    private int _restartEntryChannel = -1;
+
     public ArrangeView()
     {
         SetStyle(
@@ -64,6 +88,17 @@ internal sealed class ArrangeView : Control
 
         _scroll.Scroll += (_, _) => Invalidate();
         Controls.Add(_scroll);
+
+        _restartEntry.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode is not (Keys.Enter or Keys.Escape))
+                return;
+
+            EndRestartEntry(keep: e.KeyCode == Keys.Enter);
+            e.Handled = e.SuppressKeyPress = true;
+        };
+        _restartEntry.LostFocus += (_, _) => EndRestartEntry(keep: true);
+        Controls.Add(_restartEntry);
     }
 
     /// <summary>The selected clip now points at a different pattern (channel, pattern number) - the
@@ -143,6 +178,7 @@ internal sealed class ArrangeView : Control
             return;
 
         _selectedIndex = playing;
+        _onRestart = false;
         ScrollIntoView(song.ChannelOrders[_selectedChannel], playing);
         Invalidate();
         AnnounceSelection();
@@ -279,6 +315,98 @@ internal sealed class ArrangeView : Control
         return null;
     }
 
+    /// <summary>A lane's RST block, in view coordinates.</summary>
+    private Rectangle RestartBox(ChannelOrder order, int channel) => new(
+        GutterWidth + LaneLength(order) - _scroll.Value + RestartGap,
+        LaneTop(channel) + 6,
+        RestartWidth,
+        LaneHeight - 14);
+
+    /// <summary>The channel whose RST block is under a point, or -1.</summary>
+    private int RestartAt(Point point)
+    {
+        if (_song is null || point.X < GutterWidth)
+            return -1;
+
+        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        {
+            if (RestartBox(_song.ChannelOrders[channel], channel).Contains(point))
+                return channel;
+        }
+
+        return -1;
+    }
+
+    private void SelectRestart(int channel)
+    {
+        if (_song is null)
+            return;
+
+        _selectedChannel = channel;
+        _selectedIndex = Math.Max(0, _song.ChannelOrders[channel].Tokens.Count - 1);
+        _onRestart = true;
+        Invalidate();
+        AnnounceSelection();
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && RestartAt(e.Location) is var channel and >= 0)
+        {
+            SelectRestart(channel);
+            BeginRestartEntry(channel);
+        }
+
+        base.OnMouseDoubleClick(e);
+    }
+
+    private void BeginRestartEntry(int channel)
+    {
+        if (_song is not { } song)
+            return;
+
+        var box = RestartBox(song.ChannelOrders[channel], channel);
+        _restartEntryChannel = channel;
+        _restartEntry.Text = song.ChannelOrders[channel].RestartPosition.ToString("00");
+        _restartEntry.ForeColor = DawPalette.Text;
+        _restartEntry.Bounds = new Rectangle(box.X + 2, box.Y + (box.Height / 2) - 12, box.Width - 4, 24);
+        _restartEntry.Visible = true;
+        _restartEntry.BringToFront();
+        _restartEntry.Focus();
+        _restartEntry.SelectAll();
+    }
+
+    private void EndRestartEntry(bool keep)
+    {
+        // Hiding a focused box moves the focus, and LostFocus comes back in here before the box
+        // counts as hidden - the channel is let go of first, so that second call finds nothing.
+        if (!_restartEntry.Visible || _restartEntryChannel < 0 || _song is not { } song)
+            return;
+
+        var order = song.ChannelOrders[_restartEntryChannel];
+        bool valid = int.TryParse(_restartEntry.Text.Trim(), out int typed)
+                     && typed >= 1 && typed <= order.Tokens.Count;
+
+        if (keep && !valid && _restartEntry.Focused)
+        {
+            // Not an entry of this channel's order: say so and stay open. Escape is the way out.
+            System.Media.SystemSounds.Beep.Play();
+            _restartEntry.ForeColor = Color.FromArgb(0xFF, 0x66, 0x66);
+            _restartEntry.SelectAll();
+            return;
+        }
+
+        _restartEntryChannel = -1;
+        _restartEntry.Visible = false;
+        Focus();
+
+        if (keep && valid && typed != order.RestartPosition)
+        {
+            order.RestartPosition = typed;
+            Edited();
+        }
+    }
+
     /// <summary>The last few pixels of a clip, where a drag changes the pattern's length. Every
     /// clip of that pattern changes with it, in this lane and the others - a pattern has one
     /// length, and the lanes are showing the same thing twice.</summary>
@@ -352,10 +480,12 @@ internal sealed class ArrangeView : Control
         Cursor = EndHandleAt(e.Location) is not null ? Cursors.SizeWE : Cursors.Default;
 
         var at = ClipAt(e.Location) ?? (-1, -1);
-        if (at != _hovered)
+        int restart = RestartAt(e.Location);
+        if (at != _hovered || restart != _hoveredRestart)
         {
             _hovered = at;
-            Cursor = at.Item2 >= 0 ? Cursors.Hand : Cursors.Default;
+            _hoveredRestart = restart;
+            Cursor = at.Item2 >= 0 || restart >= 0 ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
 
@@ -365,6 +495,7 @@ internal sealed class ArrangeView : Control
     protected override void OnMouseLeave(EventArgs e)
     {
         _hovered = (-1, -1);
+        _hoveredRestart = -1;
         Invalidate();
         base.OnMouseLeave(e);
     }
@@ -387,6 +518,7 @@ internal sealed class ArrangeView : Control
             _resizeChanged = false;
             _selectedChannel = handle.Channel;
             _selectedIndex = handle.Index;
+            _onRestart = false;
             Capture = true;
             Invalidate();
             AnnounceSelection();
@@ -398,8 +530,13 @@ internal sealed class ArrangeView : Control
         {
             _selectedChannel = at.Channel;
             _selectedIndex = at.Index;
+            _onRestart = false;
             Invalidate();
             AnnounceSelection();
+        }
+        else if (RestartAt(e.Location) is var restart and >= 0)
+        {
+            SelectRestart(restart);
         }
 
         base.OnMouseDown(e);
@@ -416,7 +553,7 @@ internal sealed class ArrangeView : Control
     }
 
     protected override bool IsInputKey(Keys keyData) => keyData is
-        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Insert
+        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Insert or Keys.Enter
         || (keyData & Keys.KeyCode) is Keys.Left or Keys.Right;
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -428,6 +565,13 @@ internal sealed class ArrangeView : Control
         }
 
         var order = song.ChannelOrders[_selectedChannel];
+
+        if (_onRestart)
+        {
+            RestartKey(order, e);
+            base.OnKeyDown(e);
+            return;
+        }
 
         if (!e.Control && !e.Alt && DigitOf(e.KeyCode) is { } digit)
         {
@@ -459,7 +603,10 @@ internal sealed class ArrangeView : Control
                 e.Handled = true;
                 break;
 
+            // Past the last clip is the lane's RST block.
             case Keys.Right:
+                if (_selectedIndex >= order.Tokens.Count - 1)
+                    _onRestart = true;
                 _selectedIndex = Math.Min(order.Tokens.Count - 1, _selectedIndex + 1);
                 Invalidate();
                 e.Handled = true;
@@ -502,8 +649,7 @@ internal sealed class ArrangeView : Control
                 break;
 
             // Where the channel goes back to at the end of its own order. Stored one-based, as
-            // the file format writes it. The lane already draws it as a loop sign on the entry it
-            // points at, which is the feedback this needs.
+            // the file format writes it; the lane's RST block shows it.
             case Keys.R when e.Control:
                 order.RestartPosition = _selectedIndex + 1;
                 Edited();
@@ -513,6 +659,51 @@ internal sealed class ArrangeView : Control
 
         AnnounceSelection();
         base.OnKeyDown(e);
+    }
+
+    /// <summary>Keys on a selected RST block: digits retype the restart entry the way they retype
+    /// a clip's pattern, Enter opens the box, Left goes back to the last clip, Up and Down move to
+    /// the next lane's RST block.</summary>
+    private void RestartKey(ChannelOrder order, KeyEventArgs e)
+    {
+        if (!e.Control && !e.Alt && DigitOf(e.KeyCode) is { } digit)
+        {
+            bool combine = _pendingDigit >= 0 && (DateTime.UtcNow - _lastDigitTime) < TimeSpan.FromMilliseconds(800);
+            int typed = combine ? (_pendingDigit * 10) + digit : digit;
+            _pendingDigit = combine ? -1 : digit;
+            _lastDigitTime = DateTime.UtcNow;
+
+            if (typed >= 1)
+            {
+                order.RestartPosition = Math.Min(typed, Math.Max(1, order.Tokens.Count));
+                Edited();
+            }
+
+            e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
+        switch (e.KeyCode)
+        {
+            case Keys.Left:
+                _onRestart = false;
+                _selectedIndex = Math.Max(0, order.Tokens.Count - 1);
+                Invalidate();
+                AnnounceSelection();
+                e.Handled = true;
+                break;
+
+            case Keys.Up:
+            case Keys.Down:
+                SelectRestart(Math.Clamp(_selectedChannel + (e.KeyCode == Keys.Up ? -1 : 1), 0, Song.ChannelCount - 1));
+                e.Handled = true;
+                break;
+
+            case Keys.Enter:
+                BeginRestartEntry(_selectedChannel);
+                e.Handled = e.SuppressKeyPress = true;
+                break;
+        }
     }
 
     private void ClampSelection()
@@ -687,11 +878,16 @@ internal sealed class ArrangeView : Control
                 continue;
 
             DrawClip(g, token.PatternNumber, new Rectangle(start, top + 6, width - 2, LaneHeight - 14),
-                selected: channel == _selectedChannel && i == _selectedIndex,
+                selected: channel == _selectedChannel && i == _selectedIndex && !_onRestart,
                 hovered: _hovered == (channel, i),
                 playing: _playheads[channel] == i,
-                restart: order.RestartPosition - 1 == i);
+                // Where the RST block points, picked out while it is pointed at - hovered or
+                // selected - rather than always: a mark on the first clip read as happening there.
+                restart: order.RestartPosition - 1 == i
+                         && (_hoveredRestart == channel || (_onRestart && _selectedChannel == channel)));
         }
+
+        DrawRestart(g, song, order, channel);
 
         // The end of the list, so a lane that stops early is obvious rather than just empty.
         int endX = GutterWidth + LaneLength(order) - _scroll.Value;
@@ -700,6 +896,55 @@ internal sealed class ArrangeView : Control
             using var endPen = new Pen(DawPalette.WithAlpha(DawPalette.TextFaint, 120)) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
             g.DrawLine(endPen, endX, top + 4, endX, top + LaneHeight - 4);
         }
+    }
+
+    /// <summary>The RST block: the restart entry, one-based as the file and the Retro view write
+    /// it, and the pattern that entry plays.</summary>
+    private void DrawRestart(Graphics g, Song song, ChannelOrder order, int channel)
+    {
+        var box = RestartBox(order, channel);
+        var clipped = Rectangle.Intersect(box, new Rectangle(GutterWidth, 0, Width - GutterWidth, Height));
+        if (clipped.Width <= 0 || order.Tokens.Count == 0)
+            return;
+
+        bool selected = _onRestart && _selectedChannel == channel;
+        bool hovered = _hoveredRestart == channel;
+        var accent = DawPalette.Effect;
+
+        using (var fill = new SolidBrush(hovered ? Color.FromArgb(0x1B, 0x23, 0x33) : Color.FromArgb(0x14, 0x1B, 0x29)))
+            g.FillRectangle(fill, clipped);
+        if (box.X >= GutterWidth)
+        {
+            using var edge = new SolidBrush(accent);
+            g.FillRectangle(edge, box.X, box.Y, 3, box.Height);
+        }
+        using (var border = new Pen(selected ? accent : DawPalette.WithAlpha(accent, 90), selected ? 1.6f : 1f))
+            g.DrawRectangle(border, clipped.X, clipped.Y, clipped.Width - 1, clipped.Height - 1);
+
+        var previous = g.Clip;
+        g.SetClip(clipped);
+
+        using (var label = new Font("Segoe UI", 6.5f, FontStyle.Bold))
+        using (var labelInk = new SolidBrush(DawPalette.WithAlpha(accent, 170)))
+            g.DrawString("RST", label, labelInk, box.X + 7, box.Y + 3);
+
+        if (box.Height >= 30)
+        {
+            using var valueFont = new Font("Consolas", 9.5f, FontStyle.Bold);
+            using var valueInk = new SolidBrush(accent);
+            g.DrawString($"{order.RestartPosition:00}", valueFont, valueInk, box.X + 6, box.Y + 15);
+        }
+
+        int target = order.RestartPosition - 1;
+        if (box.Height >= 48 && target >= 0 && target < order.Tokens.Count
+            && order.Tokens[target] is PatternRefToken token)
+        {
+            using var targetFont = new Font("Consolas", 7f);
+            using var targetInk = new SolidBrush(DawPalette.TextFaint);
+            g.DrawString($"P{token.PatternNumber:00}", targetFont, targetInk, box.X + 7, box.Y + 34);
+        }
+
+        g.Clip = previous;
     }
 
     private void DrawClip(Graphics g, int patternNumber, Rectangle box, bool selected, bool hovered, bool playing, bool restart)
@@ -732,11 +977,10 @@ internal sealed class ArrangeView : Control
             g.DrawString($"{patternNumber:00}", font, ink, clipped.X + 7, clipped.Y + 4);
         }
 
-        if (restart && clipped.Width > 12)
+        if (restart)
         {
-            using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
-            using var ink = new SolidBrush(DawPalette.Effect);
-            g.DrawString("↻", font, ink, clipped.Right - 14, clipped.Y + 3);
+            using var mark = new Pen(DawPalette.Effect, 1.6f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
+            g.DrawRectangle(mark, clipped.X, clipped.Y, clipped.Width - 1, clipped.Height - 1);
         }
     }
 }

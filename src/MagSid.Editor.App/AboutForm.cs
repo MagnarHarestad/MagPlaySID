@@ -204,7 +204,10 @@ public sealed class AboutForm : Form
              "  Ctrl+Left / Right  Move the clip\n" +
              "  Insert             Duplicate the clip\n" +
              "  Delete             Remove the clip\n" +
-             "  Ctrl+R             Channel restarts at this clip (↻)\n" +
+             "  RST block          After the last clip: where the channel restarts (entry and\n" +
+             "                     pattern). Hover or select it to see the target clip.\n" +
+             "                     Double-click, Enter or two digits to set it\n" +
+             "  Ctrl+R             Channel restarts at this clip\n" +
              "  Click CH name      Mute / unmute the channel\n" +
              "  Arrows             Move between clips and channels\n\n");
 
