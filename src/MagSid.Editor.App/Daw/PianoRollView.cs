@@ -37,8 +37,11 @@ internal sealed class PianoRollView : Control
     private const int KeyHeight = 15;
     private const int RowWidth = 22;
 
-    private const int LowestOctave = 1;
-    private const int HighestOctave = 6;
+    // The note table's whole range, C-0..B-7. Drums sit at the very ends - SOS's kick is a C-0 and
+    // its snare a C-7, their pitch coming from the note program - and a roll that stopped short of
+    // them drew those rows as if they were empty.
+    private const int LowestOctave = 0;
+    private const int HighestOctave = 7;
 
     /// <summary>Held notes, for the keyboard strip. A set rather than one note: three can sound
     /// at once, which is what the chip has.</summary>
