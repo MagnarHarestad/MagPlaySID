@@ -1,4 +1,4 @@
-namespace MagSid.Editor.App.Daw;
+﻿namespace MagSid.Editor.App.Daw;
 
 /// <summary>
 /// The DAW view's colours: one scheme across the arrangement, the piano roll and the instrument, so
@@ -35,16 +35,27 @@ internal static class DawPalette
 
     public static readonly Color ActiveInk = Color.FromArgb(0x12, 0x08, 0x1F);
 
-    /// <summary>One colour per instrument, by number. Wraps, because sixteen instruments is more
-    /// than a palette can keep distinct and a repeat is better than a muddy near-miss.</summary>
+    /// <summary>One colour per instrument, by number - sixteen, the format's own limit, so no two
+    /// instruments share one. All light enough for the dark note names drawn on them. Patterns
+    /// take the same colours by number, and past sixteen they wrap.</summary>
     private static readonly Color[] InstrumentColours =
     [
-        Color.FromArgb(0x35, 0xC8, 0xF0),
-        Color.FromArgb(0x3C, 0xE0, 0x8A),
-        Color.FromArgb(0xF0, 0xA8, 0x3C),
-        Color.FromArgb(0xA0, 0x6C, 0xF0),
-        Color.FromArgb(0xF0, 0x6E, 0x9A),
-        Color.FromArgb(0x6E, 0xE0, 0xD0),
+        Color.FromArgb(0x35, 0xC8, 0xF0), // cyan
+        Color.FromArgb(0x3C, 0xE0, 0x8A), // green
+        Color.FromArgb(0xF0, 0xA8, 0x3C), // orange
+        Color.FromArgb(0xA0, 0x6C, 0xF0), // purple
+        Color.FromArgb(0xF0, 0x6E, 0x9A), // pink
+        Color.FromArgb(0x6E, 0xE0, 0xD0), // aqua
+        Color.FromArgb(0xF0, 0xE0, 0x5A), // yellow
+        Color.FromArgb(0xF0, 0x60, 0x4C), // red
+        Color.FromArgb(0x6A, 0x8C, 0xF8), // blue
+        Color.FromArgb(0xB4, 0xE0, 0x4C), // lime
+        Color.FromArgb(0xE0, 0x7A, 0xE8), // magenta
+        Color.FromArgb(0xD8, 0xB8, 0x90), // tan
+        Color.FromArgb(0xC4, 0xB4, 0xFF), // lavender
+        Color.FromArgb(0xFF, 0xB4, 0xA0), // salmon
+        Color.FromArgb(0xC8, 0xA0, 0x40), // gold
+        Color.FromArgb(0xB8, 0xC0, 0xD0), // silver
     ];
 
     public static Color ForInstrument(int number) =>
