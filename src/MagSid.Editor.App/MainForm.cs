@@ -1242,7 +1242,7 @@ public sealed class MainForm : Form
         if (_playbackEngine.PositionAt(heard, out long capturedAt) is { Channels.Count: 3 } position)
         {
             _dawView.SetPlayheads(
-                position.Channels[0].OrderPos, position.Channels[1].OrderPos, position.Channels[2].OrderPos);
+                position.Channels[0].PlayingEntry, position.Channels[1].PlayingEntry, position.Channels[2].PlayingEntry);
 
             // The row being heard and how far through it - worked out from the sequencer's own
             // tick countdown rather than its raw row index, which jumps a note at a time. The

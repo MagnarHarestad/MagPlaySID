@@ -1,4 +1,4 @@
-using MagSid.Core.Model;
+﻿using MagSid.Core.Model;
 using MagSid.Core.Validation;
 
 namespace MagSid.Playback;
@@ -138,7 +138,7 @@ public sealed class SongSequencer
             // OrderPos points past the entry being played, so after the frame the entry that
             // just triggered is OrderPos - 1. Read through Capture rather than the field, so
             // this stays honest about only using what the type already publishes.
-            int entry = probe.Capture().Channels[channel].OrderPos - 1;
+            int entry = probe.Capture().Channels[channel].PlayingEntry;
 
             if (triggeredRow >= 0 && entry == orderIndex)
             {
@@ -455,7 +455,12 @@ public sealed class SongSequencer
         int RowIndex,
         int LoopStartRowIndex,
         int LoopRepeatCounter,
-        int Duration);
+        int Duration)
+    {
+        /// <summary>The order entry being played, or -1 before the first. OrderPos is where the
+        /// next pattern will be fetched from, one past this - not the entry itself.</summary>
+        public int PlayingEntry => OrderPos - 1;
+    }
 
     /// <summary>A whole-song instant: every channel plus the shared tick countdown, captured
     /// together so the parts stay in the same relation to each other when they are put back.</summary>
