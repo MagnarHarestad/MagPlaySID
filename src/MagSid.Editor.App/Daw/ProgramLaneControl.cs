@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -96,6 +96,14 @@ internal sealed class ProgramLaneControl : Control
 
     public int SelectedStep => _selected;
 
+    /// <summary>Lets go of the selected step without announcing it - for when the lane is given a
+    /// different instrument's program, whose step of the same number is a different step.</summary>
+    public void ClearSelection()
+    {
+        _selected = -1;
+        Invalidate();
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
         int at = CellAt(e.X, e.Y);
@@ -135,29 +143,42 @@ internal sealed class ProgramLaneControl : Control
             return;
         }
 
-        _selected = at;
+        // A second click on the selected step lets go of it - the way back to editing the
+        // instrument rather than one step of it.
+        _selected = at == _selected ? -1 : at;
         Invalidate();
-        StepSelected?.Invoke(at);
+        StepSelected?.Invoke(_selected);
 
         base.OnMouseClick(e);
     }
 
     protected override bool IsInputKey(Keys keyData) => keyData is
-        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Insert;
+        Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Delete or Keys.Insert or Keys.Escape;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         switch (e.KeyCode)
         {
+            // Moving the selection with the arrows is a selection like any other, so it is
+            // announced the same way a click is - whatever edits the selected step follows it.
             case Keys.Left:
                 _selected = Math.Max(0, _selected - 1);
                 Invalidate();
+                StepSelected?.Invoke(_selected);
                 e.Handled = true;
                 break;
 
             case Keys.Right:
                 _selected = Math.Min(_steps.Count - 1, _selected + 1);
                 Invalidate();
+                StepSelected?.Invoke(_selected);
+                e.Handled = true;
+                break;
+
+            case Keys.Escape when _selected >= 0:
+                _selected = -1;
+                Invalidate();
+                StepSelected?.Invoke(-1);
                 e.Handled = true;
                 break;
 

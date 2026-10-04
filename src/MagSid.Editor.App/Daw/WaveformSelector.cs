@@ -45,6 +45,7 @@ internal sealed class WaveformSelector : Control
     ];
 
     private byte _waveform = 0x41;
+    private string _target = string.Empty;
     private int _hovered = -1;
     private int _hoveredModifier = -1;
 
@@ -60,6 +61,22 @@ internal sealed class WaveformSelector : Control
     public event Action<byte>? WaveformChanged;
 
     public Color Accent { get; set; } = DawPalette.Oscillator;
+
+    /// <summary>What the tabs are editing when it is not the instrument itself - a wavetable step,
+    /// say. Shown in the preview where the hint usually is, so a click is never a surprise about
+    /// which byte it lands on. Empty for the instrument.</summary>
+    public string Target
+    {
+        get => _target;
+        set
+        {
+            if (_target == value)
+                return;
+
+            _target = value;
+            Invalidate();
+        }
+    }
 
     public byte Waveform
     {
@@ -215,8 +232,17 @@ internal sealed class WaveformSelector : Control
         g.DrawString($"${_waveform:X2}", hexFont, hexInk,
             new RectangleF(0, preview.Y + 2, preview.Width - 5, 12), far);
 
-        // A gesture nobody can see is a gesture nobody finds.
-        g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
+        if (_target.Length > 0)
+        {
+            using var targetFont = new Font("Consolas", 7f, FontStyle.Bold);
+            using var targetInk = new SolidBrush(Accent);
+            g.DrawString(_target, targetFont, targetInk, preview.X + 5, preview.Y + 2);
+        }
+        else
+        {
+            // A gesture nobody can see is a gesture nobody finds.
+            g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
+        }
     }
 
     private static void DrawTab(Graphics g, RectangleF box, string label, bool on, bool hovered, Color accent)

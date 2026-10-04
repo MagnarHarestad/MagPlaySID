@@ -246,7 +246,9 @@ public sealed class AboutForm : Form
 
         Heading("Instrument page");
         Mono("  Click the name        Rename\n" +
-             "  Waveform tab          Click: that waveform only. Right-click: combine\n" +
+             "  Waveform tab          Click: that waveform only. Right-click: combine.\n" +
+             "                        With a wavetable step selected it changes that step\n" +
+             "                        (click the step again or Escape to go back)\n" +
              "  Sync / Ring           Modulate against the previous voice\n" +
              "  Knob                  Drag up / down (Shift: fine), wheel, double-click to\n" +
              "                        reset, right-click for Learn MIDI / Forget\n" +

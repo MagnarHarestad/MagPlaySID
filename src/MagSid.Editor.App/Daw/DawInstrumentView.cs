@@ -98,6 +98,11 @@ internal sealed class DawInstrumentView : Panel
 
     public void LoadInstrument(Instrument? instrument)
     {
+        // Another instrument's step 02 is not this one's: a selection carried across would point
+        // the waveform tabs at a step nobody picked.
+        if (!ReferenceEquals(instrument, _instrument))
+            _wavetable.ClearSelection();
+
         _instrument = instrument;
         _loading = true;
 
@@ -111,6 +116,7 @@ internal sealed class DawInstrumentView : Panel
                 _noteProgram.SetSteps([]);
                 _filter.SetSteps([]);
                 ShowEnding(null);
+                ShowWaveformTarget(null);
                 return;
             }
 
@@ -120,7 +126,6 @@ internal sealed class DawInstrumentView : Panel
             _subtitle.Text = Describe(instrument);
 
             _waveform.Accent = accent;
-            _waveform.Waveform = instrument.Waveform;
 
             _attack.SetValueSilently(PackedNibbles.High(instrument.AttackDecay));
             _decay.SetValueSilently(PackedNibbles.Low(instrument.AttackDecay));
@@ -199,10 +204,55 @@ internal sealed class DawInstrumentView : Panel
             PackedNibbles.High(instrument.AttackDecay), PackedNibbles.Low(instrument.AttackDecay),
             PackedNibbles.High(instrument.SustainRelease), PackedNibbles.Low(instrument.SustainRelease));
 
-        _waveform.Waveform = instrument.Waveform;
         _wavetable.SetSteps(ProgramSteps.Wavetable(instrument));
         _noteProgram.SetSteps(ProgramSteps.NoteProgram(instrument));
         _filter.SetSteps(ProgramSteps.Filter(instrument));
+        ShowWaveformTarget(instrument);
+    }
+
+    /// <summary>The wavetable step the waveform tabs are editing, or -1 for the instrument's own
+    /// waveform.</summary>
+    private int WaveformStep(Instrument instrument) =>
+        _wavetable.SelectedStep >= 0 && _wavetable.SelectedStep < Wavetable(instrument).Count
+            ? _wavetable.SelectedStep
+            : -1;
+
+    /// <summary>Shows in the tabs whatever they will edit: the selected wavetable step's byte, or
+    /// the instrument's waveform when no step is selected.</summary>
+    private void ShowWaveformTarget(Instrument? instrument)
+    {
+        if (instrument is null)
+        {
+            _waveform.Target = string.Empty;
+            return;
+        }
+
+        int step = WaveformStep(instrument);
+        _waveform.Waveform = step >= 0 ? Wavetable(instrument)[step] : instrument.Waveform;
+        _waveform.Target = step >= 0 ? $"WAVETABLE STEP {step:00}  -  ESC FOR THE INSTRUMENT" : string.Empty;
+    }
+
+    /// <summary>
+    /// A waveform tab clicked with a wavetable step selected changes that step: the step takes the
+    /// new waveform, and sync and ring with it, but keeps its own gate and test bits - a step that
+    /// gates the note off or resets the oscillator does that on purpose, and picking a waveform
+    /// is not a reason to undo it. With no step selected, the instrument's own waveform changes.
+    /// </summary>
+    private void ApplyWaveform(Instrument instrument, byte chosen)
+    {
+        int step = WaveformStep(instrument);
+
+        // The implied one-step program is the instrument's waveform under another name; changing
+        // it there keeps the instrument free of a WAVE section it does not need.
+        if (step < 0 || instrument.Wavetable.Count == 0)
+        {
+            instrument.Waveform = chosen;
+            return;
+        }
+
+        var program = Wavetable(instrument);
+        program[step] = (byte)((program[step] & 0x09) | (chosen & 0xF6));
+        Apply(instrument, program);
     }
 
     private void WireKnobs()
@@ -225,7 +275,8 @@ internal sealed class DawInstrumentView : Panel
         _continuous.CheckedChanged += on => Commit(i => i.PulseContinuous = on);
         _noHardRestart.CheckedChanged += on => Commit(i => i.NoHardRestart = on);
 
-        _waveform.WaveformChanged += w => Commit(i => i.Waveform = w);
+        _waveform.WaveformChanged += w => Commit(i => ApplyWaveform(i, w));
+        _wavetable.StepSelected += _ => ShowWaveformTarget(_instrument);
 
         WireProgram(
             _wavetable,
