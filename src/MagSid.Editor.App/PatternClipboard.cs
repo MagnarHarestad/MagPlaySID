@@ -15,30 +15,18 @@ namespace MagSid.Editor.App;
 internal static class PatternClipboard
 {
     private static List<PatternRow> _rows = [];
-
-    // A range copy holds playable rows only and pastes over playable rows only, stepping around
-    // loop markers on both ends - a marker is structure, and a range dragged across one is about
-    // the notes, not about moving the loop. A whole-pattern copy is the pattern verbatim.
-    private static bool _isRange;
+    private static List<CopiedNote> _notes = [];
 
     public static bool HasContent => _rows.Count > 0;
 
-    public static void Copy(Pattern pattern)
-    {
-        _rows = [.. pattern.Rows];
-        _isRange = false;
-    }
+    public static void Copy(Pattern pattern) => _rows = [.. pattern.Rows];
 
-    /// <summary>The playable rows from <paramref name="fromRow"/> to <paramref name="toRow"/> -
-    /// what the piano roll's range tool copies.</summary>
-    public static void CopyRange(Pattern pattern, int fromRow, int toRow)
-    {
-        _rows = [.. pattern.Rows
-            .Skip(Math.Max(0, fromRow))
-            .Take(Math.Max(0, toRow - fromRow + 1))
-            .Where(row => row is not (LoopStartRow or LoopEndRow))];
-        _isRange = true;
-    }
+    /// <summary>Notes copied in the piano roll, each placed by its distance in beats from the first
+    /// of them - so a paste puts the same shape down wherever it is aimed. Kept apart from the
+    /// whole-pattern copy: one is notes, the other is a pattern's rows.</summary>
+    public static IReadOnlyList<CopiedNote> Notes => _notes;
+
+    public static void CopyNotes(IEnumerable<CopiedNote> notes) => _notes = [.. notes];
 
     /// <summary>Writes the copied rows over <paramref name="pattern"/> from <paramref name="row"/>
     /// on, growing it with holds if the copy runs past its end. Returns false when there is nothing
@@ -48,23 +36,6 @@ internal static class PatternClipboard
         if (_rows.Count == 0 || row < 0)
         {
             return false;
-        }
-
-        if (_isRange)
-        {
-            int next = row;
-            foreach (var copied in _rows)
-            {
-                while (next < pattern.Rows.Count && pattern.Rows[next] is LoopStartRow or LoopEndRow)
-                    next++;
-
-                if (next >= pattern.Rows.Count)
-                    pattern.Rows.Add(new HoldRow());
-
-                pattern.Rows[next++] = copied;
-            }
-
-            return true;
         }
 
         while (pattern.Rows.Count < row + _rows.Count)
@@ -80,3 +51,7 @@ internal static class PatternClipboard
         return true;
     }
 }
+
+/// <summary>One note on the clipboard: how many beats after the first copied note it starts, and
+/// what it is.</summary>
+internal sealed record CopiedNote(int BeatOffset, NoteName Note, int Instrument, int Length);

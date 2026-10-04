@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -7,7 +7,6 @@ namespace MagSid.Editor.App.Daw;
 internal enum RollTool
 {
     Select,
-    Range,
     Draw,
     Erase,
     Trim,
@@ -33,8 +32,7 @@ internal sealed class RollToolbar : Control
 
     private static readonly (RollTool Tool, string Name, string Help)[] Tools =
     [
-        (RollTool.Select, "Object Selection", "Click a note to select it, Ctrl+click to add to the selection, drag across the grid to select several. Drag selected notes to move them."),
-        (RollTool.Range, "Range Selection", "Drag across beats to select a range. Delete silences it, Shift+C copies it, Shift+V pastes it."),
+        (RollTool.Select, "Object Selection", "Click a note to select it, Ctrl+click to add, drag a box to select several. Drag them to move, drag an end to resize. Ctrl+X cuts, Ctrl+C copies, Ctrl+V pastes at the row picked in the beat bar."),
         (RollTool.Draw, "Draw", "Click to write a note, drag to give it a length. Drag a note's right edge to resize it."),
         (RollTool.Erase, "Erase", "Click or drag across notes to delete them."),
         (RollTool.Trim, "Trim", "Click inside a note to cut off everything after that point."),
@@ -168,14 +166,6 @@ internal sealed class RollToolbar : Control
                     new(x + 3, y + 1), new(x + 3, y + 14), new(x + 6.5f, y + 10.5f),
                     new(x + 9, y + 15), new(x + 11, y + 14), new(x + 8.5f, y + 9.5f), new(x + 13, y + 9.5f),
                 });
-                break;
-
-            case RollTool.Range:
-                // Two brackets with the span between them.
-                g.DrawLines(pen, new PointF[] { new(x + 4, y + 2), new(x + 1.5f, y + 2), new(x + 1.5f, y + 14), new(x + 4, y + 14) });
-                g.DrawLines(pen, new PointF[] { new(x + 12, y + 2), new(x + 14.5f, y + 2), new(x + 14.5f, y + 14), new(x + 12, y + 14) });
-                using (var span = new SolidBrush(Color.FromArgb(120, ink)))
-                    g.FillRectangle(span, x + 4, y + 6, 8, 4);
                 break;
 
             case RollTool.Draw:

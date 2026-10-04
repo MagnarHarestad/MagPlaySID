@@ -74,11 +74,6 @@ internal sealed class PianoRollView : Control
     private int _moveColumns;
     private int _moveKeys;
 
-    // Range selection, in beat columns, inclusive. -1 when there is none.
-    private int _rangeStart = -1;
-    private int _rangeEnd = -1;
-    private bool _rangeDragging;
-
     // The line tool's anchor cell and where the pointer is now.
     private (int Row, int Key)? _lineStart;
     private Point _linePointer;
@@ -87,67 +82,26 @@ internal sealed class PianoRollView : Control
     private bool _erasing;
     private bool _erased;
 
-    /// <summary>
-    /// What a click in the grid does.
-    ///
-    /// Going from Range Selection to Object Selection hands the range over: every note that starts
-    /// inside it becomes selected, so the lot can be moved or stretched together, and the range
-    /// stays drawn to show what was picked. Choosing Range Selection again lets the range go. Any
-    /// other change of tool drops whatever was selected - a selection carried into a tool that does
-    /// not act on one would leave keys acting on something no longer meant.
-    /// </summary>
+    /// <summary>What a click in the grid does. Changing tool drops the selected notes: a selection
+    /// carried into a tool that does not act on one would leave keys acting on something no
+    /// longer meant.</summary>
     public RollTool Tool
     {
         get => _tool;
         set
         {
-            var previous = _tool;
             _tool = value;
             _lineStart = null;
             _bandStart = null;
-
-            if (previous == RollTool.Range && value == RollTool.Select && _rangeStart >= 0)
-            {
-                SelectNotesInRange();
-            }
-            else
-            {
-                _selection.Clear();
-                _rangeStart = _rangeEnd = -1;
-            }
-
+            _selection.Clear();
             Cursor = CursorFor(value);
             Invalidate();
         }
     }
 
-    /// <summary>Every note that starts inside the range, as the object selection.</summary>
-    private void SelectNotesInRange()
-    {
-        int first = Math.Min(_rangeStart, _rangeEnd);
-        int last = Math.Max(_rangeStart, _rangeEnd);
-
-        _selection.Clear();
-        foreach (var note in _notes)
-        {
-            int column = ColumnOf(note.Row);
-            if (column >= first && column <= last)
-                _selection.Add(note.Row);
-        }
-    }
-
-    /// <summary>A range handed over to Object Selection is only a picture of what was picked. Once
-    /// the selection is changed by hand it no longer says anything, and goes.</summary>
-    private void DropHandedOverRange()
-    {
-        if (_tool == RollTool.Select)
-            _rangeStart = _rangeEnd = -1;
-    }
-
     private static Cursor CursorFor(RollTool tool) => tool switch
     {
         RollTool.Select => Cursors.Default,
-        RollTool.Range => Cursors.IBeam,
         RollTool.Erase => Cursors.No,
         RollTool.Trim => Cursors.SizeWE,
         RollTool.Split => Cursors.VSplit,
@@ -190,10 +144,7 @@ internal sealed class PianoRollView : Control
                 if (note is null)
                 {
                     if (!ModifierKeys.HasFlag(Keys.Control))
-                    {
                         _selection.Clear();
-                        DropHandedOverRange();
-                    }
 
                     _bandStart = e.Location;
                     _band = new Rectangle(e.Location, Size.Empty);
@@ -215,7 +166,6 @@ internal sealed class PianoRollView : Control
                 {
                     _selection.Clear();
                     _selection.Add(note.Row);
-                    DropHandedOverRange();
                 }
 
                 _selectedRow = note.Row;
@@ -227,17 +177,6 @@ internal sealed class PianoRollView : Control
                 Capture = true;
                 Invalidate();
                 return true;
-
-            case RollTool.Range:
-            {
-                int column = Math.Clamp(ColumnAtX(e.X), 0, Math.Max(0, ColumnCount - 1));
-                _rangeStart = _rangeEnd = column;
-                _rangeDragging = true;
-                _selectedRow = RowOf(column);
-                Capture = true;
-                Invalidate();
-                return true;
-            }
 
             case RollTool.Erase:
                 _erasing = true;
@@ -326,18 +265,6 @@ internal sealed class PianoRollView : Control
             return true;
         }
 
-        if (_rangeDragging)
-        {
-            int column = Math.Clamp(ColumnAtX(e.X), 0, Math.Max(0, ColumnCount - 1));
-            if (column != _rangeEnd)
-            {
-                _rangeEnd = column;
-                Invalidate();
-            }
-
-            return true;
-        }
-
         if (_erasing)
         {
             if (_pattern is { } pattern && CellAt(e.Location) is { } cell)
@@ -384,13 +311,6 @@ internal sealed class PianoRollView : Control
             Invalidate();
         }
 
-        if (_rangeDragging)
-        {
-            _rangeDragging = false;
-            Capture = false;
-            Invalidate();
-        }
-
         if (_erasing)
         {
             _erasing = false;
@@ -430,15 +350,6 @@ internal sealed class PianoRollView : Control
 
         PatternNotes.MoveNotes(pattern, moves);
 
-        // A range handed over from Range Selection travels with the notes it picked, so it still
-        // frames them.
-        if (_rangeStart >= 0)
-        {
-            int last = Math.Max(0, ColumnCount - 1);
-            _rangeStart = Math.Clamp(_rangeStart + _moveColumns, 0, last);
-            _rangeEnd = Math.Clamp(_rangeEnd + _moveColumns, 0, last);
-        }
-
         // The selection follows the notes to where they went.
         _selection.Clear();
         foreach (var move in moves)
@@ -451,76 +362,93 @@ internal sealed class PianoRollView : Control
     }
 
     /// <summary>
-    /// Keys that act on a tool's selection rather than on the selected row: Delete takes the
-    /// selected notes or silences the range, Shift+C and Shift+V copy and paste the range, and
-    /// Escape lets go of either. Returns true when the key belonged here.
+    /// Keys that act on the selected notes rather than on the selected row: Ctrl+X cuts them,
+    /// Ctrl+C copies them, Delete removes them and Escape lets go of them. Ctrl+V pastes what was
+    /// copied, starting at the selected row - which a click in the beat bar sets without writing
+    /// anything, so an empty spot can be aimed at. Returns true when the key belonged here.
     /// </summary>
     private bool HandleToolKey(KeyEventArgs e, Pattern pattern)
     {
-        bool hasRange = _tool == RollTool.Range && _rangeStart >= 0;
-        int first = Math.Min(_rangeStart, _rangeEnd);
-        int last = Math.Max(_rangeStart, _rangeEnd);
+        bool selected = _tool == RollTool.Select && _selection.Count > 0;
 
         switch (e.KeyCode)
         {
-            case Keys.Escape when _selection.Count > 0 || hasRange:
+            case Keys.Escape when _selection.Count > 0:
                 _selection.Clear();
-                _rangeStart = _rangeEnd = -1;
                 Invalidate();
                 break;
 
-            case Keys.Delete when _tool == RollTool.Select && _selection.Count > 0:
-                foreach (int row in _selection.OrderByDescending(r => r))
-                    PatternNotes.Erase(pattern, row);
-
-                _selection.Clear();
-                Commit();
+            case Keys.C when e.Control && selected:
+                CopySelection();
                 break;
 
-            case Keys.Delete when hasRange:
-                PatternNotes.ClearRange(pattern, RowOf(first), RowOf(last));
-                Commit();
+            case Keys.X when e.Control && selected:
+                CopySelection();
+                EraseSelection(pattern);
                 break;
 
-            case Keys.C when e.Shift && hasRange:
-                PatternClipboard.CopyRange(pattern, RowOf(first), RowOf(last));
+            case Keys.Delete when selected:
+                EraseSelection(pattern);
                 break;
 
-            case Keys.V when e.Shift && hasRange:
-                if (!PatternClipboard.PasteInto(pattern, RowOf(first)))
-                    return false;
-
-                Commit();
+            case Keys.V when e.Control && PatternClipboard.Notes.Count > 0 && _selectedRow >= 0:
+                PasteNotes(pattern);
                 break;
 
             default:
                 return false;
         }
 
-        e.Handled = true;
+        e.Handled = e.SuppressKeyPress = true;
         return true;
     }
 
-    /// <summary>What the tools have in hand, drawn over the notes: the range, the notes being
-    /// dragged at where they would land, the rubber band, and the line about to be drawn.</summary>
+    private void CopySelection()
+    {
+        var notes = _notes.Where(n => _selection.Contains(n.Row)).OrderBy(n => n.Row).ToList();
+        if (notes.Count == 0)
+            return;
+
+        int first = ColumnOf(notes[0].Row);
+        PatternClipboard.CopyNotes(notes.Select(n =>
+            new CopiedNote(ColumnOf(n.Row) - first, n.Note, n.InstrumentNumber, n.Length)));
+    }
+
+    private void EraseSelection(Pattern pattern)
+    {
+        foreach (int row in _selection.OrderByDescending(r => r))
+            PatternNotes.Erase(pattern, row);
+
+        _selection.Clear();
+        Commit();
+    }
+
+    /// <summary>Puts the copied notes down from the selected row on, keeping their spacing in beats
+    /// and their lengths, and leaves them selected - ready to drag straight on to where they
+    /// belong. What runs past the end of the pattern is cut off; a paste never lengthens it.
+    /// </summary>
+    private void PasteNotes(Pattern pattern)
+    {
+        int start = ColumnOf(_selectedRow);
+        var placed = PatternClipboard.Notes
+            .Where(n => start + n.BeatOffset < ColumnCount)
+            .Select(n => (Row: RowOf(start + n.BeatOffset), n.Note, n.Instrument, n.Length))
+            .ToList();
+
+        PatternNotes.PlaceNotes(pattern, placed);
+
+        _selection.Clear();
+        foreach (var note in placed)
+            _selection.Add(note.Row);
+
+        Commit();
+    }
+
+    /// <summary>What the tools have in hand, drawn over the notes: the notes being dragged at where
+    /// they would land, the rubber band, and the line about to be drawn.</summary>
     private void DrawToolOverlays(Graphics g)
     {
         int bottom = Height - _scrollX.Height;
-
-        if (_rangeStart >= 0)
-        {
-            int first = Math.Min(_rangeStart, _rangeEnd);
-            int last = Math.Max(_rangeStart, _rangeEnd);
-            int left = KeyboardWidth + (first * RowWidth) - _scrollX.Value;
-            int right = KeyboardWidth + ((last + 1) * RowWidth) - _scrollX.Value;
-
-            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Oscillator, 34)))
-                g.FillRectangle(fill, left, BeatBarTop, right - left, bottom - BeatBarTop);
-
-            using var edge = new Pen(DawPalette.WithAlpha(DawPalette.Oscillator, 180));
-            g.DrawLine(edge, left, BeatBarTop, left, bottom);
-            g.DrawLine(edge, right, BeatBarTop, right, bottom);
-        }
 
         if (_moving && (_moveColumns != 0 || _moveKeys != 0))
         {

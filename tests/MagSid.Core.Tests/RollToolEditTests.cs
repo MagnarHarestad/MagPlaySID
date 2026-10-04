@@ -116,6 +116,31 @@ public class RollToolEditTests
         Assert.Equal("G-4 ... ...", Shape(pattern));
     }
 
+    /// <summary>A paste: notes go in at their own lengths, released where holds would carry
+    /// them on, without disturbing the note already playing before them.</summary>
+    [Fact]
+    public void Placed_notes_keep_their_lengths()
+    {
+        var pattern = PatternOf(Note("C-4"), new HoldRow(), new HoldRow(), new HoldRow(), new HoldRow(), new HoldRow(), new HoldRow());
+
+        PatternNotes.PlaceNotes(pattern, [(2, N("E-4"), 1, 2), (4, N("G-4"), 1, 1)]);
+
+        Assert.Equal("C-4 ... E-4 ... G-4 --- ...", Shape(pattern));
+    }
+
+    /// <summary>A paste near the end of a pattern does not make the pattern longer: what does not
+    /// fit is cut short or left out.</summary>
+    [Fact]
+    public void Placed_notes_stop_at_the_end_of_the_pattern()
+    {
+        var pattern = PatternOf(new HoldRow(), new HoldRow(), new HoldRow());
+
+        PatternNotes.PlaceNotes(pattern, [(1, N("E-4"), 1, 4), (5, N("G-4"), 1, 1)]);
+
+        Assert.Equal("... E-4 ...", Shape(pattern));
+        Assert.Equal(3, pattern.Rows.Count);
+    }
+
     [Fact]
     public void Split_makes_two_notes_of_one()
     {

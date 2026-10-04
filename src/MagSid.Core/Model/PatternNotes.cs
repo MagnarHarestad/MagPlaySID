@@ -321,13 +321,28 @@ public static class PatternNotes
         foreach (var (from, _, _) in moves)
             Erase(pattern, from);
 
-        foreach (var (to, note, instrument, length) in lifted.OrderBy(l => l.ToRow))
+        PlaceNotes(pattern, lifted);
+    }
+
+    /// <summary>
+    /// Writes notes in at given rows, each exactly as long as given - what pasting copied notes
+    /// and putting moved ones down both come to.
+    ///
+    /// A note is cut short by a loop marker or the end of the pattern, and one landing on a marker
+    /// or past the end is left out; neither makes the pattern longer. A release follows each note
+    /// that would otherwise ring on into holds, and a note written over another replaces it - this
+    /// format plays one note at a time.
+    /// </summary>
+    public static void PlaceNotes(Pattern pattern, IEnumerable<(int Row, NoteName Note, int Instrument, int Length)> notes)
+    {
+        var rows = pattern.Rows;
+        foreach (var (row, note, instrument, length) in notes.OrderBy(n => n.Row))
         {
-            if (to < 0 || to >= rows.Count || rows[to] is LoopStartRow or LoopEndRow)
+            if (row < 0 || row >= rows.Count || rows[row] is LoopStartRow or LoopEndRow)
                 continue;
 
-            SetNote(pattern, to, note, instrument, length);
-            SetLength(pattern, to, length);
+            SetNote(pattern, row, note, instrument, length);
+            SetLength(pattern, row, length);
         }
     }
 

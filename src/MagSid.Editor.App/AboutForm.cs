@@ -211,17 +211,18 @@ public sealed class AboutForm : Form
         Heading("Piano roll tools");
         Mono("  Object Selection   Click a note, Ctrl+click to add, drag a box to select\n" +
              "                     several. Drag to move them, drag an end to resize them\n" +
-             "  Range Selection    Drag across beats. Delete silences, Shift+C copies,\n" +
-             "                     Shift+V pastes\n" +
              "  Draw               Click and drag - the note lasts as long as the drag\n" +
              "  Erase              Click or drag across notes\n" +
              "  Trim               Click inside a note to cut off the rest\n" +
              "  Split              Click inside a note to split it there\n" +
              "  Glue               Click a note to join it to the next\n" +
-             "  Line               Drag to draw a run of notes\n" +
-             "  Escape             Drop the selection or range\n\n");
-        Body("Range, then Object Selection: the notes in the range are selected, ready to move or " +
-             "resize together. Choose Range again to clear it.\n\n");
+             "  Line               Drag to draw a run of notes\n\n");
+        Body("With notes selected:\n\n");
+        Mono("  Ctrl+X    Cut\n" +
+             "  Ctrl+C    Copy\n" +
+             "  Ctrl+V    Paste at the selected row - click the beat bar to pick it\n" +
+             "  Delete    Remove\n" +
+             "  Escape    Deselect\n\n");
 
         Heading("Piano roll keys");
         Mono("  Right-click        Delete the note\n" +
