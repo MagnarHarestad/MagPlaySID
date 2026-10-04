@@ -373,8 +373,10 @@ internal sealed class DawInstrumentView : Panel
         _waveform.Height = 76;
         _waveform.Margin = new Padding(0, 0, 0, 8);
 
+        // Taller by the row the CONT and NO HR switches used to have under it - they sit beside
+        // the knobs now, and the curve is the thing on this panel that most wants the height.
         _envelope.Dock = DockStyle.Bottom;
-        _envelope.Height = 74;
+        _envelope.Height = 108;
 
         var knobRow = new FlowLayoutPanel
         {
@@ -384,29 +386,35 @@ internal sealed class DawInstrumentView : Panel
             WrapContents = false,
         };
 
-        Knob(_attack, "ATT", DawPalette.Oscillator, 0, 15, Hex1);
-        Knob(_decay, "DEC", DawPalette.Oscillator, 0, 15, Hex1);
-        Knob(_sustain, "SUS", DawPalette.Oscillator, 0, 15, Hex1);
-        Knob(_release, "REL", DawPalette.Oscillator, 0, 15, Hex1);
-        Knob(_pulseWidth, "PW", DawPalette.Envelope, 0, 15, v => v.ToString(), Instrument.DefaultPulseWidth);
-        Knob(_pulseSweep, "SWEEP", DawPalette.Envelope, -128, 127, v => v.ToString("+#;-#;0"));
-        knobRow.Controls.AddRange([_attack, _decay, _sustain, _release, _pulseWidth, _pulseSweep]);
+        Knob(_attack, "Attack", DawPalette.Oscillator, 0, 15, Hex1, bindingKey: "att");
+        Knob(_decay, "Decay", DawPalette.Oscillator, 0, 15, Hex1, bindingKey: "dec");
+        Knob(_sustain, "Sustain", DawPalette.Oscillator, 0, 15, Hex1, bindingKey: "sus");
+        Knob(_release, "Release", DawPalette.Oscillator, 0, 15, Hex1, bindingKey: "rel");
+        Knob(_pulseWidth, "Pulse", DawPalette.Envelope, 0, 15, v => v.ToString(), Instrument.DefaultPulseWidth, bindingKey: "pw");
+        Knob(_pulseSweep, "PulseSweep", DawPalette.Envelope, -128, 127, v => v.ToString("+#;-#;0"), bindingKey: "sweep");
+        foreach (var knob in new[] { _attack, _decay, _sustain, _release, _pulseWidth, _pulseSweep })
+            knob.Width = 64;    // room for the spelled-out names, PulseSweep the widest
 
-        var flags = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 34,
-            BackColor = DawPalette.Panel,
-            Padding = new Padding(4, 2, 4, 4),
-            WrapContents = false,
-        };
+        // CONT and NO HR are switches about the pulse and the envelope, so they stand beside the
+        // knobs for those, one above the other, rather than on a row of their own.
         _continuous.Accent = DawPalette.Envelope;
         _noHardRestart.Accent = DawPalette.Envelope;
+        var flags = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            BackColor = DawPalette.Panel,
+            Size = new Size(84, 66),
+            Margin = new Padding(10, 4, 0, 0),
+        };
+        _continuous.Margin = new Padding(0, 0, 0, 6);
+        _noHardRestart.Margin = Padding.Empty;
         flags.Controls.AddRange([_continuous, _noHardRestart]);
+
+        knobRow.Controls.AddRange([_attack, _decay, _sustain, _release, _pulseWidth, _pulseSweep, flags]);
 
         oscillator.Body.Controls.Add(knobRow);
         oscillator.Body.Controls.Add(_envelope);
-        oscillator.Body.Controls.Add(flags);
         oscillator.Body.Controls.Add(_waveform);
 
         // --- effects ----------------------------------------------------------------------
@@ -650,14 +658,15 @@ internal sealed class DawInstrumentView : Panel
 
     private static void Knob(
         KnobControl knob, string caption, Color accent, int minimum, int maximum,
-        Func<int, string> format, int defaultValue = 0)
+        Func<int, string> format, int defaultValue = 0, string? bindingKey = null)
     {
         knob.Caption = caption;
 
-        // Derived from the caption rather than listed separately, so a knob cannot be added with a
-        // binding key someone forgot to give it. Prefixed by panel, since CUTOFF means one thing on
-        // an instrument and another on a filter step.
-        knob.BindingKey = "instrument." + caption.ToLowerInvariant();
+        // Derived from the caption unless told otherwise, so a knob cannot be added with a binding
+        // key someone forgot to give it. Prefixed by panel, since CUTOFF means one thing on an
+        // instrument and another on a filter step. A knob whose caption has since been spelled out
+        // keeps the key it was saved under, or every controller bound to it would quietly let go.
+        knob.BindingKey = "instrument." + (bindingKey ?? caption.ToLowerInvariant());
         knob.Accent = accent;
         knob.Minimum = minimum;
         knob.Maximum = maximum;
