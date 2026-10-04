@@ -248,15 +248,44 @@ internal sealed class DawInstrumentView : Panel
             return;
 
         BeginStepEntry(_filter, cell, $"${instrument.Filter[step].Cutoff:X2}", text =>
-            ParseTypedCutoff(text) is { } cutoff
-                ? i => { if (step < i.Filter.Count) i.Filter[step] = WithCutoff(i.Filter[step], cutoff); }
+            ParseTypedHex(text, FilterStep.MinCutoff, FilterStep.MaxCutoff) is { } cutoff
+                ? i => { if (step < i.Filter.Count) i.Filter[step] = WithCutoff(i.Filter[step], cutoff - i.Filter[step].Cutoff); }
                 : null);
     }
 
-    /// <summary>A step with a new cutoff and everything else as it was - a setup step stays one.</summary>
-    private static FilterStep WithCutoff(FilterStep step, byte cutoff) => step.IsSetup
-        ? FilterStep.Setup(step.ModeVolume!.Value, step.ResonanceRouting!.Value, cutoff, step.SweepRate)
-        : FilterStep.Sweep(cutoff);
+    /// <summary>
+    /// The whole control register byte, typed: unlike the wheel, which only walks the waveform
+    /// bits, this is the way to set gate, sync, ring and test exactly. $00 ends a wavetable, so it
+    /// is not a step.
+    /// </summary>
+    private void BeginWaveEntry(int step, Rectangle cell)
+    {
+        if (_instrument is not { } instrument || step >= Wavetable(instrument).Count)
+            return;
+
+        BeginStepEntry(_wavetable, cell, $"${Wavetable(instrument)[step]:X2}", text =>
+            ParseTypedHex(text, 0x01, 0xFF) is { } value
+                ? i => SetWaveStep(i, step, value)
+                : null);
+    }
+
+    private static void SetWaveStep(Instrument instrument, int step, byte value)
+    {
+        // The implied one-step program is the instrument's waveform plus gate; a gated byte typed
+        // there is still that, so it stays the waveform rather than growing a WAVE section.
+        if (instrument.Wavetable.Count == 0 && (value & 0x01) != 0)
+        {
+            instrument.Waveform = (byte)((value & 0xFE) | (instrument.Waveform & 0x01));
+            return;
+        }
+
+        var program = Wavetable(instrument);
+        if (step >= program.Count)
+            return;
+
+        program[step] = value;
+        Apply(instrument, program);
+    }
 
     private void BeginStepEntry(ProgramLaneControl lane, Rectangle cell, string text,
                                 Func<string, Action<Instrument>?> parse)
@@ -305,15 +334,15 @@ internal sealed class DawInstrumentView : Panel
             Commit(edit);
     }
 
-    /// <summary>A cutoff as someone would type it: hex, with or without the $ - "40", "$4A".
-    /// $00 and $FF are the stream's end and setup markers, so not cutoffs.</summary>
-    private static byte? ParseTypedCutoff(string text)
+    /// <summary>A byte as someone would type it: hex, with or without the $ - "40", "$4A". Null
+    /// outside the range, which is where each program keeps its end and setup markers.</summary>
+    private static byte? ParseTypedHex(string text, byte minimum, byte maximum)
     {
         string trimmed = text.Trim().TrimStart('$');
         return trimmed.Length is >= 1 and <= 2
-               && byte.TryParse(trimmed, System.Globalization.NumberStyles.HexNumber, null, out byte cutoff)
-               && cutoff is >= FilterStep.MinCutoff and <= FilterStep.MaxCutoff
-            ? cutoff
+               && byte.TryParse(trimmed, System.Globalization.NumberStyles.HexNumber, null, out byte value)
+               && value >= minimum && value <= maximum
+            ? value
             : null;
     }
 
@@ -396,9 +425,10 @@ internal sealed class DawInstrumentView : Panel
         _waveform.WaveformChanged += w => Commit(i => ApplyWaveform(i, w));
         _wavetable.StepSelected += _ => ShowWaveformTarget(_instrument);
 
-        // Typing a note or a cutoff: Enter keeps it, Escape throws it away, and clicking elsewhere
+        // Typing a step's value: Enter keeps it, Escape throws it away, and clicking elsewhere
         // keeps it if it is a value at all. "C4" is taken as "C-4" - the dash is how the file
         // writes a natural, not something anyone should have to type.
+        _wavetable.StepDoubleClicked += BeginWaveEntry;
         _noteProgram.StepDoubleClicked += BeginNoteEntry;
         _filter.StepDoubleClicked += BeginCutoffEntry;
         _stepEntry.KeyDown += (_, e) =>

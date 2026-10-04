@@ -255,6 +255,8 @@ public sealed class AboutForm : Form
              "  CONT / NO HR          See Retro instruments\n" +
              "  Program lanes         Click + to add, wheel or Up / Down to change (Shift: x16),\n" +
              "                        right-click or Delete to remove, Insert to add\n" +
+             "  Wavetable step        Double-click to type the control byte in hex ($41, 11),\n" +
+             "                        $01-$FF\n" +
              "  Note program step     Double-click to type the note (C-4, D#5, C4). Enter keeps,\n" +
              "                        Escape cancels\n" +
              "  LOOP / HOLD / ROOT    What happens after the last note step (FROM: loop start)\n" +
