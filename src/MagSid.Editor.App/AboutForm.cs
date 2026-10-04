@@ -315,6 +315,12 @@ public sealed class AboutForm : Form
              "  Glue               Click a note to join it to the next one\n" +
              "  Line               Drag from one note to another to draw a run between them\n" +
              "  Escape             Lets go of a selection or a range\n\n");
+        Body("A range and the selection tool work together. Pick a range, then choose Object " +
+             "Selection: every note starting inside the range becomes selected, and the range " +
+             "stays drawn to show what was picked. Drag any of those notes to move them all - the " +
+             "range moves with them - or drag the end of one to make every selected note longer " +
+             "or shorter by the same number of beats. Choosing Range Selection again lets the " +
+             "range go.\n\n");
         Body("Deleting a note in the roll - right-click, Erase, or Delete on a selection - leaves " +
              "silence where it was. The pattern view's own clear turns the row into a hold, which " +
              "lets the note before it run on into the gap; in a roll that reads as the earlier " +

@@ -88,23 +88,60 @@ internal sealed class PianoRollView : Control
     private bool _erased;
 
     /// <summary>
-    /// What a click in the grid does. Changing tool drops whatever the last one had selected: a
-    /// range is not a selection of notes, and carrying one across would leave keys acting on
-    /// something no longer drawn.
+    /// What a click in the grid does.
+    ///
+    /// Going from Range Selection to Object Selection hands the range over: every note that starts
+    /// inside it becomes selected, so the lot can be moved or stretched together, and the range
+    /// stays drawn to show what was picked. Choosing Range Selection again lets the range go. Any
+    /// other change of tool drops whatever was selected - a selection carried into a tool that does
+    /// not act on one would leave keys acting on something no longer meant.
     /// </summary>
     public RollTool Tool
     {
         get => _tool;
         set
         {
+            var previous = _tool;
             _tool = value;
-            _selection.Clear();
-            _rangeStart = _rangeEnd = -1;
             _lineStart = null;
             _bandStart = null;
+
+            if (previous == RollTool.Range && value == RollTool.Select && _rangeStart >= 0)
+            {
+                SelectNotesInRange();
+            }
+            else
+            {
+                _selection.Clear();
+                _rangeStart = _rangeEnd = -1;
+            }
+
             Cursor = CursorFor(value);
             Invalidate();
         }
+    }
+
+    /// <summary>Every note that starts inside the range, as the object selection.</summary>
+    private void SelectNotesInRange()
+    {
+        int first = Math.Min(_rangeStart, _rangeEnd);
+        int last = Math.Max(_rangeStart, _rangeEnd);
+
+        _selection.Clear();
+        foreach (var note in _notes)
+        {
+            int column = ColumnOf(note.Row);
+            if (column >= first && column <= last)
+                _selection.Add(note.Row);
+        }
+    }
+
+    /// <summary>A range handed over to Object Selection is only a picture of what was picked. Once
+    /// the selection is changed by hand it no longer says anything, and goes.</summary>
+    private void DropHandedOverRange()
+    {
+        if (_tool == RollTool.Select)
+            _rangeStart = _rangeEnd = -1;
     }
 
     private static Cursor CursorFor(RollTool tool) => tool switch
@@ -141,21 +178,22 @@ internal sealed class PianoRollView : Control
         switch (_tool)
         {
             case RollTool.Select:
-                // A note's end is still its handle under the selection tool, as in Cubase.
+                // A note's end is still its handle under the selection tool, as in Cubase - and
+                // grabbing the end of a selected note stretches every selected note by the same
+                // number of beats.
                 if (note is not null && OverEndHandle(note, e.X))
                 {
-                    _resizingRow = note.Row;
-                    _resizeChanged = false;
-                    _selectedRow = note.Row;
-                    Capture = true;
-                    Invalidate();
+                    BeginResize(note, together: _selection.Contains(note.Row));
                     return true;
                 }
 
                 if (note is null)
                 {
                     if (!ModifierKeys.HasFlag(Keys.Control))
+                    {
                         _selection.Clear();
+                        DropHandedOverRange();
+                    }
 
                     _bandStart = e.Location;
                     _band = new Rectangle(e.Location, Size.Empty);
@@ -177,6 +215,7 @@ internal sealed class PianoRollView : Control
                 {
                     _selection.Clear();
                     _selection.Add(note.Row);
+                    DropHandedOverRange();
                 }
 
                 _selectedRow = note.Row;
@@ -390,6 +429,15 @@ internal sealed class PianoRollView : Control
         }
 
         PatternNotes.MoveNotes(pattern, moves);
+
+        // A range handed over from Range Selection travels with the notes it picked, so it still
+        // frames them.
+        if (_rangeStart >= 0)
+        {
+            int last = Math.Max(0, ColumnCount - 1);
+            _rangeStart = Math.Clamp(_rangeStart + _moveColumns, 0, last);
+            _rangeEnd = Math.Clamp(_rangeEnd + _moveColumns, 0, last);
+        }
 
         // The selection follows the notes to where they went.
         _selection.Clear();
@@ -1119,21 +1167,53 @@ internal sealed class PianoRollView : Control
     /// </summary>
     private void DragNoteEnd(int x)
     {
-        if (_pattern is not { } pattern || _notes.FirstOrDefault(n => n.Row == _resizingRow) is not { } note)
+        if (_pattern is not { } pattern || !_resizeFrom.TryGetValue(_resizingRow, out int grabbedFrom))
         {
             return;
         }
 
+        // How far the grabbed note's end has moved, in beats, from where the drag began - and every
+        // note being stretched moves its own end by that much from its own starting length. Each
+        // is measured from the start of the drag rather than from the last step, so going back
+        // and forth never drifts.
         int column = (x - KeyboardWidth + _scrollX.Value) / RowWidth;
-        int length = Math.Clamp(column - ColumnOf(note.Row) + 1, 1, DraggableLength(pattern, note.Row));
+        int delta = (column - ColumnOf(_resizingRow) + 1) - grabbedFrom;
 
-        if (!PatternNotes.SetLength(pattern, note.Row, length))
+        bool changed = false;
+        foreach (var (row, from) in _resizeFrom)
+        {
+            int length = Math.Clamp(from + delta, 1, DraggableLength(pattern, row));
+            changed |= PatternNotes.SetLength(pattern, row, length);
+        }
+
+        if (!changed)
         {
             return;
         }
 
         _resizeChanged = true;
         Reread();
+        Invalidate();
+    }
+
+    /// <summary>The notes a resize drag is stretching, and how long each was when it began.</summary>
+    private readonly Dictionary<int, int> _resizeFrom = [];
+
+    /// <summary>Starts dragging a note's end - that note alone, or with <paramref name="together"/>
+    /// every selected note, each keeping its own length plus whatever the drag adds.</summary>
+    private void BeginResize(NoteBlock grabbed, bool together)
+    {
+        _resizeFrom.Clear();
+        foreach (var note in _notes)
+        {
+            if (note.Row == grabbed.Row || (together && _selection.Contains(note.Row)))
+                _resizeFrom[note.Row] = note.Length;
+        }
+
+        _resizingRow = grabbed.Row;
+        _resizeChanged = false;
+        _selectedRow = grabbed.Row;
+        Capture = true;
         Invalidate();
     }
 
@@ -1220,11 +1300,7 @@ internal sealed class PianoRollView : Control
         // so shortening one is the commonest edit there is, and it should not need the keyboard.
         if (existing is not null && KeyForNote(existing.Note) == cell.Key && OverEndHandle(existing, e.X))
         {
-            _resizingRow = existing.Row;
-            _resizeChanged = false;
-            _selectedRow = existing.Row;
-            Capture = true;
-            Invalidate();
+            BeginResize(existing, together: false);
             return;
         }
 
@@ -1248,10 +1324,13 @@ internal sealed class PianoRollView : Control
         Audition(placed, _defaultInstrument);
 
         Reread();
-        _resizingRow = cell.Row;
-        _resizeChanged = true;     // the note itself is already an edit, drag or no drag
-        Capture = true;
-        DragNoteEnd(e.X);
+        if (_notes.FirstOrDefault(n => n.Row == cell.Row) is { } drawn)
+        {
+            BeginResize(drawn, together: false);
+            _resizeChanged = true;     // the note itself is already an edit, drag or no drag
+            DragNoteEnd(e.X);
+        }
+
         Invalidate();
 
         base.OnMouseDown(e);
