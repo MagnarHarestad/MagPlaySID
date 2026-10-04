@@ -28,7 +28,19 @@ public static class SongCoverageAnalyzer
     /// pass, and a row's note length is fixed - so each note exercises its instrument's programs
     /// the same way on every repeat.
     /// </summary>
-    public static IReadOnlyList<ProgramCoverage> Run(Song song, int frameCap = DefaultFrameCap)
+    public static IReadOnlyList<ProgramCoverage> Run(Song song, int frameCap = DefaultFrameCap) =>
+        Pass(song, frameCap, out _).AllCoverage;
+
+    /// <summary>How many frames one full pass of every channel's order list takes - the same
+    /// stopping rule as <see cref="Run"/>, for anything else that wants to cover the whole song
+    /// once, such as measuring the player's rastertime.</summary>
+    public static int PassFrames(Song song, int frameCap = DefaultFrameCap)
+    {
+        Pass(song, frameCap, out int frames);
+        return frames;
+    }
+
+    private static SongSequencer Pass(Song song, int frameCap, out int frames)
     {
         var sequencer = new SongSequencer(song, static (_, _) => { });
 
@@ -45,6 +57,7 @@ public static class SongCoverageAnalyzer
             target[ch] = song.ChannelOrders[ch].Tokens.Count + 1;
         }
 
+        frames = frameCap;
         for (int frame = 0; frame < frameCap; frame++)
         {
             sequencer.Frame();
@@ -61,10 +74,11 @@ public static class SongCoverageAnalyzer
 
             if (complete)
             {
+                frames = frame + 1;
                 break;
             }
         }
 
-        return sequencer.AllCoverage;
+        return sequencer;
     }
 }

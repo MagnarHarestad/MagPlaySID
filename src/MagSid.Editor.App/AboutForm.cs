@@ -118,7 +118,10 @@ public sealed class AboutForm : Form
              "mode also silences every voice. The toolbar shows the mode and which key toggles " +
              "it; clicking it toggles too.\n\n" +
              "Menu → Swap Spacebar Behavior makes Space play and stop the song (from the start, " +
-             "like F1). Edit / Jam then stays on F5.\n\n");
+             "like F1). Edit / Jam then stays on F5.\n\n" +
+             "Song Length is the exported size. Rastertime is what the player costs per frame in " +
+             "raster lines, average / worst, measured by running its own 6502 code over one pass " +
+             "of the song; hover it for cycles and where the worst frame is.\n\n");
 
         Heading("The menu bar");
         Mono("  Menu              About, New, Open, Save, Save As, Export to .sid,\n" +

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel;
 using System.Diagnostics;
+using MagSid.Assembler;
 using MagSid.Core;
 using MagSid.Core.Model;
 using MagSid.Core.Serialization;
@@ -68,6 +69,14 @@ public sealed class MainForm : Form
     /// every edit rather than by running the assembler - see SongSizeCalculator, whose figures
     /// are pinned to real c6510 builds by SongSizeTests. Hovering breaks the total down.</summary>
     private readonly ToolStripLabel _songLengthLabel = new("Song Length: $000");
+
+    /// <summary>What "jsr play" costs, in raster lines: the average over one pass of the song and
+    /// the worst single frame. Measured by running the player's own 6502 code - see RasterTime -
+    /// which takes a few hundred milliseconds, so it runs in the background a moment after the
+    /// song stops changing rather than on every keystroke like the length beside it.</summary>
+    private readonly ToolStripLabel _rasterLabel = new("Rastertime: $-- / $-- (Max)");
+    private readonly System.Windows.Forms.Timer _rasterDelay = new() { Interval = 400 };
+    private CancellationTokenSource? _rasterCancel;
     private readonly ToolStripButton _nextPosition = new("▶");
     // Only needs to be fast enough to notice a new pattern/row-boundary reasonably promptly for
     // labels (PAT NN, marker prefixes) - the actual smooth-scroll animation no longer depends on
@@ -321,6 +330,64 @@ public sealed class MainForm : Form
             $"  filters     {size.FilterPoolBytes,5}",
             $"  song order  {size.OrderBytes,5}",
             $"  note table  {size.NoteTableBytes,5}");
+
+        // Every edit restarts the wait, so typing a run of notes measures once, after the last.
+        _rasterDelay.Stop();
+        _rasterDelay.Start();
+    }
+
+    /// <summary>Measures the song as it stands now, on a copy, off the UI thread. A newer edit
+    /// cancels a measurement still running, so only the latest one ever reaches the label.</summary>
+    private async void MeasureRasterTime()
+    {
+        _rasterDelay.Stop();
+        _rasterCancel?.Cancel();
+        var cancel = new CancellationTokenSource();
+        _rasterCancel = cancel;
+
+        var song = SongCloner.Clone(_session.Song);
+        int loadAddress = EditorSettings.SidLoadAddress;
+
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                int frames = SongCoverageAnalyzer.PassFrames(song);
+                return RasterTime.Measure(song, frames, loadAddress, cancel.Token);
+            }, cancel.Token);
+
+            if (cancel.IsCancellationRequested || IsDisposed)
+                return;
+
+            ShowRasterTime(result);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer edit took over.
+        }
+        catch (Exception ex) when (!cancel.IsCancellationRequested && !IsDisposed)
+        {
+            // A song the exporter cannot build has no player to measure either.
+            _rasterLabel.Text = "Rastertime: $-- / $-- (Max)";
+            _rasterLabel.ToolTipText = "Not measured: " + ex.Message;
+        }
+    }
+
+    private void ShowRasterTime(RasterTimeResult result)
+    {
+        _rasterLabel.Text = $"Rastertime: ${result.AverageLines:X2} / ${result.MaxLines:X2} (Max)";
+
+        static string At(int frame) => TimeSpan.FromSeconds(frame / 50.0).ToString(@"m\:ss\.ff");
+        const int line = RasterTimeResult.CyclesPerLine;
+
+        _rasterLabel.ToolTipText = string.Join(Environment.NewLine,
+            "Raster lines for \"jsr play\" - the player's own 6502 code, run cycle by cycle",
+            $"over one pass of the song ({result.Frames} frames, {At(result.Frames)}).",
+            $"  average {result.AverageCycles,5:F0} cycles  {result.AverageCycles / line,5:F1} lines",
+            $"  max     {result.MaxCycles,5} cycles  {result.MaxCycles / (double)line,5:F1} lines, at {At(result.MaxFrame)}",
+            $"  init    {result.InitCycles,5} cycles",
+            "PAL: 63 cycles a line, 312 lines a frame. Badlines and sprites on",
+            "screen take cycles too, so in the visible area it runs a little longer.");
     }
 
     private ToolStrip BuildToolbar()
@@ -346,6 +413,8 @@ public sealed class MainForm : Form
 
         toolbar.Items.Add(new ToolStripSeparator());
         toolbar.Items.Add(_songLengthLabel);
+        toolbar.Items.Add(new ToolStripSeparator());
+        toolbar.Items.Add(_rasterLabel);
 
         return toolbar;
     }
@@ -781,6 +850,8 @@ public sealed class MainForm : Form
         };
         _playbackPollTimer.Tick += (_, _) => DrainPlaybackEvents();
         FormClosing += (_, _) => StopPlayback();
+        FormClosing += (_, _) => _rasterCancel?.Cancel();
+        _rasterDelay.Tick += (_, _) => MeasureRasterTime();
     }
 
     /// <summary>Mirrors TrackerGridControl.EditMode onto the toolbar. Colored rather than just
