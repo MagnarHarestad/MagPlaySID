@@ -1,4 +1,4 @@
-namespace MagSid.Core.Model;
+﻿namespace MagSid.Core.Model;
 
 /// <summary>
 /// A PATnn: block. Patterns are a single pool shared by all channels - the same pattern
@@ -6,10 +6,10 @@ namespace MagSid.Core.Model;
 /// </summary>
 public sealed class Pattern
 {
-    /// <summary>Rows a freshly created pattern is given. A pattern with none draws as blank
-    /// space in the tracker grid, which reads as "nothing works here" rather than "type here" -
-    /// so both the new-song pattern and any pattern created while editing start with these.</summary>
-    public const int DefaultNewRows = 4;
+    /// <summary>Rows a freshly created pattern is given: one bar of sixteen, which is what the DAW
+    /// view's grid counts in. Both the new song's patterns and any pattern created while editing
+    /// start with these.</summary>
+    public const int DefaultNewRows = 16;
 
     public int Number { get; set; }
     public List<PatternRow> Rows { get; } = [];

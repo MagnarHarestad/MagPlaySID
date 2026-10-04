@@ -1,4 +1,4 @@
-using MagSid.Core;
+﻿using MagSid.Core;
 using MagSid.Core.Model;
 using MagSid.Core.Serialization;
 using MagSid.Core.Validation;
@@ -267,7 +267,6 @@ public sealed class EditorSession
     private static Song CreateNewSong()
     {
         var song = new Song();
-        song.Patterns.Add(Pattern.CreateEmpty(1));
 
         // One instrument from the start. Without it the song saves but will not assemble:
         // Startup\Tables.s only emits ad_table/sr_table/wave_table when there is at least one
@@ -276,13 +275,14 @@ public sealed class EditorSession
         // means notes can be typed immediately instead of hitting "Add an instrument first".
         song.Instruments.Add(Instrument.CreateDefault(1));
 
-        // Every channel starts pointed at that one pattern. SongValidator requires a non-empty
-        // order per channel, so a song without this can't be saved at all - and since the
-        // tracker grid edits order entries in place (there is no separate order panel any
-        // more), an empty list would also leave nothing on screen to put the cursor on.
-        foreach (var order in song.ChannelOrders)
+        // A pattern of its own per channel - P01 on CH1, P02 on CH2, P03 on CH3 - so each part can
+        // be written straight away without the three writing over one shared pattern. Every
+        // channel needs a non-empty order for the song to save at all.
+        for (int channel = 0; channel < Song.ChannelCount; channel++)
         {
-            order.Tokens.Add(new PatternRefToken(1));
+            int number = channel + 1;
+            song.Patterns.Add(Pattern.CreateEmpty(number));
+            song.ChannelOrders[channel].Tokens.Add(new PatternRefToken(number));
         }
 
         return song;
