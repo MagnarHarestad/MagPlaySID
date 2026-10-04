@@ -257,8 +257,16 @@ internal sealed class PianoRollView : Control
             int keys = KeyAtY(e.Y) - _moveFromKey;
             if (columns != _moveColumns || keys != _moveKeys)
             {
+                bool pitchChanged = keys != _moveKeys;
                 _moveColumns = columns;
                 _moveKeys = keys;
+
+                // One note dragged to a new pitch sounds at that pitch, as the key for it would -
+                // so the ear follows the hand. Not a whole selection: a chord shape moved as one
+                // is judged by where it lands, and three voices restarting on every step is noise.
+                if (pitchChanged && _selection.Count == 1)
+                    AuditionMovedNote();
+
                 Invalidate();
             }
 
@@ -331,6 +339,17 @@ internal sealed class PianoRollView : Control
             PatternNotes.DrawLine(drawn, start.Row, NoteForKey(start.Key), endRow, NoteForKey(KeyAtY(e.Y)), _defaultInstrument);
             Commit();
         }
+    }
+
+    /// <summary>Plays the one note being dragged at the pitch it would land on now.</summary>
+    private void AuditionMovedNote()
+    {
+        int row = _selection.First();
+        if (_notes.FirstOrDefault(n => n.Row == row) is not { } note)
+            return;
+
+        int key = Math.Clamp(KeyForNote(note.Note) + _moveKeys, 0, KeyCount - 1);
+        Audition(NoteForKey(key), note.InstrumentNumber);
     }
 
     /// <summary>Puts the dragged selection down where the drag left it - the same distance in beats
