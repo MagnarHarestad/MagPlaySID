@@ -556,10 +556,10 @@ public sealed class MainForm : Form
     {
         if (_dawShowing)
         {
-            // Edit mode writes it into the roll, Jam mode only sounds it - the same rule the
-            // tracker's own entry path follows, decided by the same toolbar switch, so flipping to
-            // Jam means the same thing in both views.
-            if (_trackerGrid.EditMode)
+            // Written into the roll only in Edit mode, and only when the roll is where you are
+            // working - clicked into, the note grid or the beat bar. Jam mode, or a note played
+            // from the lanes or the instrument page, only sounds.
+            if (_trackerGrid.EditMode && _dawView.RollHasFocus)
             {
                 _dawView.StepInput(note);
             }
@@ -888,7 +888,9 @@ public sealed class MainForm : Form
     /// </summary>
     private void OnDawKeyDown(object? sender, KeyEventArgs e)
     {
-        if (!_dawShowing || TypingInAField() || e.Control || e.Alt)
+        // The arrange lanes take digits as pattern numbers, and 2, 3, 5, 6 and 7 are piano keys -
+        // so with the lanes focused the keyboard edits the arrangement instead of playing.
+        if (!_dawShowing || TypingInAField() || e.Control || e.Alt || _dawView.ArrangeHasFocus)
         {
             return;
         }

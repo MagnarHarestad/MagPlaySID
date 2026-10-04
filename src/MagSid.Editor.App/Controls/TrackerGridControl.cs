@@ -1705,17 +1705,7 @@ public sealed class TrackerGridControl : Control
         _pendingOrderDigit = combine ? -1 : digit;
         _lastOrderDigitTime = DateTime.UtcNow;
 
-        int newValue;
-        if (typed == _song.Patterns.Count + 1)
-        {
-            _song.Patterns.Add(Pattern.CreateEmpty(typed));
-            newValue = typed;
-        }
-        else
-        {
-            newValue = Math.Clamp(typed, 1, _song.Patterns.Count);
-        }
-
+        int newValue = _song.ResolveTypedPatternNumber(typed);
         _song.ChannelOrders[_cursorChannel].Tokens[r.OrderIndex] = new PatternRefToken(newValue);
         Edited?.Invoke();
         Invalidate();

@@ -426,6 +426,14 @@ internal sealed class ArrangeView : Control
 
         var order = song.ChannelOrders[_selectedChannel];
 
+        if (!e.Control && !e.Alt && DigitOf(e.KeyCode) is { } digit)
+        {
+            EnterPatternDigit(song, order, digit);
+            e.Handled = e.SuppressKeyPress = true;
+            base.OnKeyDown(e);
+            return;
+        }
+
         switch (e.KeyCode)
         {
             case Keys.Left when e.Control:
@@ -533,6 +541,40 @@ internal sealed class ArrangeView : Control
         }
 
         base.OnMouseUp(e);
+    }
+
+    private int _pendingDigit = -1;
+    private DateTime _lastDigitTime;
+
+    private static int? DigitOf(Keys key) => key switch
+    {
+        >= Keys.D0 and <= Keys.D9 => key - Keys.D0,
+        >= Keys.NumPad0 and <= Keys.NumPad9 => key - Keys.NumPad0,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Retypes which pattern the selected clip plays: two digits within 800ms make one number, the
+    /// way the tracker's own order field and instrument entry work. The clip changes on the first
+    /// digit and again on the second, so "02" shows 0 clamped to pattern 1 for a moment and then
+    /// lands on 2 - the same as the tracker, and the reason a typed number may only ever create the
+    /// one pattern that comes next (see Song.ResolveTypedPatternNumber).
+    /// </summary>
+    private void EnterPatternDigit(Song song, ChannelOrder order, int digit)
+    {
+        if (_selectedIndex >= order.Tokens.Count || order.Tokens[_selectedIndex] is not PatternRefToken)
+        {
+            return;
+        }
+
+        bool combine = _pendingDigit >= 0 && (DateTime.UtcNow - _lastDigitTime) < TimeSpan.FromMilliseconds(800);
+        int typed = combine ? (_pendingDigit * 10) + digit : digit;
+        _pendingDigit = combine ? -1 : digit;
+        _lastDigitTime = DateTime.UtcNow;
+
+        order.Tokens[_selectedIndex] = new PatternRefToken(song.ResolveTypedPatternNumber(typed));
+        Edited();
+        AnnounceSelection();
     }
 
     private void Edited()
@@ -705,7 +747,7 @@ internal sealed class ArrangeView : Control
         using var font = new Font("Segoe UI", 7.5f);
         using var ink = new SolidBrush(DawPalette.TextFaint);
         g.DrawString(
-            "Click a clip to edit it  ·  drag its end to resize the pattern  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  Ctrl+R restarts here  ·  mute from the channel name  ·  "
+            "Click a clip to edit it  ·  type its pattern number  ·  drag its end to resize the pattern  ·  Ctrl+←→ moves it  ·  Insert duplicates  ·  Delete removes  ·  Ctrl+R restarts here  ·  mute from the channel name  ·  "
             + "↻ marks where the channel restarts",
             font, ink, 12, y);
     }

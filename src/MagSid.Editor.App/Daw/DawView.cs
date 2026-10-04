@@ -132,6 +132,15 @@ internal sealed class DawView : Panel
         _octaveLabel.Text = $"OCT {Octave}";
     }
 
+    /// <summary>The roll has the keyboard - it was the last thing clicked, the note grid or the
+    /// beat bar. Notes are only written down then: a note played while working in the lanes or on
+    /// an instrument is being listened to, not entered.</summary>
+    public bool RollHasFocus => _pianoRoll.ContainsFocus;
+
+    /// <summary>The arrange lanes have the keyboard, and the digits typed there are pattern numbers
+    /// rather than notes.</summary>
+    public bool ArrangeHasFocus => _arrange.ContainsFocus;
+
     public bool StepInput(MagSid.Core.Model.NoteName note) =>
         _pianoRoll.Visible && _pianoRoll.StepInput(note);
 

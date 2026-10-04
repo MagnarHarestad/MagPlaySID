@@ -267,6 +267,12 @@ public sealed class AboutForm : Form
              "clicking a different row in the Instruments panel, without leaving the pattern to " +
              "do it. Clicking a row there does the reverse: focus jumps back to the pattern so " +
              "typing continues right away.\n\n");
+        Body("In the DAW view a note is written into the roll only in Edit mode and only while " +
+             "the roll has the keyboard - the last thing you clicked was the note grid or the beat " +
+             "bar. Played anywhere else, from the typing keys or the MIDI keyboard, it just sounds. " +
+             "With the arrange lanes clicked, the keyboard edits the arrangement instead: type two " +
+             "digits to point the selected clip at that pattern, as in the order column here - the " +
+             "next number after the last pattern creates it.\n\n");
         Body("The DAW view takes the same keys, the same octave key and the same Edit/Jam rule - " +
              "its own octave, shown beside the tabs, since the two views are looked at one at a " +
              "time. In its piano roll, Return (or CapsLock) writes a gate-off on the selected " +
