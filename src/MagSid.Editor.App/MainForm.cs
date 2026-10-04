@@ -272,15 +272,15 @@ public sealed class MainForm : Form
         var optimizeItem = new ToolStripMenuItem("&Optimize", null, (_, _) => DoOptimize());
         menu.Items.Add(optimizeItem);
 
-        // Beside Optimize, as asked. It swaps the middle of the window and nothing else: the menu,
-        // the toolbar, the transport and the status bar stay exactly where they were, so switching
-        // never moves what you were reaching for.
-        _viewToggleItem = new ToolStripMenuItem("&DAW", null, (_, _) => ToggleView());
-        menu.Items.Add(_viewToggleItem);
-
         _midiMenu = new ToolStripMenuItem("&MIDI");
         _midiMenu.DropDownOpening += (_, _) => BuildMidiMenu();
         menu.Items.Add(_midiMenu);
+
+        // Last on the bar. It swaps the middle of the window and nothing else: the menu, the
+        // toolbar, the transport and the status bar stay exactly where they were, so switching
+        // never moves what you were reaching for.
+        _viewToggleItem = new ToolStripMenuItem("&DAW", null, (_, _) => ToggleView());
+        menu.Items.Add(_viewToggleItem);
 
         return menu;
     }
