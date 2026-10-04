@@ -1163,6 +1163,30 @@ public sealed class TrackerGridControl : Control
         return (lastPattern, lastPattern.Rows.Count + extraRowsNeeded);
     }
 
+    /// <summary>True on the last real row of the last pattern in a channel's order-list - the row
+    /// after which RestartPosition takes over, on whichever pass through the loop it is.</summary>
+    private bool IsOrderEndRow(int ch, (Pattern Pattern, int LocalRow, int OrderIndex)? resolved)
+    {
+        if (_song is null || resolved is not { } r)
+        {
+            return false;
+        }
+
+        var tokens = _song.ChannelOrders[ch].Tokens;
+        int lastPatternToken = -1;
+        for (int i = tokens.Count - 1; i >= 0 && lastPatternToken < 0; i--)
+        {
+            if (tokens[i] is PatternRefToken)
+            {
+                lastPatternToken = i;
+            }
+        }
+
+        int realCount = RealRowCount(r.Pattern);
+        return r.OrderIndex == lastPatternToken && realCount > 0 &&
+               r.LocalRow == RealRowOriginalIndex(r.Pattern, realCount - 1);
+    }
+
     /// <summary>Total row count across one non-looping pass through a channel's order-list
     /// chain, starting at _songPosition - see <see cref="LastRowForCursorChannel"/>.</summary>
     private int SinglePassRowCount(int ch)
@@ -2223,10 +2247,9 @@ public sealed class TrackerGridControl : Control
                 string? markerText = resolved is { } r
                     ? isBoundary ? $"P{r.Pattern.Number:D2}" : PrefixForRow(r.Pattern, r.LocalRow)
                     : null;
-                // isLoopRow: false - the "LoopNN" cell is a static-edit-view concept (which
-                // row is *this pass's* last one); the live-follow view just keeps scrolling
-                // through the loop point rather than singling it out.
-                DrawOrderTrackCell(g, ch, row, colX, y, isBoundary, isLoopRow: false, resolved);
+                // The follow view scrolls on through the loop, so the RST row comes round once
+                // per pass - it is whichever row ends the order-list, not one fixed row number.
+                DrawOrderTrackCell(g, ch, row, colX, y, isBoundary, IsOrderEndRow(ch, resolved), resolved);
                 DrawCell(g, ch, row, colX + OrderColWidth, y, resolved, markerText);
             }
         }
