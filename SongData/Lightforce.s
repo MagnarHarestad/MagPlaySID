@@ -3,7 +3,7 @@ var v_Song_Speed = 0
 INSTRUMENTS:
 ; nr, waveform, AD, SR [, WAVE $81 $41] [, ARP "C-6" ROOT] [, FLT ($1f $f1 $08) $20] [, PW 8 +2] [, SLIDE +8] [, VIB $32 $10] [, NOHR]
 ; Instrument 01 : Bass
-01, $41, $02, $d4, WAVE $09 $81 $41, ARP "B-6" "B-6" ROOT, FLT ($3f $f3 $80 +1), PW 6 +24
+01, $41, $02, $d4, WAVE $09 $81 $41, ARP "B-6" "B-6" ROOT, PW 6 +24
 ; Instrument 02 : Kick
 02, $11, $0f, $fa, WAVE $09 $81 $41 $11 $11 $11 $11, ARP "B-6" "B-6" "D-3" "C#3" "F#2" "B-1" "F#1" HOLD, FLT ($3f $f3 $80 +1), PW 8 +24, NOHR
 ; Instrument 03 : Lead1

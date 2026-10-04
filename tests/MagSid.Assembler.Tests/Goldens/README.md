@@ -17,6 +17,12 @@ what pins relocation. `slide_only.bin` and `slide_and_vib.bin` come from the two
 this folder: no real song uses SLIDE, so without them the slide paths and the shared
 frequency-modulation block with both effects on would go uncompared.
 
+`lightforce.bin` was reassembled on **2026-10-05**, after Lightforce's Bass lost its filter program
+(Kick's identical one already sets the filter up). Same command, with the player, include files and
+`c6510.exe` taken from commit `6221867` and `Globalmacros.s` read from the Censor SVN tree. The
+procedure was checked first by reproducing the old `lightforce.bin` byte for byte from the old song;
+the new one differs from it in a single byte, Bass's `flt_start` entry, `$01` to `$00`.
+
 `opcodes.txt` is the emitter's opcode table, one `mnemonic mode hex` line each, frozen after
 `OpcodeTableTests` had checked all 106 of them against c6510 instruction by instruction.
 
