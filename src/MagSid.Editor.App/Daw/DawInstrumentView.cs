@@ -379,14 +379,10 @@ internal sealed class DawInstrumentView : Panel
     private void ShowWaveformTarget(Instrument? instrument)
     {
         if (instrument is null)
-        {
-            _waveform.Target = string.Empty;
             return;
-        }
 
         int step = WaveformStep(instrument);
         _waveform.Waveform = step >= 0 ? Wavetable(instrument)[step] : instrument.Waveform;
-        _waveform.Target = step >= 0 ? $"WAVETABLE STEP {step:00}  -  ESC FOR THE INSTRUMENT" : string.Empty;
     }
 
     /// <summary>
@@ -394,6 +390,9 @@ internal sealed class DawInstrumentView : Panel
     /// new waveform, and sync and ring with it, but keeps its own gate and test bits - a step that
     /// gates the note off or resets the oscillator does that on purpose, and picking a waveform
     /// is not a reason to undo it. With no step selected, the instrument's own waveform changes.
+    ///
+    /// Silence is the exception both ways: it is the whole byte, $09, and a step that was silent
+    /// takes the chosen waveform without the test bit that was part of its silence.
     /// </summary>
     private void ApplyWaveform(Instrument instrument, byte chosen)
     {
@@ -408,7 +407,11 @@ internal sealed class DawInstrumentView : Panel
         }
 
         var program = Wavetable(instrument);
-        program[step] = (byte)((program[step] & 0x09) | (chosen & 0xF6));
+        bool silence = (chosen & 0xF0) == 0;
+        bool wasSilent = (program[step] & 0xF0) == 0;
+        program[step] = silence ? WaveformSelector.Silence
+            : wasSilent ? (byte)(chosen | 0x01)
+            : (byte)((program[step] & 0x09) | (chosen & 0xF6));
         Apply(instrument, program);
     }
 

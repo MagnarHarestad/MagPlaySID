@@ -3,7 +3,7 @@
 namespace MagSid.Editor.App.Daw;
 
 /// <summary>
-/// The four waveform tabs, over a drawing of whichever is chosen.
+/// The four waveform tabs and Silence, over a drawing of whichever is chosen.
 ///
 /// The byte is a SID control register: bit 4 triangle, 5 saw, 6 pulse, 7 noise, bit 0 the gate.
 /// More than one can be set at once - the combined waveforms are a real and much-used SID trick -
@@ -20,6 +20,10 @@ namespace MagSid.Editor.App.Daw;
 /// The gate bit is not a tab: it is what starts a note, and an instrument whose base waveform has it
 /// clear would simply never sound. It is forced on, quietly, the same way the assembler's emitter
 /// does it.
+///
+/// Silence is $09: no waveform, the test bit holding the oscillator at zero, gate on - the usual
+/// first wavetable step of a drum. It is the whole byte rather than a bit to combine, and leaving
+/// it for a waveform drops the test bit, which would otherwise keep that waveform silent too.
 /// </summary>
 internal sealed class WaveformSelector : Control
 {
@@ -27,13 +31,22 @@ internal sealed class WaveformSelector : Control
     private const int ModifierWidth = 86;
     private const int ModifierGap = 10;
 
+    /// <summary>No waveform, test and gate on.</summary>
+    public const byte Silence = 0x09;
+
+    /// <summary>A bit of 0 is Silence, which is a whole byte rather than a bit.</summary>
     private static readonly (string Label, byte Bit)[] Tabs =
     [
         ("Triangle", 0x10),
         ("Saw", 0x20),
         ("Pulse", 0x40),
         ("Noise", 0x80),
+        ("Silence", 0x00),
     ];
+
+    private bool IsSilent => (_waveform & 0xF0) == 0;
+
+    private bool IsOn(byte bit) => bit == 0 ? IsSilent : (_waveform & bit) != 0;
 
     /// <summary>Sync and ring modulation: low-nibble bits, not waveforms. Both work against the
     /// voice before this one - voice 1's partner is voice 3 - and ring is only audible on
@@ -45,7 +58,6 @@ internal sealed class WaveformSelector : Control
     ];
 
     private byte _waveform = 0x41;
-    private string _target = string.Empty;
     private int _hovered = -1;
     private int _hoveredModifier = -1;
 
@@ -61,22 +73,6 @@ internal sealed class WaveformSelector : Control
     public event Action<byte>? WaveformChanged;
 
     public Color Accent { get; set; } = DawPalette.Oscillator;
-
-    /// <summary>What the tabs are editing when it is not the instrument itself - a wavetable step,
-    /// say. Shown in the preview where the hint usually is, so a click is never a surprise about
-    /// which byte it lands on. Empty for the instrument.</summary>
-    public string Target
-    {
-        get => _target;
-        set
-        {
-            if (_target == value)
-                return;
-
-            _target = value;
-            Invalidate();
-        }
-    }
 
     public byte Waveform
     {
@@ -94,7 +90,7 @@ internal sealed class WaveformSelector : Control
 
     /// <summary>Where the waveform tabs end and the modifier group begins. The modifiers take a
     /// fixed strip on the right so they stay the same size whatever the panel does, and the four
-    /// waveforms share what is left.</summary>
+    /// waveforms and Silence share what is left.</summary>
     private int WaveformStripWidth =>
         Math.Max(Tabs.Length * 40, Width - (Modifiers.Length * ModifierWidth) - ModifierGap);
 
@@ -165,9 +161,18 @@ internal sealed class WaveformSelector : Control
         if (at >= 0 && e.Button is MouseButtons.Left or MouseButtons.Right)
         {
             byte bit = Tabs[at].Bit;
-            byte next = e.Button == MouseButtons.Right
+            if (bit == 0)
+            {
+                Apply(Silence);
+                base.OnMouseClick(e);
+                return;
+            }
+
+            // Out of silence, the test bit goes with it - and there is nothing to combine with.
+            byte low = (byte)(_waveform & (IsSilent ? 0x07 : 0x0F));
+            byte next = e.Button == MouseButtons.Right && !IsSilent
                 ? (byte)(_waveform ^ bit)
-                : (byte)((_waveform & 0x0F) | bit);
+                : (byte)(low | bit);
 
             // Clearing the last waveform bit would leave an instrument that cannot make a sound, so
             // the last one standing refuses to go out.
@@ -203,7 +208,7 @@ internal sealed class WaveformSelector : Control
         {
             var (label, bit) = Tabs[i];
             DrawTab(g, new RectangleF(i * tabWidth, 0, tabWidth - 2, TabHeight), label,
-                (_waveform & bit) != 0, _hovered == i, Accent);
+                IsOn(bit), _hovered == i, Accent);
         }
 
         // In the effects colour, not the oscillator's: these two are modulation against the
@@ -232,17 +237,8 @@ internal sealed class WaveformSelector : Control
         g.DrawString($"${_waveform:X2}", hexFont, hexInk,
             new RectangleF(0, preview.Y + 2, preview.Width - 5, 12), far);
 
-        if (_target.Length > 0)
-        {
-            using var targetFont = new Font("Consolas", 7f, FontStyle.Bold);
-            using var targetInk = new SolidBrush(Accent);
-            g.DrawString(_target, targetFont, targetInk, preview.X + 5, preview.Y + 2);
-        }
-        else
-        {
-            // A gesture nobody can see is a gesture nobody finds.
-            g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
-        }
+        // A gesture nobody can see is a gesture nobody finds.
+        g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
     }
 
     private static void DrawTab(Graphics g, RectangleF box, string label, bool on, bool hovered, Color accent)
