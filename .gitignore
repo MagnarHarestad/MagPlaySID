@@ -11,6 +11,9 @@ obj/
 *.mp3
 *.wav
 
+# Exported .sid files. Built from the song beside them on demand, the same as the audio.
+SongData/*.sid
+
 # OS
 Thumbs.db
 desktop.ini
