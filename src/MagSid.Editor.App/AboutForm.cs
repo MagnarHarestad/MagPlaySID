@@ -95,7 +95,9 @@ public sealed class AboutForm : Form
         _text.Clear();
 
         Write("MagSID Editor\n", TitleFont, ColorTitle);
-        Write("Version 1.0  ·  Magnar Harestad\n\n", SubtitleFont, ColorSubtitle);
+        // From the project's <Version>, so the number lives in one place.
+        var version = typeof(AboutForm).Assembly.GetName().Version;
+        Write($"Version {version?.Major}.{version?.Minor}  ·  Magnar Harestad\n\n", SubtitleFont, ColorSubtitle);
 
         Body("A tracker for the MAGSIDv7 player on the Commodore 64. It edits Patterns.s song " +
              "files and exports finished .sid files. Two views edit the same song: Retro, a " +
