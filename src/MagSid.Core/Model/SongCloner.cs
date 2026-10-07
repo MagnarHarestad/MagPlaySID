@@ -52,7 +52,6 @@ public static class SongCloner
             SoftHardRestart = instrument.SoftHardRestart,
             VibratoDelaySpeed = instrument.VibratoDelaySpeed,
             VibratoDepth = instrument.VibratoDepth,
-            SlideRate = instrument.SlideRate,
         };
 
         copy.Wavetable.AddRange(instrument.Wavetable);

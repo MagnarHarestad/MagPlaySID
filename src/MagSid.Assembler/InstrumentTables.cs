@@ -32,7 +32,6 @@ public sealed class InstrumentTables
     public required byte[] VibratoDelaySpeed { get; init; }
 
     public required byte[] VibratoDepth { get; init; }
-    public required byte[] SlideRate { get; init; }
 
     public static InstrumentTables Build(Song song, NoteDictionary notes)
     {
@@ -55,7 +54,6 @@ public sealed class InstrumentTables
             PulseAdd = instruments.Select(i => (byte)(i.PulseSweep & 0xFF)).ToArray(),
             VibratoDelaySpeed = instruments.Select(i => i.HasVibrato ? i.VibratoDelaySpeed : (byte)0).ToArray(),
             VibratoDepth = instruments.Select(i => i.VibratoDepth).ToArray(),
-            SlideRate = instruments.Select(i => (byte)i.SlideRate).ToArray(),
         };
     }
 

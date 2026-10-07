@@ -141,9 +141,6 @@ public sealed class Instrument
     /// <summary>GoatTracker's 1xx/2xx slide as an instrument property: a signed rate added to the
     /// 16-bit SID frequency every frame the note sounds (positive up, negative down). 0 means no
     /// slide, which is also why the file grammar cannot spell a rate of 0.</summary>
-    public sbyte SlideRate { get; set; }
-
-    public bool HasSlide => SlideRate != 0;
 
     /// <summary>True when the pulse settings are the ones an instrument gets by saying
     /// nothing, so the writer can leave the PW section off entirely and a file round-trips

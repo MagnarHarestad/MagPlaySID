@@ -184,8 +184,7 @@ public class InstrumentSectionTests
     [InlineData("01, $41, $00, $a8, NOHR")]
     [InlineData("01, $41, $00, $a8, PW 6 +24 CONT, NOHR")]
     [InlineData("01, $41, $00, $a8, VIB $32 $10")]
-    [InlineData("01, $41, $00, $a8, SLIDE +8")]
-    [InlineData("01, $41, $00, $a8, SLIDE -128, VIB $32 $10, NOHR")]
+    [InlineData("01, $41, $00, $a8, VIB $32 $10, NOHR")]
     [InlineData("01, $41, $00, $a8, PW 6 +24, VIB $0f $ff, NOHR")]
     [InlineData("01, $41, $00, $a8, SOFTHR")]
     [InlineData("01, $41, $00, $a8, PW 6 +24 CONT, NOHR, SOFTHR")]
@@ -242,12 +241,13 @@ public class InstrumentSectionTests
         Assert.Throws<PatternsFormatException>(() => ReadInstrument(line));
     }
 
+    /// <summary>Slide is a pattern row now ("1xx" up, "2xx" down), so an instrument's SLIDE is
+    /// refused in any form rather than quietly dropped.</summary>
     [Theory]
+    [InlineData("01, $41, $00, $a8, SLIDE +8")]
     [InlineData("01, $41, $00, $a8, SLIDE 0")]
-    [InlineData("01, $41, $00, $a8, SLIDE +128")]
     [InlineData("01, $41, $00, $a8, SLIDE")]
-    [InlineData("01, $41, $00, $a8, SLIDE +8, SLIDE +8")]
-    public void A_malformed_or_duplicate_SLIDE_is_rejected(string line)
+    public void An_instrument_SLIDE_is_rejected(string line)
     {
         Assert.Throws<PatternsFormatException>(() => ReadInstrument(line));
     }

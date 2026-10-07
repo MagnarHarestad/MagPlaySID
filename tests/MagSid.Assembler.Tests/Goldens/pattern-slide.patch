@@ -1,0 +1,173 @@
+--- Code/musicplayer.s
++++ Code/musicplayer.s
+@@ -18,6 +18,7 @@
+ 		var CMD_OFF   = $d0
+ 		var CMD_WAIT  = $d1
+ 		var LOOP_END  = $d2
++		var CMD_SLIDE = $d3
+ 
+ 		; $00 terminates both the note stream and the song-order stream, and costs nothing
+ 		; to test for - the lda that fetches the byte already sets Z, so a bare beq does it.
+@@ -78,6 +79,15 @@
+ 		}
+ 		endif
+ 
++		; The rate a pattern's slide row set, per voice - only when some pattern has one.
++		if def v_slide
++		lua {
++			table.insert(__ZPs, "voice_slide")
++			table.insert(__ZPs, "voice_slide_2")
++			table.insert(__ZPs, "voice_slide_3")
++		}
++		endif
++
+ 		m_ZP.b "filter_pos"
+ 		m_ZP.b "filter_phase"
+ 		m_ZP.b "filter_delta"
+@@ -238,6 +248,9 @@
+ 		sta voice_off_lo,x                     ; vibrato and slide both start from the bare note
+ 		sta voice_off_hi,x
+ 		endif
++		if def v_slide
++		sta voice_slide,x                      ; and a new note starts without a slide
++		endif
+ 		pla
+ 		tay                                    ; park pw_init while testing it - Y is free from
+ 		sta voice_prev_pw,x                    ; here to the end of this routine. Stashed for the
+@@ -344,17 +357,15 @@
+ 		; rewrites the bare note every frame. Both move one signed 16-bit offset; slide adds
+ 		; slide_rate a frame, vibrato traces a triangle from vib_ds (delay/speed) and vib_depth.
+ .freqmod:
+-		ldy voice_inst,x
+-		if def v_slide
+ 		if def v_vibrato
+-		lda slide_rate,y
+-		ora vib_depth,y
+-		beq .idle                              ; neither effect on this instrument
+-		lda slide_rate,y
+-		beq .noslide
++		ldy voice_inst,x                       ; only vibrato reads the instrument's tables
++		endif
++		if def v_slide
++		lda voice_slide,x                      ; with slides in the song the note + offset is
++		if def v_vibrato                       ; written every frame, slide or none - that is what
++		beq .noslide                           ; keeps a slide "100" stopped where it got to
+ 		else
+-		lda slide_rate,y
+-		beq .idle
++		beq .fmwrite
+ 		endif
+ 		; offset += rate, sign-extended. None of pla/and/beq/lda touches the carry the adc
+ 		; produced, the same idiom the pulse-width sweep uses.
+@@ -572,7 +583,12 @@
+ 		cmp #CMD_OFF
+ 		bcc .setinstrument                     ; $C0..$CF
+ 		cmp #LOOP_END
++		if def v_slide
++		bcc .playrow
++		bne .slide                             ; $D3, only in a song with slide rows
++		else
+ 		bne .playrow                           ; $D0/$D1 - note off and wait are stored as the
++		endif
+ 		                                       ; command byte itself, which is what NOTE_OFF/ROW_WAIT
+ 		                                       ; are defined to be. Falls through on $D2 into .loopend,
+ 		                                       ; which is why that block has to stay right here.
+@@ -604,6 +620,17 @@
+ 		tay                                    ; same reasoning - jump straight in with Y set
+ 		jmp .nextcmd
+ 
++		if def v_slide
++		; $D3, then the signed rate: a wait row that also sets the voice's slide, leaving as
++		; ROW_WAIT with Y on the rate byte so .playrow steps past it.
++.slide:
++		iny
++		lda (ZP_lb),y
++		sta voice_slide,x
++		lda #ROW_WAIT
++		bne .playrow                           ; always - ROW_WAIT is not zero
++		endif
++
+ 		; Masking rather than subtracting: the dispatch above already proved which range the
+ 		; byte is in, so the low bits are the value and a single AND isolates them - one byte
+ 		; less than sec/sbc, and it leaves no carry to think about.
+--- Startup/Tables.s
++++ Startup/Tables.s
+@@ -66,6 +66,18 @@
+     return note:upper()
+ end
+ 
++-- "1xx" slides up, "2xx" down, xx in hex - a row in place of a note. nil for anything else.
++local function SlideRate(note)
++    local dir, hex = note:match("^([12])(%x%x)$")
++    if not dir then
++        return nil
++    end
++    local rate = tonumber(hex, 16)
++    if dir == "2" then rate = -rate end
++    assert(rate >= -128 and rate <= 127, "slide out of range: " .. note)
++    return rate
++end
++
+ -- "LE" (bare, loops forever) or "LE04" etc (finite repeat count, N times total).
+ local function IsLE(tu)
+     return tu == "LE" or tu:match("^LE%d+$") ~= nil
+@@ -501,7 +513,7 @@
+             local row = ParseSingleNoteLine(raw)
+             if row then
+                 local note = NormalizeNote(row.note)
+-                if note ~= "..." and note ~= "---" then
++                if note ~= "..." and note ~= "---" and not SlideRate(note) then
+                     GetNoteID(note)
+                 end
+             end
+@@ -535,6 +547,7 @@
+ -- of Code\musicplayer.s). LS marks the loop anchor, LE emits $D2 + count + offset, $00 ends.
+ 
+ local CMD_DUR, CMD_INST, CMD_OFF, CMD_WAIT, CMD_LOOP_END = 0x80, 0xC0, 0xD0, 0xD1, 0xD2
++local CMD_SLIDE = 0xD3
+ local MAX_DURATION, MAX_INSTRUMENT = 64, 16
+ 
+ local ptr_rows = {}
+@@ -672,6 +685,11 @@
+                     -- setting alone is exactly right and costs nothing.
+                     SetState(nil, duration)
+                     Emit(CMD_OFF)
++                elseif SlideRate(note) then
++                    -- A wait row that also sets the voice's slide: $D3 and the signed rate.
++                    SetState(nil, duration)
++                    Emit(CMD_SLIDE)
++                    Emit(SlideRate(note) % 256)
+                 else
+                     assert(instruments[row.inst] ~= nil,
+                         "PAT" .. NN .. ": instrument " .. tostring(row.inst) .. " is not defined in INSTRUMENTS")
+@@ -898,20 +916,6 @@
+         EmitByteTable("vib_depth:", vib_depth_values)
+     end
+ 
+-    -- Slide: one signed byte per instrument, emitted only for a song that uses it.
+-    local any_slide = false
+-    local slide_values = {}
+-    for id = 1, instrument_count do
+-        local slide = instruments[id].slide
+-        if slide then any_slide = true end
+-        slide_values[id] = string.format("$%02x", (slide or 0) % 256)
+-    end
+-    assert(any_slide == (v_slide_scan == true),
+-        "slide scan disagrees with the parsed INSTRUMENTS - v_songfile must be set before " ..
+-        "Tables.s is included")
+-    if any_slide then
+-        EmitByteTable("slide_rate:", slide_values)
+-    end
+ end
+ 
+ -- Song-order resolution per channel: a list of pattern numbers, optionally followed by
+@@ -1064,8 +1068,8 @@
+                 in_instruments = false
+             elseif in_instruments and t:match("^%d+%s*,") then
+                 if t:upper():match(",%s*VIB%s") then v_vibrato_scan = true end
+-                if t:upper():match(",%s*SLIDE%s") then v_slide_scan = true end
+             end
++            if not in_instruments and t:match('^"[12]%x%x"') then v_slide_scan = true end
+         end
+         f:close()
+     end

@@ -142,7 +142,6 @@ public sealed class EditorSession
             SoftHardRestart = source.SoftHardRestart,
             VibratoDelaySpeed = source.VibratoDelaySpeed,
             VibratoDepth = source.VibratoDepth,
-                SlideRate = source.SlideRate,
         };
         // FilterStep is an immutable readonly record struct and Wavetable/Arpeggio hold plain
         // byte/NoteName values, so AddRange here copies content, never aliases the source's own

@@ -41,7 +41,6 @@ internal sealed class DawInstrumentView : Panel
     private readonly KnobControl _vibratoDelay = new();
     private readonly KnobControl _vibratoSpeed = new();
     private readonly KnobControl _vibratoDepth = new();
-    private readonly KnobControl _slide = new();
 
     private readonly ToggleButton _continuous = new("CONT");
     private readonly ToggleButton _noHardRestart = new("NO HR");
@@ -163,7 +162,6 @@ internal sealed class DawInstrumentView : Panel
             _vibratoDelay.SetValueSilently(PackedNibbles.High(instrument.VibratoDelaySpeed));
             _vibratoSpeed.SetValueSilently(PackedNibbles.Low(instrument.VibratoDelaySpeed));
             _vibratoDepth.SetValueSilently(instrument.VibratoDepth);
-            _slide.SetValueSilently(instrument.SlideRate);
 
             _continuous.Checked = instrument.PulseContinuous;
             _noHardRestart.Checked = instrument.NoHardRestart;
@@ -204,8 +202,6 @@ internal sealed class DawInstrumentView : Panel
 
         if (instrument.HasVibrato)
             parts.Add($"VIB ${instrument.VibratoDelaySpeed:X2} ${instrument.VibratoDepth:X2}");
-        if (instrument.HasSlide)
-            parts.Add($"SLIDE {instrument.SlideRate:+#;-#;0}");
 
         return string.Join("   ·   ", parts);
     }
@@ -432,7 +428,6 @@ internal sealed class DawInstrumentView : Panel
         _vibratoDelay.ValueChanged += v => Commit(i => i.VibratoDelaySpeed = PackedNibbles.WithHigh(i.VibratoDelaySpeed, v));
         _vibratoSpeed.ValueChanged += v => Commit(i => i.VibratoDelaySpeed = PackedNibbles.WithLow(i.VibratoDelaySpeed, v));
         _vibratoDepth.ValueChanged += v => Commit(i => i.VibratoDepth = (byte)v);
-        _slide.ValueChanged += v => Commit(i => i.SlideRate = (sbyte)v);
 
         _continuous.CheckedChanged += on => Commit(i => i.PulseContinuous = on);
         _noHardRestart.CheckedChanged += on => Commit(i => i.NoHardRestart = on);
@@ -651,7 +646,7 @@ internal sealed class DawInstrumentView : Panel
         oscillator.Body.Controls.Add(_waveform);
 
         // --- effects ----------------------------------------------------------------------
-        var effects = Section("VIBRATO & SLIDE", DawPalette.Effect);
+        var effects = Section("VIBRATO", DawPalette.Effect);
         effects.Dock = DockStyle.Fill;
 
         var effectKnobs = new FlowLayoutPanel
@@ -664,8 +659,7 @@ internal sealed class DawInstrumentView : Panel
         Knob(_vibratoDelay, "Delay", DawPalette.Effect, 0, 15, Hex1);
         Knob(_vibratoSpeed, "Speed", DawPalette.Effect, 0, 15, Hex1);
         Knob(_vibratoDepth, "Depth", DawPalette.Effect, 0, 255, Hex2);
-        Knob(_slide, "Slide", DawPalette.Effect, -128, 127, v => v.ToString("+#;-#;0"));
-        effectKnobs.Controls.AddRange([_vibratoDelay, _vibratoSpeed, _vibratoDepth, _slide]);
+        effectKnobs.Controls.AddRange([_vibratoDelay, _vibratoSpeed, _vibratoDepth]);
 
         var effectNote = new Label
         {
@@ -675,8 +669,8 @@ internal sealed class DawInstrumentView : Panel
             ForeColor = DawPalette.TextFaint,
             Font = new Font("Segoe UI", 7.5f),
             Padding = new Padding(8, 2, 8, 6),
-            Text = "Depth 0 turns vibrato off, rate 0 turns slide off. A song using neither leaves "
-                   + "both out of the assembled player entirely.",
+            Text = "Depth 0 turns vibrato off, and a song with no vibrato leaves it out of the "
+                   + "assembled player entirely. Slides are written in the pattern: 1xx up, 2xx down.",
         };
 
         effects.Body.Controls.Add(effectKnobs);

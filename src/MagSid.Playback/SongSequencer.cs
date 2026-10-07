@@ -76,6 +76,10 @@ public sealed class SongSequencer
         _patternsByNumber = song.Patterns.ToDictionary(p => p.Number);
         _instrumentsByNumber = song.Instruments.ToDictionary(i => i.Number);
 
+        bool slides = MagSid.Core.SongSizeCalculator.UsesSlide(song);
+        foreach (var channel in _channels)
+            channel.Voice.SongHasSlides = slides;
+
         // Matches music.init's "lda #$0f / sta $d418" - max volume, no filter routing.
         // Without this the filter's Vol register stays 0 and every voice is silent.
         _write(0x18, 0x0f);
@@ -415,6 +419,11 @@ public sealed class SongSequencer
             if (row is NoteOffRow)
             {
                 state.Voice.ReleaseNote(RegisterBase(ch), _write);
+            }
+            else if (row is SlideRow slide)
+            {
+                // A wait row that also sets the slide: the sounding note carries on and glides.
+                state.Voice.SetSlide(slide.Rate);
             }
             else if (row is NoteRow noteRow)
             {

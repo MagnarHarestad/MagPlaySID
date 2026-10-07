@@ -39,8 +39,8 @@ public static class SongSizeCalculator
     // frequency-modulation block, which is why both-at-once is less than the two deltas summed.
     private static readonly int PlayerBare = 462 + HardRestartBytes;
     private static readonly int PlayerVibrato = 574 + HardRestartBytes;
-    private static readonly int PlayerSlide = 523 + HardRestartBytes;
-    private static readonly int PlayerVibratoAndSlide = 604 + HardRestartBytes;
+    private static readonly int PlayerSlide = 533 + HardRestartBytes;
+    private static readonly int PlayerVibratoAndSlide = 608 + HardRestartBytes;
 
     /// <summary>Keeping the waveform through the hard restart loads and masks it rather than
     /// loading $08 - two bytes. The four figures above are the $08 player's.</summary>
@@ -55,11 +55,16 @@ public static class SongSizeCalculator
     private const int CmdNoteOff = 0xD0;
     private const int CmdWait = 0xD1;
     private const int CmdLoopEnd = 0xD2;
+    private const int CmdSlide = 0xD3;
+
+    /// <summary>A "1xx"/"2xx" row anywhere in the song - what assembles the slide code in.</summary>
+    public static bool UsesSlide(Song song) =>
+        song.Patterns.Any(p => p.Rows.Any(r => r is SlideRow));
 
     public static SongSize Measure(Song song)
     {
         bool anyVibrato = song.Instruments.Any(i => i.HasVibrato);
-        bool anySlide = song.Instruments.Any(i => i.HasSlide);
+        bool anySlide = UsesSlide(song);
 
         int player = (anyVibrato, anySlide) switch
         {
@@ -75,9 +80,9 @@ public static class SongSizeCalculator
         int patternBytes = song.Patterns.Sum(p => EncodedLength(p.Rows));
 
         // ad, sr, wt_start, arp_start, flt_start, pw_init, pw_add - one byte each per
-        // instrument, plus the two vibrato tables and the slide one when those are in play.
+        // instrument, plus the two vibrato tables when those are in play.
         int instrumentCount = song.Instruments.Count;
-        int perInstrumentTables = 7 + (anyVibrato ? 2 : 0) + (anySlide ? 1 : 0);
+        int perInstrumentTables = 7 + (anyVibrato ? 2 : 0);
 
         return new SongSize(
             PlayerBytes: player,
@@ -181,6 +186,16 @@ public static class SongSizeCalculator
                     consumedUntil = idx + duration - 1;
                     SetState(null, duration);   // a note-off uses no instrument
                     stream.Add(CmdNoteOff);
+                    break;
+                }
+
+                case SlideRow slide:
+                {
+                    int duration = 1 + CountHolds(idx + 1);
+                    consumedUntil = idx + duration - 1;
+                    SetState(null, duration);
+                    stream.Add(CmdSlide);
+                    stream.Add(slide.Rate & 0xFF);
                     break;
                 }
 

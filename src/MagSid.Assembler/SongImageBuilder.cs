@@ -21,7 +21,7 @@ public static class SongImageBuilder
 
         var features = new PlayerFeatures(
             Vibrato: song.Instruments.Any(i => i.HasVibrato),
-            Slide: song.Instruments.Any(i => i.HasSlide),
+            Slide: Core.SongSizeCalculator.UsesSlide(song),
             SoftHardRestart: song.Instruments.Any(i => i.SoftHardRestart));
 
         var notes = NoteDictionary.Build(song);
@@ -50,7 +50,6 @@ public static class SongImageBuilder
             PwAdd = asm.NewLabel("pw_add"),
             VibDs = features.Vibrato ? asm.NewLabel("vib_ds") : null,
             VibDepth = features.Vibrato ? asm.NewLabel("vib_depth") : null,
-            SlideRate = features.Slide ? asm.NewLabel("slide_rate") : null,
             TblSongOrder = asm.NewLabel("tbl_songorder"),
             NoteFreqLow = asm.NewLabel("note_freq_low"),
             NoteFreqHigh = asm.NewLabel("note_freq_high"),
@@ -98,9 +97,6 @@ public static class SongImageBuilder
             EmitTable(asm, tables.VibDs!, instrumentTables.VibratoDelaySpeed);
             EmitTable(asm, tables.VibDepth!, instrumentTables.VibratoDepth);
         }
-
-        if (features.Slide)
-            EmitTable(asm, tables.SlideRate!, instrumentTables.SlideRate);
 
         EmitTable(asm, tables.TblSongOrder, order.Bytes);
 

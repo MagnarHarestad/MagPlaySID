@@ -11,50 +11,6 @@ namespace MagSid.Playback.Tests;
 /// </summary>
 public class VibratoTests
 {
-    private const string SlideSongText = """
-        var v_Song_Speed = 4
-
-        INSTRUMENTS:
-        01, $41, $09, $a0, WAVE $41, ARP ROOT, SLIDE +8
-        02, $41, $09, $a0, SLIDE -5
-        03, $41, $09, $a0, WAVE $41 $41, ARP "C-4" "E-4" "G-4", VIB $00 $04, SLIDE +3
-        END:
-
-        PAT01:
-        "C-4", 01
-        "...", 00
-        "...", 00
-        "...", 00
-        "E-4", 02
-        "...", 00
-        "...", 00
-        "...", 00
-        "G-3", 03
-        "...", 00
-        "...", 00
-        "...", 00
-        END:
-
-        PAT02:
-        "C-3", 02
-        "...", 00
-        "...", 00
-        "...", 00
-        END:
-
-        ORDER_CH1:
-        1
-        END:
-
-        ORDER_CH2:
-        2
-        END:
-
-        ORDER_CH3:
-        2
-        END:
-        """;
-
     private const string SongText = """
         var v_Song_Speed = 4
 
@@ -154,35 +110,5 @@ public class VibratoTests
         Assert.Equal(
             new[] { 0x089b, 0x08a3, 0x089b, 0x0893, 0x088b, 0x0883, 0x088b, 0x0893, 0x089b, 0x08a3 },
             frames.Skip(9).Select(f => f[1]).ToArray());
-    }
-
-    [Fact]
-    public void Slide_adds_its_rate_every_frame_with_and_without_an_arpeggio()
-    {
-        var frames = RunFrames(56, SlideSongText);
-
-        // Voice 1: ARP ROOT rewrites the bare note every frame, so the slide has to go on top of
-        // it. Voice 2: no ARP, so only the slide's own write moves the pitch.
-        for (int frame = 0; frame <= 12; frame++)
-        {
-            Assert.Equal(0x1125 + 8 * frame, frames[frame][0]);
-            Assert.Equal(0x0893 - 5 * frame, frames[frame][1]);
-        }
-    }
-
-    [Fact]
-    public void Slide_and_vibrato_share_one_offset_over_an_arpeggio()
-    {
-        var frames = RunFrames(56, SlideSongText);
-
-        // Captured from the assembled player: slide +3 every frame plus a speed-0, depth-4
-        // vibrato that turns round every frame, over a C-4/E-4/G-4 arpeggio.
-        Assert.Equal(
-            new[]
-            {
-                0x112c, 0x15a0, 0x19be, 0x1131, 0x15ad, 0x19c3, 0x113e, 0x15b2,
-                0x19d0, 0x1143, 0x15bf, 0x19d5, 0x1150, 0x15c4, 0x19e2,
-            },
-            frames.Skip(41).Take(15).Select(f => f[0]).ToArray());
     }
 }

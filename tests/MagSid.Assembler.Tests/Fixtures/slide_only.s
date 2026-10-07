@@ -1,18 +1,20 @@
-; Test fixture, not a tune: the smallest song that turns the SLIDE gate on.
-; No song in SongData uses SLIDE, so without this the slide half of the player
-; is never compared against c6510. See PlayerImageTests.
+; Test fixture, not a tune: the smallest song that turns on slide.
+; Slides are pattern rows - 1xx up, 2xx down, 100 stops - and no song in SongData has one,
+; so without this the slide half of the player is never compared against c6510.
 var v_Song_Speed = 6
 
 INSTRUMENTS:
-01, $41, $00, $f7, WAVE $09 $41 $40, ARP ROOT, PW 6 +0, SLIDE +8
-02, $21, $00, $aa, WAVE $09 $21 $20, ARP ROOT, PW 2 +6 CONT, SLIDE -4
+01, $41, $00, $f7, WAVE $09 $41 $40, ARP ROOT, PW 6 +0
+02, $21, $00, $aa, WAVE $09 $21 $20, ARP ROOT, PW 2 +6 CONT
 END:
 
 PAT01:
 "C-4", 01
+"108", 00
 "...", 00
 "E-4", 02
-"...", 00
+"204", 00
+"100", 00
 END:
 
 ORDER_CH1:

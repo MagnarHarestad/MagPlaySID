@@ -34,7 +34,7 @@ public static class PatternsFileWriter
 
         Line("INSTRUMENTS:");
         Line("; nr, waveform, AD, SR [, WAVE $81 $41] [, ARP \"C-6\" ROOT] " +
-             "[, FLT ($1f $f1 $08) $20] [, PW 8 +2] [, SLIDE +8] [, VIB $32 $10] [, NOHR]");
+             "[, FLT ($1f $f1 $08) $20] [, PW 8 +2] [, VIB $32 $10] [, NOHR]");
         foreach (var instrument in song.Instruments.OrderBy(i => i.Number))
         {
             // A whole-line comment rather than a section on the instrument's own line: the name
@@ -117,9 +117,6 @@ public static class PatternsFileWriter
                 sb.Append(" CONT");
         }
 
-        if (instrument.HasSlide)
-            sb.Append($", SLIDE {instrument.SlideRate:+0;-0;+0}");
-
         if (instrument.HasVibrato)
             sb.Append($", VIB ${instrument.VibratoDelaySpeed:x2} ${instrument.VibratoDepth:x2}");
 
@@ -148,6 +145,7 @@ public static class PatternsFileWriter
         NoteRow(var note, var inst) => $"\"{note}\", {inst:D2}",
         HoldRow => "\"...\", 00",
         NoteOffRow => "\"---\", 00",
+        SlideRow slide => $"\"{slide.Text}\", 00",
         LoopStartRow => "LS",
         LoopEndRow(null) => "LE",
         LoopEndRow(var count) => $"LE{count:D2}",

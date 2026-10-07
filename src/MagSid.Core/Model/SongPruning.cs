@@ -59,7 +59,6 @@ public static class SongPruning
                 SoftHardRestart = instrument.SoftHardRestart,
                 VibratoDelaySpeed = instrument.VibratoDelaySpeed,
                 VibratoDepth = instrument.VibratoDepth,
-                SlideRate = instrument.SlideRate,
             };
             copy.Wavetable.AddRange(instrument.Wavetable);
             copy.Arpeggio.AddRange(instrument.Arpeggio);

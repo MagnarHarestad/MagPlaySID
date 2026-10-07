@@ -19,6 +19,7 @@ public static class PatternEncoder
     private const int CmdNoteOff = 0xD0;
     private const int CmdWait = 0xD1;
     private const int CmdLoopEnd = 0xD2;
+    private const int CmdSlide = 0xD3;
 
     private const int MaxDuration = 64;
     private const int MaxInstrument = 16;
@@ -134,6 +135,17 @@ public static class PatternEncoder
                     consumedUntil = idx + duration - 1;
                     SetState(null, duration);            // a note-off uses no instrument
                     stream.Add(CmdNoteOff);
+                    break;
+                }
+
+                case SlideRow slide:
+                {
+                    // A wait row that also sets the voice's slide: $D3 and the signed rate.
+                    int duration = 1 + CountHolds(idx + 1);
+                    consumedUntil = idx + duration - 1;
+                    SetState(null, duration);
+                    stream.Add(CmdSlide);
+                    stream.Add((byte)(slide.Rate & 0xFF));
                     break;
                 }
 

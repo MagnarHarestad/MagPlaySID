@@ -76,6 +76,24 @@ public sealed class VoiceEngine
     private int _vibCount;
     private bool _vibDown;
 
+    /// <summary>The slide a pattern's "1xx"/"2xx" row set, per frame; 0 until one does and again
+    /// from every new note.</summary>
+    private int _slideRate;
+
+    /// <summary>A slide row: from the next frame the sounding note glides by
+    /// <paramref name="rate"/> a frame, until the next note or slide row. Matches the player's
+    /// $D3 command, which just stores the rate.</summary>
+    public void SetSlide(int rate) => _slideRate = rate;
+
+    /// <summary>
+    /// The song has slide rows, so the player was built with the slide code - which writes the
+    /// note plus its offset every frame, slide or no slide. That is what keeps a stopped slide
+    /// where it got to: a note program rewrites the bare note every frame, and only the offset
+    /// added back on top holds the slid pitch. Without slides the write is skipped when neither
+    /// effect is on, as the player does then.
+    /// </summary>
+    public bool SongHasSlides { get; set; }
+
     /// <summary>
     /// Hard restart, this frame: zero AD and drop the previous note's envelope at a fast release
     /// rate, gate off - the waveform kept or cut with TEST, as MagSid.Core.HardRestart says -
@@ -150,6 +168,7 @@ public sealed class VoiceEngine
         _rootNote = note;
 
         _freqOffset = 0;
+        _slideRate = 0;
         _vibDown = false;
         _vibDelay = (instrument.VibratoDelaySpeed & 0xF0) >> 2;
         _vibCount = (instrument.VibratoDelaySpeed & 0x0F) >> 1;
@@ -252,14 +271,14 @@ public sealed class VoiceEngine
     /// </summary>
     private void StepFrequencyModulation(Instrument instrument, int baseReg, Action<int, int> write)
     {
-        if (instrument.SlideRate == 0 && instrument.VibratoDepth == 0)
+        if (!SongHasSlides && instrument.VibratoDepth == 0)
         {
             return;
         }
 
-        if (instrument.SlideRate != 0)
+        if (_slideRate != 0)
         {
-            _freqOffset = (_freqOffset + instrument.SlideRate) & 0xFFFF;
+            _freqOffset = (_freqOffset + _slideRate) & 0xFFFF;
         }
 
         if (instrument.VibratoDepth != 0)

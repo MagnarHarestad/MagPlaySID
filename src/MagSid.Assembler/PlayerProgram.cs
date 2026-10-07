@@ -4,7 +4,7 @@ using static Operand;
 
 /// <summary>The song tables the player reads. They are emitted after the code, so they arrive here
 /// as labels the caller has not placed yet - the reason the emitter resolves references late.
-/// VibDs/VibDepth/SlideRate are null exactly when the matching feature is off.</summary>
+/// VibDs/VibDepth are null exactly when vibrato is off.</summary>
 public sealed class SongTableLabels
 {
     public required Label TblRowsLo { get; init; }
@@ -25,7 +25,6 @@ public sealed class SongTableLabels
 
     public Label? VibDs { get; init; }
     public Label? VibDepth { get; init; }
-    public Label? SlideRate { get; init; }
 }
 
 /// <summary>The per-song constants baked into the player code: v_Song_Speed and the three
@@ -60,6 +59,8 @@ public static class PlayerProgram
     private const int CmdInst = 0xC0;
     private const int CmdOff = 0xD0;
     private const int LoopEnd = 0xD2;
+    private const int CmdSlide = 0xD3;
+    private const int RowWait = 0xD1;
 
     /// <summary>voice_note holds a note id or one of these, deliberately the same bytes the stream
     /// uses so Voice_Tick can store the command straight from A.</summary>
@@ -112,16 +113,13 @@ public static class PlayerProgram
         EmitMusicInit(asm, parameters, zp, musicInit, voiceAdvanceOrder);
         EmitPlayerData(asm, parameters, voiceOrderPos, sidChannelOffset);
         EmitMusicPlay(asm, tables, parameters, zp, musicPlay, voiceAutomation, voiceTick, onBeatPlaySong);
-        EmitVoiceTick(asm, tables, zp, voiceTick, voicePlayCurrent, voiceAdvanceOrder);
+        EmitVoiceTick(asm, tables, features, zp, voiceTick, voicePlayCurrent, voiceAdvanceOrder);
     }
 
     private static void RequireTables(SongTableLabels tables, PlayerFeatures features)
     {
         if (features.Vibrato && (tables.VibDs is null || tables.VibDepth is null))
             throw new ArgumentException("A song with vibrato needs both vib_ds and vib_depth.", nameof(tables));
-
-        if (features.Slide && tables.SlideRate is null)
-            throw new ArgumentException("A song with slide needs slide_rate.", nameof(tables));
     }
 
     /// <summary>Clears the gate bit and stops the wavetable, keeping the waveform-select bits - the
@@ -305,6 +303,9 @@ public static class PlayerProgram
             asm.Sta(MemX(zp.VoiceOffHi));
         }
 
+        if (features.Slide)
+            asm.Sta(MemX(zp.VoiceSlide));           // and a new note starts without a slide
+
         asm.Pla();
         asm.Tay();                                  // park pw_init while testing it
         // Stashed for the *next* trigger's NOHR test: this is the instrument that will be sounding
@@ -429,8 +430,9 @@ public static class PlayerProgram
     }
 
     /// <summary>Slide and vibrato, last in Voice_Automation because the arpeggio rewrites the bare
-    /// note every frame. Both move one signed 16-bit offset; slide adds slide_rate a frame, vibrato
-    /// traces a triangle from vib_ds (delay/speed) and vib_depth.</summary>
+    /// note every frame. Both move one signed 16-bit offset; slide adds the rate a pattern's slide
+    /// row left in voice_slide a frame, vibrato traces a triangle from vib_ds (delay/speed) and
+    /// vib_depth.</summary>
     private static void EmitFreqMod(
         Emitter6502 asm, SongTableLabels tables, PlayerFeatures features, ZeroPageLayout zp,
         Label entry, Label idle, Label sidChannelOffset)
@@ -439,23 +441,17 @@ public static class PlayerProgram
         var fmWrite = asm.NewLabel(".fmwrite");
         var noSlide = asm.NewLabel(".noslide");
 
-        asm.Ldy(MemX(zp.VoiceInst));
+        // Only vibrato reads the instrument's tables; the slide lives with the voice.
+        if (features.Vibrato)
+            asm.Ldy(MemX(zp.VoiceInst));
 
+        // With slides in the song the note plus its offset is written every frame, slide or no
+        // slide: a note program rewrites the bare note each frame, and only the offset added back
+        // on top keeps a slide that "100" stopped where it got to.
         if (features.Slide)
         {
-            if (features.Vibrato)
-            {
-                asm.Lda(MemY(tables.SlideRate!));
-                asm.Ora(MemY(tables.VibDepth!));
-                asm.Beq(idle);                      // neither effect on this instrument
-                asm.Lda(MemY(tables.SlideRate!));
-                asm.Beq(noSlide);
-            }
-            else
-            {
-                asm.Lda(MemY(tables.SlideRate!));
-                asm.Beq(idle);
-            }
+            asm.Lda(MemX(zp.VoiceSlide));
+            asm.Beq(features.Vibrato ? noSlide : fmWrite);
 
             // offset += rate, sign-extended. None of pla/and/beq/lda touches the carry the adc
             // produced, the same idiom the pulse-width sweep uses.
@@ -651,7 +647,7 @@ public static class PlayerProgram
     /// indexed by X rather than three macro copies, which used to cost 592 of the player's 794
     /// bytes. Rows are variable length: voice_event is a byte offset, .nextcmd consumes commands.</summary>
     private static void EmitVoiceTick(
-        Emitter6502 asm, SongTableLabels tables, ZeroPageLayout zp,
+        Emitter6502 asm, SongTableLabels tables, PlayerFeatures features, ZeroPageLayout zp,
         Label entry, Label voicePlayCurrent, Label voiceAdvanceOrder)
     {
         asm.Define(entry);
@@ -663,6 +659,7 @@ public static class PlayerProgram
         var advance = asm.NewLabel(".advance");
         var loopBack = asm.NewLabel(".loopback");
         var endOfPattern = asm.NewLabel(".endofpattern");
+        var slide = asm.NewLabel(".slide");
 
         asm.Stx(Mem(zp.ZpCh));
 
@@ -694,7 +691,15 @@ public static class PlayerProgram
         // $D0/$D1 - note off and wait are stored as the command byte itself, which is what
         // NOTE_OFF/ROW_WAIT are defined to be. Falls through on $D2 into .loopend, which is why
         // that block has to stay right here.
-        asm.Bne(playRow);
+        if (features.Slide)
+        {
+            asm.Bcc(playRow);
+            asm.Bne(slide);                         // $D3, only in a song with slide rows
+        }
+        else
+        {
+            asm.Bne(playRow);
+        }
 
         // --- .loopend ---
         // $D2, then the repeat count (0 = bare LE, loops forever), then the byte offset to jump
@@ -721,6 +726,18 @@ public static class PlayerProgram
         asm.Lda(IndY(zp.ZpLb));
         asm.Tay();                                  // same reasoning - jump straight in with Y set
         asm.Jmp(nextCmd);
+
+        if (features.Slide)
+        {
+            // $D3, then the signed rate: a wait row that also sets the voice's slide, so it leaves
+            // as ROW_WAIT with Y on the rate byte - .playrow steps past it.
+            asm.Define(slide);
+            asm.Iny();
+            asm.Lda(IndY(zp.ZpLb));
+            asm.Sta(MemX(zp.VoiceSlide));
+            asm.Lda(Imm(RowWait));
+            asm.Bne(playRow);                       // always - ROW_WAIT is not zero
+        }
 
         // Masking rather than subtracting: the dispatch above already proved which range the byte
         // is in, so the low bits are the value and a single AND isolates them - one byte less than

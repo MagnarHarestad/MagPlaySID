@@ -34,6 +34,13 @@ clears only the gate (`lda voice_last_waveform,x / and #$fe` in place of `lda #$
 for that one instruction. The procedure was first checked by rebuilding all eleven originals byte for
 byte; every GateOff image is exactly two bytes longer.
 
+`slide_only.bin` and `slide_and_vib.bin` were reassembled on **2026-10-08**, when slide moved from an
+instrument setting to pattern rows (`"1xx"` up, `"2xx"` down, a `$D3` command and its rate). The
+player and song reader from commit `6221867` were ported to that in a scratch copy - the change is
+`pattern-slide.patch` beside this file, against that commit's `Code/musicplayer.s` and
+`Startup/Tables.s` - and the fixtures rewritten to slide rows. The nine images without a slide came
+out byte for byte as before. Rebuilding any golden from now on means applying that patch first.
+
 `opcodes.txt` is the emitter's opcode table, one `mnemonic mode hex` line each, frozen after
 `OpcodeTableTests` had checked all 106 of them against c6510 instruction by instruction.
 

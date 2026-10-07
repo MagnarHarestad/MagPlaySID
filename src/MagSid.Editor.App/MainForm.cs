@@ -1724,7 +1724,6 @@ public sealed class MainForm : Form
             SoftHardRestart = instrument.SoftHardRestart,
             VibratoDelaySpeed = instrument.VibratoDelaySpeed,
             VibratoDepth = instrument.VibratoDepth,
-                SlideRate = instrument.SlideRate,
         };
         capped.Wavetable.AddRange(instrument.Wavetable);
         capped.Arpeggio.AddRange(instrument.Arpeggio);

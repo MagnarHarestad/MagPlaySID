@@ -64,6 +64,12 @@ public sealed class ZeroPageLayout
             VoiceVibDelay = Array();
         }
 
+        // The rate a pattern's slide row set, per voice - only when some pattern has one.
+        if (features.Slide)
+        {
+            VoiceSlide = Array();
+        }
+
         FilterPos = Scalar();
         FilterPhase = Scalar();
         FilterDelta = Scalar();
@@ -110,6 +116,7 @@ public sealed class ZeroPageLayout
     public int VoiceVibDir { get; }
     public int VoiceVibCnt { get; }
     public int VoiceVibDelay { get; }
+    public int VoiceSlide { get; }
 
     public int FilterPos { get; }
     public int FilterPhase { get; }

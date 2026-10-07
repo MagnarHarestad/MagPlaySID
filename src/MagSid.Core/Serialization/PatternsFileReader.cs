@@ -179,7 +179,7 @@ public static partial class PatternsFileReader
         string sourceName, int lineNumber, string line, string tail, Instrument instrument)
     {
         bool sawWave = false, sawArp = false, sawFilter = false, sawPulse = false,
-             sawNoHardRestart = false, sawSoftHardRestart = false, sawVibrato = false, sawSlide = false;
+             sawNoHardRestart = false, sawSoftHardRestart = false, sawVibrato = false;
 
         foreach (string rawSegment in tail.Split(','))
         {
@@ -240,12 +240,12 @@ public static partial class PatternsFileReader
                     ParsePulse(sourceName, lineNumber, line, body, instrument);
                     break;
 
+                // Slide moved from the instrument to the patterns. Refusing it rather than
+                // dropping it keeps a file from quietly losing its glides.
                 case "SLIDE":
-                    if (sawSlide)
-                        throw Error(sourceName, lineNumber, $"INSTRUMENTS: duplicate SLIDE: {line}");
-                    sawSlide = true;
-                    ParseSlide(sourceName, lineNumber, line, body, instrument);
-                    break;
+                    throw Error(sourceName, lineNumber,
+                        "INSTRUMENTS: SLIDE is no longer an instrument setting - write slide rows in " +
+                        $"the pattern instead, \"1xx\" up or \"2xx\" down in hex: {line}");
 
                 case "VIB":
                     if (sawVibrato)
@@ -259,22 +259,6 @@ public static partial class PatternsFileReader
                         $"INSTRUMENTS: unknown section '{segment}' in: {line}");
             }
         }
-    }
-
-    /// <summary>SLIDE +8 - a signed decimal rate, -128..127 and not 0 (0 is spelt by leaving the
-    /// section out).</summary>
-    private static void ParseSlide(
-        string sourceName, int lineNumber, string line, string body, Instrument instrument)
-    {
-        if (!int.TryParse(body, System.Globalization.NumberStyles.AllowLeadingSign,
-                System.Globalization.CultureInfo.InvariantCulture, out int rate)
-            || rate is < -128 or > 127 or 0)
-        {
-            throw Error(sourceName, lineNumber,
-                $"INSTRUMENTS: SLIDE takes a signed rate -128..127, not 0, e.g. SLIDE +8: {line}");
-        }
-
-        instrument.SlideRate = (sbyte)rate;
     }
 
     /// <summary>VIB $ds $depth - delay/speed nibbles, then a depth of $01..$ff ($00 would mean
@@ -531,6 +515,10 @@ public static partial class PatternsFileReader
         {
             "..." => new HoldRow(),
             "---" => new NoteOffRow(),
+            _ when SlideRow.TryParse(noteText, out var slide) => slide,
+            _ when noteText.Length == 3 && noteText[0] is '1' or '2' && char.IsAsciiHexDigit(noteText[1]) =>
+                throw Error(sourceName, lineNumber,
+                    $"'{noteText}' is not a slide: 1xx goes up to 17F, 2xx down to 280."),
             _ => new NoteRow(ParseNoteOrThrow(sourceName, lineNumber, noteText), instrumentNumber),
         };
     }
