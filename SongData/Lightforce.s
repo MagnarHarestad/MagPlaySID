@@ -7,7 +7,7 @@ INSTRUMENTS:
 ; Instrument 02 : Kick
 02, $11, $0f, $fa, WAVE $09 $81 $41 $11 $11 $11 $11, ARP "B-6" "B-6" "D-3" "C#3" "F#2" "B-1" "F#1" HOLD, FLT ($3f $f3 $80 +1), PW 8 +24, NOHR
 ; Instrument 03 : Lead1
-03, $41, $02, $7f, PW 11 +32
+03, $41, $02, $6f, WAVE $21 $41, ARP ROOT, PW 11 +32, NOHR
 ; Instrument 04 : Snare
 04, $81, $08, $e8, WAVE $09 $81 $41 $40 $40 $80, ARP "A#6" "A#6" "A-3" "F#3" "D#3" "B-6" HOLD, PW 8 +24
 END:

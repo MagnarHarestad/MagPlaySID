@@ -23,6 +23,10 @@ frequency-modulation block with both effects on would go uncompared.
 procedure was checked first by reproducing the old `lightforce.bin` byte for byte from the old song;
 the new one differs from it in a single byte, Bass's `flt_start` entry, `$01` to `$00`.
 
+`lightforce.bin` and `magnificent.bin` were reassembled again on **2026-10-08**, after Lead1 changed
+in both songs (Lightforce's gained a wavetable, a note program and NOHR; Magnificent's a new ADSR).
+Same player and procedure; the other nine came out byte for byte as they were, which is the check.
+
 `GateOff\` holds the same eleven images for the player whose hard restart keeps the waveform and
 clears only the gate (`lda voice_last_waveform,x / and #$fe` in place of `lda #$08`) - the setting
 `MagSid.Core.HardRestart.KeepsWaveform` selects, and which folder the tests compare against. Made on

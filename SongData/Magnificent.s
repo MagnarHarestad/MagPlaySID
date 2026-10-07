@@ -25,7 +25,7 @@ INSTRUMENTS:
 ; Instrument 11 : ARP_D-F-A#
 11, $21, $00, $8a, WAVE $09 $41 $41 $20, ARP "F-4" "A#4" "D-4", PW 2 +22 CONT
 ; Instrument 12 : Lead1
-12, $41, $00, $fd, WAVE $09 $41 $40, ARP ROOT, PW 2 +22 CONT
+12, $41, $0f, $9d, WAVE $09 $41 $40, ARP ROOT, PW 2 +22 CONT
 ; Instrument 13 : Lead2
 13, $41, $00, $7c, WAVE $09 $41 $40, ARP ROOT, PW 2 +22 CONT
 END:
