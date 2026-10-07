@@ -74,6 +74,18 @@ public sealed class InstrumentEditorPanel : UserControl
         Margin = new Padding(8, 1, 0, 0),
     };
 
+    // When this instrument's note is replaced, the hard restart keeps its waveform and clears
+    // only the gate, instead of cutting it with $08 - see Instrument.SoftHardRestart.
+    private readonly CheckBox _softHardRestart = new()
+    {
+        Text = "Soft HR",
+        Appearance = Appearance.Button,
+        AutoSize = true,
+        ForeColor = EditorPalette.Body,
+        FlatStyle = FlatStyle.Flat,
+        Margin = new Padding(4, 1, 0, 0),
+    };
+
     private readonly NumericUpDown _pulseWidth = Spinner(0, 15, narrow: true);
     private readonly TextBox _pulseSweep = HexField();
 
@@ -288,6 +300,7 @@ public sealed class InstrumentEditorPanel : UserControl
         voiceRow.Controls.Add(_pulseSweep);
         voiceRow.Controls.Add(_pulseContinuous);
         voiceRow.Controls.Add(_noHardRestart);
+        voiceRow.Controls.Add(_softHardRestart);
         voiceRow.Controls.Add(_vibrator);
         voiceRow.Controls.Add(FieldLabel("D/S"));
         voiceRow.Controls.Add(_vibDelaySpeed);
@@ -321,6 +334,7 @@ public sealed class InstrumentEditorPanel : UserControl
             TryCommit();
         };
         _noHardRestart.CheckedChanged += (_, _) => { if (!_suppressAutoCommit) TryCommit(); };
+        _softHardRestart.CheckedChanged += (_, _) => { if (!_suppressAutoCommit) TryCommit(); };
         _pulseWidth.ValueChanged += (_, _) => { if (!_suppressAutoCommit) TryCommit(); };
         _pulseContinuous.CheckedChanged += (_, _) => { if (!_suppressAutoCommit) TryCommit(); };
 
@@ -515,6 +529,7 @@ public sealed class InstrumentEditorPanel : UserControl
         _attackDecay.Text = instrument.AttackDecay.ToString("x2");
         _sustainRelease.Text = instrument.SustainRelease.ToString("x2");
         _noHardRestart.Checked = instrument.NoHardRestart;
+        _softHardRestart.Checked = instrument.SoftHardRestart;
 
         _pulseWidth.Value = Math.Clamp(instrument.PulseWidth, 0, 15);
         // Shown as the raw byte GoatTracker-style ($00-$ff), same as A/D and S/R, rather than a
@@ -703,6 +718,7 @@ public sealed class InstrumentEditorPanel : UserControl
         instrument.AttackDecay = attackDecay;
         instrument.SustainRelease = sustainRelease;
         instrument.NoHardRestart = _noHardRestart.Checked;
+        instrument.SoftHardRestart = _softHardRestart.Checked;
         instrument.PulseWidth = (int)_pulseWidth.Value;
         instrument.PulseSweep = unchecked((sbyte)pulseSweepByte);
         instrument.PulseContinuous = _pulseContinuous.Checked;

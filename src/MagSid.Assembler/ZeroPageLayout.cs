@@ -133,7 +133,9 @@ public sealed class ZeroPageLayout
 /// <summary>Which of the optional effects this song needs, and therefore how much of the player is
 /// assembled at all. Mirrors v_vibrato / v_slide / v_freqmod in Startup\Tables.s, which are set by
 /// scanning the song's INSTRUMENTS block.</summary>
-public sealed record PlayerFeatures(bool Vibrato, bool Slide)
+/// <param name="SoftHardRestart">Some instrument has SOFTHR, so the hard restart has to look at
+/// the outgoing instrument's flag; without one the test is left out of the player.</param>
+public sealed record PlayerFeatures(bool Vibrato, bool Slide, bool SoftHardRestart = false)
 {
     public static readonly PlayerFeatures None = new(false, false);
 

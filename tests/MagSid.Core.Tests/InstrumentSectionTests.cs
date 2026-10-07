@@ -187,6 +187,8 @@ public class InstrumentSectionTests
     [InlineData("01, $41, $00, $a8, SLIDE +8")]
     [InlineData("01, $41, $00, $a8, SLIDE -128, VIB $32 $10, NOHR")]
     [InlineData("01, $41, $00, $a8, PW 6 +24, VIB $0f $ff, NOHR")]
+    [InlineData("01, $41, $00, $a8, SOFTHR")]
+    [InlineData("01, $41, $00, $a8, PW 6 +24 CONT, NOHR, SOFTHR")]
     public void The_continuous_pulse_flag_and_the_filter_sweep_rate_round_trip(string line)
     {
         var song = PatternsFileReader.Parse(WrapSong(line), "test");
@@ -254,6 +256,15 @@ public class InstrumentSectionTests
     public void A_duplicate_NOHR_is_rejected()
     {
         Assert.Throws<PatternsFormatException>(() => ReadInstrument("01, $41, $00, $a8, NOHR, NOHR"));
+    }
+
+    [Fact]
+    public void The_soft_hard_restart_flag_is_bare_off_by_default_and_once_only()
+    {
+        Assert.True(ReadInstrument("01, $41, $00, $a8, SOFTHR").SoftHardRestart);
+        Assert.False(ReadInstrument("01, $41, $00, $a8").SoftHardRestart);
+        Assert.False(ReadInstrument("01, $41, $00, $a8, NOHR").SoftHardRestart);
+        Assert.Throws<PatternsFormatException>(() => ReadInstrument("01, $41, $00, $a8, SOFTHR, SOFTHR"));
     }
 
     [Fact]

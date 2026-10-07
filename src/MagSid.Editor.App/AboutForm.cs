@@ -178,6 +178,9 @@ public sealed class AboutForm : Form
              "  Pulse, Sweep       Pulse width and its change per frame\n" +
              "  Cont.              Keep the pulse sweep running across notes\n" +
              "  No HR              Skip the hard restart - legato notes\n" +
+             "  Soft HR            When this instrument's note is replaced, clear only the gate\n" +
+             "                     and keep its waveform instead of cutting it with $08 - no\n" +
+             "                     click. Costs the player 10 bytes, and only if used\n" +
              "  Vibrator, D/S,     Vibrato on/off, delay/speed byte, depth byte\n" +
              "  Depth\n" +
              "  Program grid       One frame per row: wavetable on the left, filter on the\n" +
@@ -261,7 +264,7 @@ public sealed class AboutForm : Form
              "  Sync / Ring           Modulate against the previous voice\n" +
              "  Knob                  Drag up / down (Shift: fine), wheel, double-click to\n" +
              "                        reset, right-click for Learn MIDI / Forget\n" +
-             "  CONT / NO HR          See Retro instruments\n" +
+             "  CONT / NO HR / SOFT HR  See Retro instruments\n" +
              "  Envelope graph        While the song plays, a dot follows the instrument's\n" +
              "                        envelope as the SID plays it (the loudest voice using it)\n" +
              "  Program lanes         Click + to add, wheel or Up / Down to change (Shift: x16),\n" +

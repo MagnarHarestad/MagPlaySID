@@ -126,6 +126,9 @@ public static class PatternsFileWriter
         if (instrument.NoHardRestart)
             sb.Append(", NOHR");
 
+        if (instrument.SoftHardRestart)
+            sb.Append(", SOFTHR");
+
         return sb.ToString();
     }
 

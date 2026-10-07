@@ -56,6 +56,7 @@ public static class SongPruning
                 PulseSweep = instrument.PulseSweep,
                 PulseContinuous = instrument.PulseContinuous,
                 NoHardRestart = instrument.NoHardRestart,
+                SoftHardRestart = instrument.SoftHardRestart,
                 VibratoDelaySpeed = instrument.VibratoDelaySpeed,
                 VibratoDepth = instrument.VibratoDepth,
                 SlideRate = instrument.SlideRate,

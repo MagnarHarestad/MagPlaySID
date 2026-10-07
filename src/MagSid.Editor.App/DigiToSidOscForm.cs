@@ -1431,6 +1431,7 @@ public sealed class DigiToSidOscForm : Form
             PulseSweep = source.PulseSweep,
             PulseContinuous = source.PulseContinuous,
             NoHardRestart = source.NoHardRestart,
+            SoftHardRestart = source.SoftHardRestart,
         };
         clone.Wavetable.AddRange(source.Wavetable);
         clone.Arpeggio.AddRange(source.Arpeggio);

@@ -110,6 +110,18 @@ public sealed class Instrument
     public bool NoHardRestart { get; set; }
 
     /// <summary>
+    /// When the next note on this voice replaces this instrument's note, its hard restart clears
+    /// only the gate and keeps the waveform - GoatTracker's way - instead of writing $08, which
+    /// stops the waveform and resets the oscillator mid-sound. The note fades through that one
+    /// frame instead of being cut, which is where the click on a cut note comes from.
+    ///
+    /// Like <see cref="NoHardRestart"/> it belongs to the outgoing instrument: it is this
+    /// instrument's note that ends. The envelope reset (AD $00, SR $07) runs either way. An
+    /// incoming instrument that wants its oscillator reset puts $09 first in its wavetable.
+    /// </summary>
+    public bool SoftHardRestart { get; set; }
+
+    /// <summary>
     /// Vibrato's first table byte: delay in the top nibble, speed in the low nibble. Delay is in
     /// units of four frames ($f = 60 frames, 1.2s on PAL) counted from the note's trigger; speed
     /// is how many further frames the pitch keeps moving one way before turning round (0 = it

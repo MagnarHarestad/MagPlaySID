@@ -139,6 +139,7 @@ public sealed class EditorSession
             PulseSweep = source.PulseSweep,
             PulseContinuous = source.PulseContinuous,
             NoHardRestart = source.NoHardRestart,
+            SoftHardRestart = source.SoftHardRestart,
             VibratoDelaySpeed = source.VibratoDelaySpeed,
             VibratoDepth = source.VibratoDepth,
                 SlideRate = source.SlideRate,

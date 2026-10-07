@@ -128,8 +128,12 @@ public sealed class VoiceEngine
             write(baseReg + 5, 0x00);
             write(baseReg + 6, 0x07);
 
-            // See MagSid.Core.HardRestart: gate off with the waveform kept, or $08.
-            write(baseReg + 4, HardRestart.KeepsWaveform ? _lastControlValue & 0xFE : 0x08);
+            // See MagSid.Core.HardRestart: gate off with the waveform kept, or $08 - kept also
+            // after an outgoing instrument with SOFTHR. Like the 6502 player, a last waveform of
+            // nothing falls back to $08, and the flag is read whether or not that note still sounds.
+            int kept = _lastControlValue & 0xFE;
+            bool soft = HardRestart.KeepsWaveform || (_instrument is { SoftHardRestart: true } && kept != 0);
+            write(baseReg + 4, soft ? kept : 0x08);
         }
 
         InstrumentNumber = instrumentNumber;

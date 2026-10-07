@@ -21,7 +21,8 @@ public static class SongImageBuilder
 
         var features = new PlayerFeatures(
             Vibrato: song.Instruments.Any(i => i.HasVibrato),
-            Slide: song.Instruments.Any(i => i.HasSlide));
+            Slide: song.Instruments.Any(i => i.HasSlide),
+            SoftHardRestart: song.Instruments.Any(i => i.SoftHardRestart));
 
         var notes = NoteDictionary.Build(song);
         var instrumentTables = InstrumentTables.Build(song, notes);

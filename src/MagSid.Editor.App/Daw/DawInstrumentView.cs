@@ -45,6 +45,7 @@ internal sealed class DawInstrumentView : Panel
 
     private readonly ToggleButton _continuous = new("CONT");
     private readonly ToggleButton _noHardRestart = new("NO HR");
+    private readonly ToggleButton _softHardRestart = new("SOFT HR");
 
     // What happens after the note program's last step. The lane draws the answer as a marker, but
     // drawing it was all it could do - this is where it gets set.
@@ -166,6 +167,7 @@ internal sealed class DawInstrumentView : Panel
 
             _continuous.Checked = instrument.PulseContinuous;
             _noHardRestart.Checked = instrument.NoHardRestart;
+            _softHardRestart.Checked = instrument.SoftHardRestart;
             ShowEnding(instrument);
 
             RefreshDerived(instrument);
@@ -434,6 +436,7 @@ internal sealed class DawInstrumentView : Panel
 
         _continuous.CheckedChanged += on => Commit(i => i.PulseContinuous = on);
         _noHardRestart.CheckedChanged += on => Commit(i => i.NoHardRestart = on);
+        _softHardRestart.CheckedChanged += on => Commit(i => i.SoftHardRestart = on);
 
         _waveform.WaveformChanged += w => Commit(i => ApplyWaveform(i, w));
         _wavetable.StepSelected += _ => ShowWaveformTarget(_instrument);
@@ -622,21 +625,24 @@ internal sealed class DawInstrumentView : Panel
         foreach (var knob in new[] { _attack, _decay, _sustain, _release, _pulseWidth, _pulseSweep })
             knob.Width = 64;    // room for the spelled-out names, PulseSweep the widest
 
-        // CONT and NO HR are switches about the pulse and the envelope, so they stand beside the
-        // knobs for those, one above the other, rather than on a row of their own.
+        // CONT, NO HR and SOFT HR are switches about the pulse and the envelope, so they stand
+        // beside the knobs for those rather than on a row of their own - two to a column, which
+        // is as many as the knob row is tall enough for.
         _continuous.Accent = DawPalette.Envelope;
         _noHardRestart.Accent = DawPalette.Envelope;
+        _softHardRestart.Accent = DawPalette.Envelope;
         var flags = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
+            WrapContents = true,
             BackColor = DawPalette.Panel,
-            Size = new Size(84, 66),
+            Size = new Size(166, 66),
             Margin = new Padding(10, 4, 0, 0),
         };
         _continuous.Margin = new Padding(0, 0, 0, 6);
         _noHardRestart.Margin = Padding.Empty;
-        flags.Controls.AddRange([_continuous, _noHardRestart]);
+        _softHardRestart.Margin = new Padding(6, 0, 0, 0);
+        flags.Controls.AddRange([_continuous, _noHardRestart, _softHardRestart]);
 
         knobRow.Controls.AddRange([_attack, _decay, _sustain, _release, _pulseWidth, _pulseSweep, flags]);
 

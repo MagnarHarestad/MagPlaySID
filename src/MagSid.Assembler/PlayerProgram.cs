@@ -240,7 +240,22 @@ public static class PlayerProgram
         }
         else
         {
+            // SOFTHR is bit 7 of the outgoing instrument's pw_init, which voice_prev_pw holds -
+            // the same byte NOHR is read from. Only assembled when some instrument has it.
+            var writeControl = asm.NewLabel(".writecontrol");
+            var hardControl = asm.NewLabel(".hardcontrol");
+            if (features.SoftHardRestart)
+            {
+                asm.Lda(MemX(zp.VoicePrevPw));
+                asm.Bpl(hardControl);
+                asm.Lda(MemX(zp.VoiceLastWaveform));
+                asm.And(Imm(0xFE));
+                asm.Bne(writeControl);              // a last waveform of nothing falls back to $08
+            }
+
+            asm.Define(hardControl);
             asm.Lda(Imm(0x08));
+            asm.Define(writeControl);
         }
 
         asm.Sta(MemY(SidControl));

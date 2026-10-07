@@ -179,7 +179,7 @@ public static partial class PatternsFileReader
         string sourceName, int lineNumber, string line, string tail, Instrument instrument)
     {
         bool sawWave = false, sawArp = false, sawFilter = false, sawPulse = false,
-             sawNoHardRestart = false, sawVibrato = false, sawSlide = false;
+             sawNoHardRestart = false, sawSoftHardRestart = false, sawVibrato = false, sawSlide = false;
 
         foreach (string rawSegment in tail.Split(','))
         {
@@ -194,6 +194,15 @@ public static partial class PatternsFileReader
                     throw Error(sourceName, lineNumber, $"INSTRUMENTS: duplicate NOHR: {line}");
                 sawNoHardRestart = true;
                 instrument.NoHardRestart = true;
+                continue;
+            }
+
+            if (segment.Equals("SOFTHR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (sawSoftHardRestart)
+                    throw Error(sourceName, lineNumber, $"INSTRUMENTS: duplicate SOFTHR: {line}");
+                sawSoftHardRestart = true;
+                instrument.SoftHardRestart = true;
                 continue;
             }
 

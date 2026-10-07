@@ -59,9 +59,10 @@ public sealed class InstrumentTables
         };
     }
 
-    /// <summary>Bit 6 is continuous (a new note leaves the channel's sweep running) and bit 5 is
-    /// NOHR (skip the hard-restart AD/SR reset). Neither has anything to do with pulse width; this
-    /// is simply where the free bits were.</summary>
+    /// <summary>Bit 6 is continuous (a new note leaves the channel's sweep running), bit 5 is
+    /// NOHR (skip the hard-restart AD/SR reset) and bit 7 is SOFTHR (the hard restart keeps the
+    /// waveform). None has anything to do with pulse width; this is simply where the free bits
+    /// were, and the pulse code masks them off before the width reaches the SID.</summary>
     private static byte PulseInitByte(Instrument instrument)
     {
         int width = instrument.PulseWidth;
@@ -69,6 +70,8 @@ public sealed class InstrumentTables
             width += 0x40;
         if (instrument.NoHardRestart)
             width += 0x20;
+        if (instrument.SoftHardRestart)
+            width += 0x80;
 
         return (byte)width;
     }

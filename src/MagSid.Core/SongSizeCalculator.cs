@@ -46,6 +46,10 @@ public static class SongSizeCalculator
     /// loading $08 - two bytes. The four figures above are the $08 player's.</summary>
     private static int HardRestartBytes => HardRestart.KeepsWaveform ? 2 : 0;
 
+    /// <summary>The SOFTHR test (lda/bpl/lda/and/bne), assembled only when an instrument has the
+    /// flag and the switch has not already made every hard restart soft.</summary>
+    private const int SoftHardRestartBytes = 10;
+
     private const int CmdDuration = 0x80;
     private const int CmdInstrument = 0xC0;
     private const int CmdNoteOff = 0xD0;
@@ -64,6 +68,9 @@ public static class SongSizeCalculator
             (false, true) => PlayerSlide,
             (true, true) => PlayerVibratoAndSlide,
         };
+
+        if (!HardRestart.KeepsWaveform && song.Instruments.Any(i => i.SoftHardRestart))
+            player += SoftHardRestartBytes;
 
         int patternBytes = song.Patterns.Sum(p => EncodedLength(p.Rows));
 
