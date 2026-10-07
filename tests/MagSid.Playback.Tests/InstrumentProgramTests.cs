@@ -39,7 +39,9 @@ public class InstrumentProgramTests
             new NoteRow(NoteName.Parse("C-5"), 1), new HoldRow(), new HoldRow(), new HoldRow());
 
         sequencer.Frame();
-        Assert.Contains((4, 0x08), writes); // hard restart: TEST, gate off
+        // Hard restart, gate off. Nothing has played on this voice yet, so keeping the waveform
+        // leaves $00; the $08 variant sets TEST instead.
+        Assert.Contains((4, HardRestart.KeepsWaveform ? 0x00 : 0x08), writes);
         Assert.DoesNotContain(writes, w => w is { Offset: 4, Value: 0x21 | 0x01 });
 
         writes.Clear();

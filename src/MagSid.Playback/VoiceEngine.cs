@@ -78,7 +78,8 @@ public sealed class VoiceEngine
 
     /// <summary>
     /// Hard restart, this frame: zero AD and drop the previous note's envelope at a fast release
-    /// rate, gate off, TEST to reset the oscillator - unless the outgoing instrument opted out
+    /// rate, gate off - the waveform kept or cut with TEST, as MagSid.Core.HardRestart says -
+    /// unless the outgoing instrument opted out
     /// via NoHardRestart, in which case none of that happens: no AD/SR write, no gate pulse, no
     /// oscillator reset. The frequency change above still lands, so a NoHardRestart retrigger is
     /// a genuine legato - the envelope simply continues wherever it already was (still decaying,
@@ -126,7 +127,9 @@ public sealed class VoiceEngine
         {
             write(baseReg + 5, 0x00);
             write(baseReg + 6, 0x07);
-            write(baseReg + 4, 0x08); // gate off, TEST on - the oscillator/envelope reset itself
+
+            // See MagSid.Core.HardRestart: gate off with the waveform kept, or $08.
+            write(baseReg + 4, HardRestart.KeepsWaveform ? _lastControlValue & 0xFE : 0x08);
         }
 
         InstrumentNumber = instrumentNumber;

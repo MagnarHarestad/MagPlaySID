@@ -23,6 +23,13 @@ frequency-modulation block with both effects on would go uncompared.
 procedure was checked first by reproducing the old `lightforce.bin` byte for byte from the old song;
 the new one differs from it in a single byte, Bass's `flt_start` entry, `$01` to `$00`.
 
+`GateOff\` holds the same eleven images for the player whose hard restart keeps the waveform and
+clears only the gate (`lda voice_last_waveform,x / and #$fe` in place of `lda #$08`) - the setting
+`MagSid.Core.HardRestart.KeepsWaveform` selects, and which folder the tests compare against. Made on
+**2026-10-07** with the same commands, the player from commit `6221867` edited in a scratch copy only
+for that one instruction. The procedure was first checked by rebuilding all eleven originals byte for
+byte; every GateOff image is exactly two bytes longer.
+
 `opcodes.txt` is the emitter's opcode table, one `mnemonic mode hex` line each, frozen after
 `OpcodeTableTests` had checked all 106 of them against c6510 instruction by instruction.
 

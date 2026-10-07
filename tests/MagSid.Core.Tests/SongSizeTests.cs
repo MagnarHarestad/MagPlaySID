@@ -43,7 +43,9 @@ public class SongSizeTests
         var song = PatternsFileReader.Parse(File.ReadAllText(path), file);
         var size = SongSizeCalculator.Measure(song);
 
-        Assert.Equal(assembledBytes, size.TotalBytes);
+        // The figures are c6510's for the $08 hard restart. The player that keeps the waveform
+        // instead assembles exactly two bytes larger for every song - see the GateOff goldens.
+        Assert.Equal(assembledBytes + (HardRestart.KeepsWaveform ? 2 : 0), size.TotalBytes);
     }
 
     [Fact]

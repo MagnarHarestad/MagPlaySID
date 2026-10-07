@@ -220,7 +220,8 @@ public static class PlayerProgram
 
         asm.Jsr(voiceSetFreq);                      // leaves Y = this channel's SID offset
 
-        // Hard restart unless NOHR: zero AD, release 7, gate off + TEST. Release 7 and not 0
+        // Hard restart unless NOHR: zero AD, release 7, gate off (waveform kept, or $08 - see
+        // MagSid.Core.HardRestart). Release 7 and not 0
         // because the envelope rate counter is never reset by a write - a period below where it
         // sits wraps it through 15 bits and the next attack stalls.
         asm.Pla();
@@ -231,7 +232,17 @@ public static class PlayerProgram
         asm.Sta(MemY(SidAttackDecay));
         asm.Lda(Imm(0x07));
         asm.Sta(MemY(SidSustainRelease));
-        asm.Lda(Imm(0x08));
+        // See MagSid.Core.HardRestart: gate off with the waveform kept, or $08.
+        if (Core.HardRestart.KeepsWaveform)
+        {
+            asm.Lda(MemX(zp.VoiceLastWaveform));
+            asm.And(Imm(0xFE));
+        }
+        else
+        {
+            asm.Lda(Imm(0x08));
+        }
+
         asm.Sta(MemY(SidControl));
         asm.Define(skipHardReset);
 

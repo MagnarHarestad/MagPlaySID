@@ -37,10 +37,14 @@ public static class SongSizeCalculator
     // without each effect and read "player, song-free" out of tools\measure.py. The effects are
     // gated out of the player entirely when no instrument uses them, and they share the
     // frequency-modulation block, which is why both-at-once is less than the two deltas summed.
-    private const int PlayerBare = 462;
-    private const int PlayerVibrato = 574;
-    private const int PlayerSlide = 523;
-    private const int PlayerVibratoAndSlide = 604;
+    private static readonly int PlayerBare = 462 + HardRestartBytes;
+    private static readonly int PlayerVibrato = 574 + HardRestartBytes;
+    private static readonly int PlayerSlide = 523 + HardRestartBytes;
+    private static readonly int PlayerVibratoAndSlide = 604 + HardRestartBytes;
+
+    /// <summary>Keeping the waveform through the hard restart loads and masks it rather than
+    /// loading $08 - two bytes. The four figures above are the $08 player's.</summary>
+    private static int HardRestartBytes => HardRestart.KeepsWaveform ? 2 : 0;
 
     private const int CmdDuration = 0x80;
     private const int CmdInstrument = 0xC0;

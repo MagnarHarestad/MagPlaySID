@@ -74,7 +74,9 @@ public class SongSequencerTests
         Assert.Contains((5, 0x00), writes); // HR frame A: AD=0
         Assert.Contains((6, 0x07), writes); // HR frame A: SR=sustain 0, release 7 - not 0,
                                              // to avoid the envelope's ADSR-delay-bug stall
-        Assert.Contains((4, 0x08), writes); // HR frame A: TEST bit, gate off
+        // HR frame A: gate off. Nothing has played on this voice yet, so keeping the waveform
+        // leaves $00; the $08 variant sets TEST instead - see MagSid.Core.HardRestart.
+        Assert.Contains((4, HardRestart.KeepsWaveform ? 0x00 : 0x08), writes);
 
         writes.Clear();
         sequencer.Frame(); // HR frame B commits next tick

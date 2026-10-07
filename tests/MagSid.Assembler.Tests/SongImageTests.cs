@@ -28,7 +28,11 @@ public class SongImageTests
 
     private static string FixtureDirectory => Path.Combine(AppContext.BaseDirectory, "Fixtures");
 
-    private static string GoldenDirectory => Path.Combine(AppContext.BaseDirectory, "Goldens");
+    /// <summary>One set of goldens per hard-restart setting (see MagSid.Core.HardRestart), both
+    /// c6510's own output, so whichever the player is set to is compared against the real thing.</summary>
+    private static string GoldenDirectory => HardRestart.KeepsWaveform
+        ? Path.Combine(AppContext.BaseDirectory, "Goldens", "GateOff")
+        : Path.Combine(AppContext.BaseDirectory, "Goldens");
 
     /// <summary>The seven real songs. Between them they reach only two of the four feature
     /// combinations - five are bare, BellaCiao has vibrato - which is what the fixtures below are
