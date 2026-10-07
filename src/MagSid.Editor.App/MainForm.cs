@@ -165,7 +165,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "MagSID Editor";
+        Text = $"MagSID Editor {EditorVersion}";
         Icon = AppIcon.Value;
 
         // Sized to the content rather than a round number: the grid draws a fixed
@@ -1553,6 +1553,16 @@ public sealed class MainForm : Form
         _session.NotifyStructureChanged();
     }
 
+    /// <summary>"v1.1", from the project's &lt;Version&gt; - the same number About shows.</summary>
+    private static string EditorVersion
+    {
+        get
+        {
+            var version = typeof(MainForm).Assembly.GetName().Version;
+            return $"v{version?.Major}.{version?.Minor}";
+        }
+    }
+
     private void RefreshStatusBar()
     {
         // Wired to DirtyChanged, which MarkDirty raises on every value edit - a pattern row, an
@@ -1562,7 +1572,7 @@ public sealed class MainForm : Form
 
         _pathLabel.Text = _session.FilePath ?? "(unsaved)";
         _dirtyLabel.Text = _session.IsDirty ? "Modified" : "Saved";
-        Text = $"MagSID Editor - {Path.GetFileName(_session.FilePath) ?? "New Song"}{(_session.IsDirty ? " *" : "")}";
+        Text = $"MagSID Editor {EditorVersion} - {Path.GetFileName(_session.FilePath) ?? "New Song"}{(_session.IsDirty ? " *" : "")}";
     }
 
     private void DoNew()

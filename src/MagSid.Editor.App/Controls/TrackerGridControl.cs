@@ -112,6 +112,9 @@ public sealed class TrackerGridControl : Control
     private static readonly Brush BrushInstrument = new SolidBrush(ColorInstrument);
     private static readonly Brush BrushHold = new SolidBrush(ColorHold);
     private static readonly Brush BrushNoteOff = new SolidBrush(ColorNoteOff);
+    // A slide row ("1xx" up, "2xx" down) in the note column - an effect, not a note, so it gets
+    // a colour of its own rather than the note's.
+    private static readonly Brush BrushSlide = new SolidBrush(EditorPalette.Warning);
     private static readonly Brush BrushLoopMarker = new SolidBrush(ColorLoopMarker);
     private static readonly Brush BrushOrderTrack = new SolidBrush(ColorOrderTrack);
     private static readonly Brush BrushHeaderBackground = new SolidBrush(ColorHeaderBackground);
@@ -581,6 +584,7 @@ public sealed class TrackerGridControl : Control
     {
         base.OnMouseDown(e);
         Focus();
+        _slideEntry = null;
 
         // Header clicks are handled before the playback-active bail-out below, unlike every
         // other click in this grid - muting a channel is exactly the thing you want to do *while*
@@ -719,6 +723,26 @@ public sealed class TrackerGridControl : Control
         {
             return;
         }
+
+        // A slide being typed takes the keys first - letters and digits included, which would
+        // otherwise play notes - until it is complete, abandoned, or interrupted.
+        if (_slideEntry is not null && HandleSlideEntryKey(e.KeyCode))
+        {
+            e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
+        // Numpad 1 or 2 in the note column starts one: "1xx" up, "2xx" down. The numpad, because
+        // the digit row is the upper octave of the piano.
+        if (_editMode && _cursorField == CursorField.Note && !e.Control && !e.Alt
+            && e.KeyCode is Keys.NumPad1 or Keys.NumPad2)
+        {
+            _slideEntry = e.KeyCode == Keys.NumPad1 ? "1" : "2";
+            Invalidate();
+            e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
         if (e.Control && _editMode && _cursorField == CursorField.Order && e.KeyCode is Keys.Up or Keys.Down)
         {
             MoveOrderEntryAtCursor(e.KeyCode == Keys.Up ? -1 : 1);
@@ -918,6 +942,11 @@ public sealed class TrackerGridControl : Control
     {
         base.OnLostFocus(e);
         ReleaseAllJamNotes();
+        if (_slideEntry is not null)
+        {
+            _slideEntry = null;
+            Invalidate();
+        }
     }
 
     private void ReleaseAllJamNotes()
@@ -933,6 +962,68 @@ public sealed class TrackerGridControl : Control
             NoteReleased?.Invoke(note);
         }
         _heldJamNotes.Clear();
+    }
+
+    /// <summary>A slide being typed: "1" or "2" for the direction, then up to the two hex digits
+    /// of the rate. Null when nothing is being typed.</summary>
+    private string? _slideEntry;
+
+    /// <summary>
+    /// One key of a slide being typed. Hex digits - numpad, digit row or A-F - fill in the rate,
+    /// and the second one writes the row; Backspace takes one back and Escape drops the lot. Any
+    /// other key abandons it and returns false, so that key then does whatever it normally does.
+    /// </summary>
+    private bool HandleSlideEntryKey(Keys key)
+    {
+        if (key == Keys.Escape)
+        {
+            _slideEntry = null;
+            Invalidate();
+            return true;
+        }
+
+        if (key == Keys.Back)
+        {
+            _slideEntry = _slideEntry!.Length > 1 ? _slideEntry[..^1] : null;
+            Invalidate();
+            return true;
+        }
+
+        if (HexDigitFromKey(key) is not { } digit)
+        {
+            _slideEntry = null;
+            Invalidate();
+            return false;
+        }
+
+        _slideEntry += digit.ToString("X");
+        if (_slideEntry.Length == 3)
+        {
+            string text = _slideEntry;
+            _slideEntry = null;
+
+            if (SlideRow.TryParse(text, out var slide))
+                SetRowAtCursor(slide);
+            else
+                System.Media.SystemSounds.Beep.Play();   // 1xx tops out at 7F, 2xx at 80
+        }
+
+        Invalidate();
+        return true;
+    }
+
+    /// <summary>Writes a row at the cursor and steps down, the way a typed note does.</summary>
+    private void SetRowAtCursor(PatternRow row)
+    {
+        var target = ResolveEditTarget(_cursorChannel, _cursorRow, allowExtend: true);
+        if (target is null)
+            return;
+
+        var (pattern, localRow) = target.Value;
+        EnsureRowCount(pattern, localRow + 1);
+        pattern.Rows[localRow] = row;
+        Edited?.Invoke();
+        MoveCursorRow(1);
     }
 
     private static int? HexDigitFromKey(Keys key) => key switch
@@ -2071,6 +2162,8 @@ public sealed class TrackerGridControl : Control
 
         if (resolved is null)
         {
+            if (PendingSlideText(channel, row) is { } typing)
+                g.DrawString(typing, GridFont, BrushSlide, x + MarkerColWidth + 2, y + 1);
             DrawCursorIfHere(g, channel, row, x, y, hasInstrument: false);
             return;
         }
@@ -2096,10 +2189,22 @@ public sealed class TrackerGridControl : Control
                 noteText = "---";
                 noteBrush = BrushNoteOff;
                 break;
+            case SlideRow slide:
+                noteText = slide.Text;
+                noteBrush = BrushSlide;
+                break;
             default:
                 noteText = "?";
                 noteBrush = BrushHold;
                 break;
+        }
+
+        // The slide being typed shows in the cursor's cell as it builds up: "1", "12_", ...
+        if (PendingSlideText(channel, row) is { } pending)
+        {
+            noteText = pending;
+            noteBrush = BrushSlide;
+            instText = null;
         }
 
         g.DrawString(noteText, GridFont, noteBrush, x + MarkerColWidth + 2, y + 1);
@@ -2111,6 +2216,12 @@ public sealed class TrackerGridControl : Control
 
         DrawCursorIfHere(g, channel, row, x, y, hasInstrument: instText is not null);
     }
+
+    /// <summary>The slide being typed, padded out with underscores, for the cursor's cell only.</summary>
+    private string? PendingSlideText(int channel, int row) =>
+        _slideEntry is not null && channel == _cursorChannel && row == _cursorRow
+            ? _slideEntry.PadRight(3, '_')
+            : null;
 
     private void DrawCursorIfHere(Graphics g, int channel, int row, int x, int y, bool hasInstrument)
     {

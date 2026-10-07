@@ -141,7 +141,9 @@ public sealed class AboutForm : Form
              "  Z S X D C V G B H N J M     current octave\n" +
              "  C C#D D#E F F#G G#A A#B\n\n" +
              "  '  /  Shift+'    Octave down / up\n" +
-             "  Return           Note off (\"---\")\n\n");
+             "  Return           Note off (\"---\")\n" +
+             "  Numpad 1 / 2     Slide up / down: then two hex digits (0-9, A-F) for the rate per\n" +
+             "                   frame, e.g. 120 or 210. 100 stops it. Esc cancels\n\n");
         Body("A held key sustains with the instrument's full program; up to three at once, one " +
              "per SID voice. A MIDI keyboard plays the same way once chosen under MIDI.\n\n");
 
@@ -150,7 +152,7 @@ public sealed class AboutForm : Form
         Body("Each channel has four fields:\n\n");
         Mono("  CH    Song order position (\"01→\"), RST01 marks the loop-back point\n" +
              "  PAT   Pattern number, and loop markers LS / LE04\n" +
-             "  NOT   Note, \"...\" hold, \"---\" note off\n" +
+             "  NOT   Note, \"...\" hold, \"---\" note off, 1xx / 2xx slide (orange)\n" +
              "  INS   Instrument number (hex, two quick keys make two digits)\n\n");
         Mono("  Arrows             Move between rows and fields\n" +
              "  Tab / Shift+Tab    Next / previous channel\n" +
