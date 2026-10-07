@@ -255,7 +255,20 @@ public sealed class InstrumentEditorPanel : UserControl
 
         var infoBlock = BuildInfoBlock();
         infoBlock.Dock = DockStyle.Top;
-        infoBlock.Height = 34;
+
+        // As tall as the groups need at this width: one line when they fit side by side, two or
+        // more when the panel is narrow - rather than a fixed height that pushes the last ones
+        // out of sight.
+        void FitInfoBlock()
+        {
+            int height = infoBlock.GetPreferredSize(new Size(Math.Max(1, ClientSize.Width), 0)).Height;
+            if (height > 0 && infoBlock.Height != height)
+                infoBlock.Height = height;
+        }
+
+        Resize += (_, _) => FitInfoBlock();
+        infoBlock.ControlAdded += (_, _) => FitInfoBlock();
+        FitInfoBlock();
 
         var (grid, endingRow) = BuildProgramGroup();
         endingRow.Dock = DockStyle.Bottom;
@@ -281,31 +294,28 @@ public sealed class InstrumentEditorPanel : UserControl
         Controls.Add(infoBlock);
     }
 
-    /// <summary>Voice and Pulse collapsed onto one dense row - no GroupBox, no description text.
-    /// No separate Name field either - it's edited in the Instruments list's own Name column now
-    /// (already inline-editable there), and not repeated here at all since that list already
-    /// shows which instrument is selected.</summary>
+    /// <summary>
+    /// The instrument's own settings as four small captioned groups - envelope, pulse, hard
+    /// restart, vibrato - that sit side by side and wrap onto another line, a whole group at a
+    /// time, when the panel is too narrow for all four. One long row used to run its last fields
+    /// off the edge once SOFT HR joined it. No Name field - it is edited in the Instruments list.
+    /// </summary>
     private Control BuildInfoBlock()
     {
-        var voiceRow = FieldRow();
-        voiceRow.Dock = DockStyle.None;
-        voiceRow.AutoSize = true;
-        voiceRow.Controls.Add(FieldLabel("A/D"));
-        voiceRow.Controls.Add(_attackDecay);
-        voiceRow.Controls.Add(FieldLabel("S/R"));
-        voiceRow.Controls.Add(_sustainRelease);
-        voiceRow.Controls.Add(FieldLabel("Pulse"));
-        voiceRow.Controls.Add(_pulseWidth);
-        voiceRow.Controls.Add(FieldLabel("Sweep"));
-        voiceRow.Controls.Add(_pulseSweep);
-        voiceRow.Controls.Add(_pulseContinuous);
-        voiceRow.Controls.Add(_noHardRestart);
-        voiceRow.Controls.Add(_softHardRestart);
-        voiceRow.Controls.Add(_vibrator);
-        voiceRow.Controls.Add(FieldLabel("D/S"));
-        voiceRow.Controls.Add(_vibDelaySpeed);
-        voiceRow.Controls.Add(FieldLabel("Depth"));
-        voiceRow.Controls.Add(_vibDepth);
+        var groups = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Padding = new Padding(4, 4, 4, 2),
+        };
+
+        groups.Controls.Add(Group("ENVELOPE",
+            FieldLabel("A/D"), _attackDecay, FieldLabel("S/R"), _sustainRelease));
+        groups.Controls.Add(Group("PULSE",
+            FieldLabel("Width"), _pulseWidth, FieldLabel("Sweep"), _pulseSweep, _pulseContinuous));
+        groups.Controls.Add(Group("HARD RESTART", _noHardRestart, _softHardRestart));
+        groups.Controls.Add(Group("VIBRATO",
+            _vibrator, FieldLabel("D/S"), _vibDelaySpeed, FieldLabel("Depth"), _vibDepth));
 
         // Fields apply live rather than waiting for an explicit Save (removed - see this type's
         // own doc comment). Text fields commit on Leave (focus actually leaving, which a
@@ -338,13 +348,50 @@ public sealed class InstrumentEditorPanel : UserControl
         _pulseWidth.ValueChanged += (_, _) => { if (!_suppressAutoCommit) TryCommit(); };
         _pulseContinuous.CheckedChanged += (_, _) => { if (!_suppressAutoCommit) TryCommit(); };
 
-        var host = new Panel { Dock = DockStyle.Fill };
-        host.Controls.Add(voiceRow);
-        void Center() => voiceRow.Location = new Point(
-            Math.Max(0, (host.Width - voiceRow.Width) / 2), Math.Max(0, (host.Height - voiceRow.Height) / 2));
-        host.Resize += (_, _) => Center();
-        voiceRow.SizeChanged += (_, _) => Center();
-        return host;
+        return groups;
+    }
+
+    /// <summary>A caption over a row of fields, in a thin frame - the grouping a GroupBox would
+    /// give, without its heavy border and wasted header space.</summary>
+    private static Control Group(string caption, params Control[] fields)
+    {
+        var row = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = Padding.Empty,
+        };
+        row.Controls.AddRange(fields);
+
+        var title = new Label
+        {
+            Text = caption,
+            AutoSize = true,
+            ForeColor = EditorPalette.Subtitle,
+            Font = new Font("Segoe UI", 6.75f, FontStyle.Bold),
+            Margin = new Padding(3, 0, 0, 1),
+        };
+
+        var group = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(4, 3, 6, 4),
+            Margin = new Padding(0, 0, 8, 4),
+        };
+        group.Controls.Add(title);
+        group.Controls.Add(row);
+        group.Paint += (_, e) =>
+        {
+            using var pen = new Pen(EditorPalette.Border);
+            e.Graphics.DrawRectangle(pen, 0, 0, group.Width - 1, group.Height - 1);
+        };
+
+        return group;
     }
 
     /// <summary>Returns the grid and the "after the last note" row separately - two different
@@ -1069,13 +1116,6 @@ public sealed class InstrumentEditorPanel : UserControl
 
     private void Complain(string message) =>
         MessageBox.Show(this, message, "Invalid value", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-    private static FlowLayoutPanel FieldRow() => new()
-    {
-        Dock = DockStyle.Fill,
-        FlowDirection = FlowDirection.LeftToRight,
-        WrapContents = false,
-    };
 
     private static Label FieldLabel(string text) => new()
     {
