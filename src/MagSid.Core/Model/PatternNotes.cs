@@ -26,6 +26,10 @@ public sealed record LoopMarker(int Row, bool IsStart, int? RepeatCount);
 ///   that reaches them, so swallowing them would change what the song does.
 /// - A pattern's row count never changes. Rows are the pattern's own length; lengthening a note
 ///   consumes the rows after it rather than pushing anything along.
+///
+/// A slide row ("1xx"/"2xx") is a hold with an effect: the note sounds on through it, so it counts
+/// towards the note's length, and edits leave it where it is - like a controller lane, it belongs
+/// to the time it sits at rather than to the note that happens to be there.
 /// </summary>
 public static class PatternNotes
 {
@@ -63,14 +67,22 @@ public static class PatternNotes
     }
 
     /// <summary>How many rows an event at <paramref name="row"/> occupies - itself plus the holds
-    /// after it, stopping at a loop marker or any other event.</summary>
+    /// and slides after it, stopping at a loop marker or any other event.</summary>
     private static int HeldLength(IReadOnlyList<PatternRow> rows, int row)
     {
         int length = 1;
-        for (int next = row + 1; next < rows.Count && rows[next] is HoldRow; next++)
+        for (int next = row + 1; next < rows.Count && rows[next] is HoldRow or SlideRow; next++)
             length++;
 
         return length;
+    }
+
+    /// <summary>A row a note's length runs over becomes a hold - unless it is a slide, which is
+    /// a hold already and stays where it is.</summary>
+    private static void HoldOver(IList<PatternRow> rows, int row)
+    {
+        if (rows[row] is not SlideRow)
+            rows[row] = new HoldRow();
     }
 
     /// <summary>Every LS and LE in the pattern, in row order.</summary>
@@ -177,7 +189,7 @@ public static class PatternNotes
 
         rows[row] = new NoteRow(note, instrumentNumber);
         for (int i = 1; i < allowed; i++)
-            rows[row + i] = new HoldRow();
+            HoldOver(rows, row + i);
     }
 
     /// <summary>
@@ -205,14 +217,14 @@ public static class PatternNotes
         if (allowed > current)
         {
             for (int i = current; i < allowed; i++)
-                rows[row + i] = new HoldRow();
+                HoldOver(rows, row + i);
 
             // Growing can run over the release that used to stop the note - its own, left by an
             // earlier shortening. The holds behind that release then carry the note on to the next
             // event, and the note ends up longer than asked. A release where it should stop keeps
             // the length exactly what was asked for, which is what a drag that grows a note one
             // beat at a time relies on.
-            if (row + allowed < rows.Count && rows[row + allowed] is HoldRow)
+            if (row + allowed < rows.Count && rows[row + allowed] is HoldRow or SlideRow)
                 rows[row + allowed] = new NoteOffRow();
 
             return true;
@@ -360,7 +372,7 @@ public static class PatternNotes
         if (row < 0 || row >= rows.Count || rows[row] is not NoteRow note)
             return false;
 
-        if (atRow <= row || atRow >= row + HeldLength(rows, row) || rows[atRow] is not HoldRow)
+        if (atRow <= row || atRow >= row + HeldLength(rows, row) || rows[atRow] is not (HoldRow or SlideRow))
             return false;
 
         rows[atRow] = new NoteRow(note.Note, note.InstrumentNumber);
@@ -385,12 +397,12 @@ public static class PatternNotes
         {
             switch (rows[next])
             {
-                case HoldRow or NoteOffRow:
+                case HoldRow or NoteOffRow or SlideRow:
                     continue;
 
                 case NoteRow:
                     for (int i = row + 1; i <= next; i++)
-                        rows[i] = new HoldRow();
+                        HoldOver(rows, i);
                     return true;
 
                 default:
@@ -447,7 +459,7 @@ public static class PatternNotes
         // sounds before it depends on which pass of the loop is playing.
         for (int next = toRow + 1; next < rows.Count; next++)
         {
-            if (rows[next] is HoldRow)
+            if (rows[next] is HoldRow or SlideRow)
                 continue;
 
             if (rows[next] is NoteOffRow)

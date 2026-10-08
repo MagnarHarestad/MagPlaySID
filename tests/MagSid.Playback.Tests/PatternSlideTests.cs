@@ -58,9 +58,9 @@ public class PatternSlideTests
         """;
 
     /// <summary>The frequency each voice was left at after every frame.</summary>
-    private static List<int[]> RunFrames(int frames)
+    private static List<int[]> RunFrames(int frames, string songText = SongText)
     {
-        var song = PatternsFileReader.Parse(SongText);
+        var song = PatternsFileReader.Parse(songText);
         var pair = new int[3, 2];
         var sequencer = new SongSequencer(song, (offset, value) =>
         {
@@ -105,6 +105,23 @@ public class PatternSlideTests
         Assert.Equal(0x1125 + 8 * 4, frames[6][0]);
         Assert.Equal(0x159A, frames[7][0]);
         Assert.Equal(0x159A, frames[9][0]);
+    }
+
+    [Fact]
+    public void The_glide_the_piano_roll_projects_is_the_one_the_sequencer_plays()
+    {
+        // Speed 2, three frames a row, and the rate changing mid-note: up, down, then stopped.
+        string text = SongText.Replace("\r\n", "\n")
+            .Replace("var v_Song_Speed = 0", "var v_Song_Speed = 2")
+            .Replace("\"108\", 00\n\"...\", 00\n\"...\", 00", "\"108\", 00\n\"...\", 00\n\"20B\", 00");
+        var pattern = PatternsFileReader.Parse(text).Patterns[0];
+        Assert.Equal(new Core.Model.SlideRow(-11), pattern.Rows[3]);
+
+        var offsets = Core.Model.PatternSlides.Glide(Core.Model.PatternSlides.Rates(pattern), 0, 7, 3);
+        var frames = RunFrames(offsets.Length, text);
+
+        Assert.Equal(offsets.Select(o => 0x1125 + o), frames.Select(f => f[0]));
+        Assert.Contains(offsets, o => o < 0);
     }
 
     [Theory]

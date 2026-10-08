@@ -259,6 +259,17 @@ public sealed class AboutForm : Form
              "- use it to place markers, note offs or a paste on an empty row. Loop markers show " +
              "there: click to select (Up / Down change an LE's count), right-click to remove.\n\n");
 
+        Heading("Slide lane");
+        Mono("  Click / drag       Draw the slide rate on those rows: above the line 1xx up,\n" +
+             "                     below it 2xx down, farther out is faster\n" +
+             "  Right-click / drag Back to 0 (no slide)\n" +
+             "  Hover              Shows the value a click would write\n\n");
+        Body("The lane is the pattern's 1xx / 2xx rows seen as a level on every row. Only the rows " +
+             "where the rate changes become slide rows - bright bars with their value under them - " +
+             "and each costs two bytes, so a run drawn at one level is a single row. A note's own " +
+             "row and the rows after a note off take no slide (a dot). The notes above show the " +
+             "glide the player will play, frame by frame, ending in a dot at the pitch reached.\n\n");
+
         Heading("Instrument page");
         Mono("  Click the name        Rename\n" +
              "  Waveform tab          Click: that waveform only. Right-click: combine.\n" +

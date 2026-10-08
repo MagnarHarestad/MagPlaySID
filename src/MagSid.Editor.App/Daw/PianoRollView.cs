@@ -62,6 +62,15 @@ internal sealed class PianoRollView : Control
     private RollGrid _grid = RollGrid.Beats;
 
     private IReadOnlyList<NoteBlock> _notes = [];
+
+    // The slide lane: the rate in force on every row, and which rows can take one at all.
+    private int[] _slideRates = [];
+    private bool[] _slidable = [];
+
+    // A stroke being drawn in the slide lane: column -> rate, written when the button comes up.
+    private Dictionary<int, int>? _slideStroke;
+    private (int Column, int Rate) _slideStrokeLast;
+    private (int Column, int Rate)? _slideHover;
     private IReadOnlyList<ReleaseBlock> _releases = [];
 
     private RollTool _tool = RollTool.Draw;
@@ -492,7 +501,7 @@ internal sealed class PianoRollView : Control
     /// they would land, the rubber band, and the line about to be drawn.</summary>
     private void DrawToolOverlays(Graphics g)
     {
-        int bottom = Height - _scrollX.Height;
+        int bottom = GridBottom;
 
         if (_moving && (_moveColumns != 0 || _moveKeys != 0))
         {
@@ -606,6 +615,28 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        if (_slideStroke is { } stroke)
+        {
+            _slideStroke = null;
+            Capture = false;
+            if (_pattern is { } pattern)
+            {
+                var rates = new Dictionary<int, int>();
+                foreach (var (column, rate) in stroke)
+                {
+                    int row = RowOf(column);
+                    if (row >= 0)
+                        rates[row] = rate;
+                }
+
+                PatternSlides.SetRates(pattern, rates);
+                Commit();
+            }
+
+            base.OnMouseUp(e);
+            return;
+        }
+
         ToolMouseUp(e);
 
         // One edit for the whole drag, not one per pixel: the song is marked dirty and the views
@@ -630,6 +661,12 @@ internal sealed class PianoRollView : Control
     /// would otherwise hang until the next click.</summary>
     protected override void OnMouseCaptureChanged(EventArgs e)
     {
+        if (!Capture && _slideStroke is not null)
+        {
+            _slideStroke = null;            // lost mid-stroke: nothing written
+            Invalidate();
+        }
+
         if (!Capture)
         {
             ReleaseAudition();
@@ -854,7 +891,7 @@ internal sealed class PianoRollView : Control
 
         int top = visible.Min(n => KeyForNote(n.Note));
         int bottom = visible.Max(n => KeyForNote(n.Note));
-        int visibleHeight = Math.Max(1, Height - GridTop - _scrollX.Height);
+        int visibleHeight = Math.Max(1, GridBottom - GridTop);
 
         double centreKey = (bottom - top + 1) * KeyHeight <= visibleHeight
             ? (top + bottom) / 2.0
@@ -897,11 +934,15 @@ internal sealed class PianoRollView : Control
         {
             _notes = PatternNotes.Read(pattern);
             _releases = PatternNotes.Releases(pattern);
+            _slideRates = PatternSlides.Rates(pattern);
+            _slidable = PatternSlides.Slidable(pattern);
         }
         else
         {
             _notes = [];
             _releases = [];
+            _slideRates = [];
+            _slidable = [];
         }
 
         BuildColumns();
@@ -993,7 +1034,7 @@ internal sealed class PianoRollView : Control
     {
         int columns = ColumnCount;
         int visibleWidth = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
-        int visibleHeight = Math.Max(1, Height - RulerHeight - HeaderHeight - _scrollX.Height);
+        int visibleHeight = Math.Max(1, Height - RulerHeight - HeaderHeight - _scrollX.Height - SlideLaneHeight);
 
         _scrollX.Minimum = 0;
         _scrollX.Maximum = Math.Max(0, (columns * RowWidth) + 40);
@@ -1023,6 +1064,44 @@ internal sealed class PianoRollView : Control
     /// grid switch on the other, and a strip carved out of it would have been drawn over both.
     /// </summary>
     private int GridTop => RulerHeight + HeaderHeight + BeatBarHeight;
+
+    /// <summary>The slide lane under the notes: a bar per row for the slide rate in force there,
+    /// drawn with the mouse like a controller lane, and the notes above it showing the glide.</summary>
+    private const int SlideLaneHeight = 64;
+
+    /// <summary>Where the notes stop and the slide lane begins.</summary>
+    private int GridBottom => Height - _scrollX.Height - SlideLaneHeight;
+
+    private int SlideLaneMid => GridBottom + (SlideLaneHeight / 2);
+
+    /// <summary>Half the lane's height a bar can use. The scale is a square root, so the small
+    /// rates a slide mostly uses are tall enough to see and to draw.</summary>
+    private const int SlideHalf = (SlideLaneHeight / 2) - 6;
+
+    private static float SlideOffsetY(int rate) =>
+        rate == 0 ? 0f : -Math.Sign(rate) * (float)Math.Sqrt(Math.Abs(rate) / 128.0) * SlideHalf;
+
+    private int SlideRateAtY(int y)
+    {
+        double d = Math.Clamp((SlideLaneMid - y) / (double)SlideHalf, -1.0, 1.0);
+        if (Math.Abs(d) < 0.06)
+            return 0;                       // a little dead zone, so 0 is easy to draw
+        int rate = (int)Math.Round(Math.Sign(d) * d * d * 128);
+        return Math.Clamp(rate, SlideRow.MinRate, SlideRow.MaxRate);
+    }
+
+    /// <summary>The column of the slide lane under a point, or null outside it.</summary>
+    private int? SlideLaneColumnAt(Point point)
+    {
+        if (_pattern is null || point.X < KeyboardWidth || point.X > Width - _scrollY.Width
+            || point.Y < GridBottom || point.Y >= Height - _scrollX.Height)
+        {
+            return null;
+        }
+
+        int column = ColumnAtX(point.X);
+        return column >= 0 && column < ColumnCount ? column : null;
+    }
 
     /// <summary>The strip of row cells between the header and the grid. Clicking one picks that
     /// row without writing anything into it - the only way to aim a marker, a gate-off or a paste
@@ -1069,7 +1148,7 @@ internal sealed class PianoRollView : Control
 
     private (int Row, int Key)? CellAt(Point point)
     {
-        if (_pattern is null || point.X < KeyboardWidth || point.Y < GridTop)
+        if (_pattern is null || point.X < KeyboardWidth || point.Y < GridTop || point.Y >= GridBottom)
             return null;
 
         int row = RowOf((point.X - KeyboardWidth + _scrollX.Value) / RowWidth);
@@ -1080,6 +1159,22 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        if (_slideStroke is not null)
+        {
+            ContinueSlideStroke(e);
+            base.OnMouseMove(e);
+            return;
+        }
+
+        var slideHover = SlideLaneColumnAt(e.Location) is { } hoverColumn
+            ? (hoverColumn, SlideRateAtY(e.Y))
+            : ((int, int)?)null;
+        if (slideHover != _slideHover)
+        {
+            _slideHover = slideHover;
+            Invalidate();
+        }
+
         if (_resizingRow >= 0)
         {
             DragNoteEnd(e.X);
@@ -1201,6 +1296,12 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseLeave(EventArgs e)
     {
+        if (_slideHover is not null)
+        {
+            _slideHover = null;
+            Invalidate();
+        }
+
         _hovered = (-1, -1);
         Invalidate();
         base.OnMouseLeave(e);
@@ -1214,6 +1315,17 @@ internal sealed class PianoRollView : Control
         if (e.Y < RulerHeight + HeaderHeight && e.Y >= RulerHeight && GridToggleBounds.Contains(e.Location))
         {
             Grid = _grid == RollGrid.Beats ? RollGrid.Rows : RollGrid.Beats;
+            return;
+        }
+
+        // The slide lane: a stroke, written when the button comes up. Right-click draws 0.
+        if (SlideLaneColumnAt(e.Location) is { } slideColumn && e.Button is MouseButtons.Left or MouseButtons.Right)
+        {
+            int rate = e.Button == MouseButtons.Right ? 0 : SlideRateAtY(e.Y);
+            _slideStroke = new Dictionary<int, int> { [slideColumn] = rate };
+            _slideStrokeLast = (slideColumn, rate);
+            Capture = true;
+            Invalidate();
             return;
         }
 
@@ -1565,12 +1677,18 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        // Everything of the notes stops above the slide lane.
+        var state = g.Save();
+        g.SetClip(new Rectangle(0, 0, Width, Math.Max(0, GridBottom)));
         DrawLanes(g);
         DrawColumns(g);
         DrawBlocks(g);
         DrawToolOverlays(g);
         DrawBeatBar(g);
         DrawKeyboard(g);
+        g.Restore(state);
+
+        DrawSlideLane(g);
         DrawPlayhead(g);
     }
 
@@ -1665,7 +1783,7 @@ internal sealed class PianoRollView : Control
     private void DrawLanes(Graphics g)
     {
         int top = GridTop;
-        int bottom = Height - _scrollX.Height;
+        int bottom = GridBottom;
 
         for (int key = 0; key < KeyCount; key++)
         {
@@ -1690,7 +1808,7 @@ internal sealed class PianoRollView : Control
             return;
 
         int top = GridTop;
-        int bottom = Height - _scrollX.Height;
+        int bottom = GridBottom;
 
         _ = pattern;
 
@@ -1860,6 +1978,13 @@ internal sealed class PianoRollView : Control
             }
         }
 
+        // The glides go on top of every block, so a note sliding into another's lane stays visible.
+        foreach (var note in _notes)
+        {
+            if (KeyForNote(note.Note) is var key and >= 0 && BlockBounds(note.Row, note.Length, key) is { } bounds)
+                DrawGlide(g, note, bounds, DawPalette.ForInstrument(note.InstrumentNumber));
+        }
+
         _ = top;
     }
 
@@ -1888,7 +2013,7 @@ internal sealed class PianoRollView : Control
         int height = KeyHeight - 2;
 
         if (x + width < KeyboardWidth || x > Width - _scrollY.Width
-            || y + height < GridTop || y > Height - _scrollX.Height)
+            || y + height < GridTop || y > GridBottom)
             return null;
 
         return new Rectangle(x + 1, y + 1, Math.Max(3, width), height);
@@ -1922,7 +2047,7 @@ internal sealed class PianoRollView : Control
     private void DrawKeyboard(Graphics g)
     {
         int top = GridTop;
-        int bottom = Height - _scrollX.Height;
+        int bottom = GridBottom;
 
         using (var fill = new SolidBrush(Color.FromArgb(0x10, 0x14, 0x1E)))
             g.FillRectangle(fill, 0, top, KeyboardWidth, bottom - top);
@@ -1965,6 +2090,183 @@ internal sealed class PianoRollView : Control
 
         using var border = new Pen(DawPalette.Border);
         g.DrawLine(border, KeyboardWidth, top, KeyboardWidth, bottom);
+    }
+
+    /// <summary>One more column of a stroke: every column the pointer passed since the last one
+    /// gets a rate on the straight line between them, so a quick sweep leaves no gaps.</summary>
+    private void ContinueSlideStroke(MouseEventArgs e)
+    {
+        if (_slideStroke is not { } stroke)
+            return;
+
+        int column = Math.Clamp(ColumnAtX(e.X), 0, Math.Max(0, ColumnCount - 1));
+        int rate = (e.Button & MouseButtons.Right) != 0 ? 0 : SlideRateAtY(e.Y);
+        var (lastColumn, lastRate) = _slideStrokeLast;
+
+        int steps = Math.Abs(column - lastColumn);
+        for (int i = 0; i <= steps; i++)
+        {
+            int c = lastColumn + (Math.Sign(column - lastColumn) * i);
+            double t = steps == 0 ? 1 : i / (double)steps;
+            stroke[c] = (int)Math.Round(lastRate + ((rate - lastRate) * t));
+        }
+
+        _slideStrokeLast = (column, rate);
+        _slideHover = (column, rate);
+        Invalidate();
+    }
+
+    /// <summary>"1xx" or "2xx", the way the row will read in the tracker.</summary>
+    private static string SlideText(int rate) => new SlideRow(rate).Text;
+
+    /// <summary>
+    /// The slide lane: a bar per column for the rate in force on that row - up for "1xx", down for
+    /// "2xx" - with the rows where the rate changes, the ones that become slide rows and cost two
+    /// bytes, marked and labelled. A note's own row and the rows after a release cannot take a
+    /// slide, and show as a small dot.
+    /// </summary>
+    private void DrawSlideLane(Graphics g)
+    {
+        int top = GridBottom;
+        int bottom = Height - _scrollX.Height;
+        int right = Width - _scrollY.Width;
+        if (bottom - top < 8)
+            return;
+
+        using (var fill = new SolidBrush(Color.FromArgb(0x0C, 0x10, 0x18)))
+            g.FillRectangle(fill, 0, top, Width, bottom - top);
+        using (var border = new Pen(DawPalette.Border))
+        {
+            g.DrawLine(border, 0, top, Width, top);
+            g.DrawLine(border, KeyboardWidth, top, KeyboardWidth, bottom);
+        }
+
+        using (var mid = new Pen(DawPalette.WithAlpha(DawPalette.Effect, 40)))
+            g.DrawLine(mid, KeyboardWidth, SlideLaneMid, right, SlideLaneMid);
+
+        using (var labelFont = new Font("Segoe UI", 7f, FontStyle.Bold))
+        using (var labelInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 170)))
+        using (var hintFont = new Font("Consolas", 6.5f))
+        using (var hintInk = new SolidBrush(DawPalette.TextFaint))
+        {
+            g.DrawString("SLIDE", labelFont, labelInk, 8, top + 4);
+            g.DrawString("1xx up", hintFont, hintInk, 8, SlideLaneMid - 14);
+            g.DrawString("2xx down", hintFont, hintInk, 8, SlideLaneMid + 4);
+        }
+
+        if (_pattern is not { } pattern)
+            return;
+
+        var clip = g.Save();
+        g.SetClip(new Rectangle(KeyboardWidth + 1, top + 1, Math.Max(0, right - KeyboardWidth - 1), bottom - top - 1));
+
+        using var barInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 110));
+        using var changeInk = new SolidBrush(DawPalette.Effect);
+        using var lockedInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.TextFaint, 120));
+        using var valueFont = new Font("Consolas", 6.5f);
+        using var valueInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 220));
+
+        int previousRate = 0;
+        for (int column = 0; column < ColumnCount; column++)
+        {
+            int row = RowOf(column);
+            if (row < 0 || row >= _slideRates.Length)
+                continue;
+
+            int rate = _slideStroke is { } stroke && stroke.TryGetValue(column, out int drawn) && _slidable[row]
+                ? drawn
+                : _slideRates[row];
+            bool changes = _slidable[row] && rate != previousRate;
+            previousRate = pattern.Rows[row] is NoteRow or NoteOffRow ? 0 : rate;
+
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
+            if (x + RowWidth < KeyboardWidth || x > right)
+                continue;
+
+            if (!_slidable[row])
+            {
+                g.FillEllipse(lockedInk, x + (RowWidth / 2) - 1.5f, SlideLaneMid - 1.5f, 3, 3);
+                continue;
+            }
+
+            if (rate == 0 && !changes)
+                continue;
+
+            float offset = SlideOffsetY(rate);
+            float y = Math.Min(SlideLaneMid, SlideLaneMid + offset);
+            float h = Math.Max(1.5f, Math.Abs(offset));
+            g.FillRectangle(changes ? changeInk : barInk, x + 3, y, RowWidth - 6, h);
+
+            // Where it changes, the value - the row the tracker will show.
+            if (changes)
+            {
+                float labelY = rate >= 0 ? SlideLaneMid + 2 : SlideLaneMid - 11;
+                g.DrawString(SlideText(rate), valueFont, valueInk, x, labelY);
+            }
+        }
+
+        // What a click here would write.
+        if (_slideHover is { } hover && _slideStroke is null && RowOf(hover.Column) is var hoverRow and >= 0
+            && hoverRow < _slidable.Length && _slidable[hoverRow])
+        {
+            int x = KeyboardWidth + (hover.Column * RowWidth) - _scrollX.Value;
+            using var ghost = new Pen(DawPalette.WithAlpha(DawPalette.Effect, 160)) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
+            float offset = SlideOffsetY(hover.Rate);
+            g.DrawRectangle(ghost, x + 3, Math.Min(SlideLaneMid, SlideLaneMid + offset), RowWidth - 7, Math.Max(1, Math.Abs(offset)));
+            using var tipFont = new Font("Consolas", 7f, FontStyle.Bold);
+            using var tipInk = new SolidBrush(DawPalette.Effect);
+            g.DrawString(SlideText(hover.Rate), tipFont, tipInk, x + RowWidth, top + 3);
+        }
+
+        g.Restore(clip);
+    }
+
+    /// <summary>
+    /// The glide a note's slides give it, drawn over the note: frame by frame the way the player
+    /// adds the rate to the 16-bit frequency, turned back into semitones on the roll. A note starts
+    /// unslid, and on each row's first frame the rate from before that row's slide row still
+    /// applies - the player moves the pitch before it reads the row.
+    /// </summary>
+    private void DrawGlide(Graphics g, NoteBlock note, Rectangle bounds, Color colour)
+    {
+        if (_song is null || note.Row >= _slideRates.Length)
+            return;
+
+        int framesPerRow = _song.Speed + 1;
+        var (lo, hi) = MagSid.Core.NotePalTable.GetFreq(note.Note);
+        double baseFrequency = (hi << 8) | lo;
+        if (baseFrequency <= 0)
+            return;
+
+        var offsets = PatternSlides.Glide(_slideRates, note.Row, note.Length, framesPerRow);
+        if (offsets.Length < 2 || offsets.All(o => o == 0))
+            return;
+
+        // From the last unmoved frame on - the stretch before it would only cross out the name.
+        int first = Math.Max(0, Array.FindIndex(offsets, o => o != 0) - 1);
+        var points = new List<PointF>(offsets.Length + 1);
+        float centreY = bounds.Y + (bounds.Height / 2f);
+        for (int i = first; i < offsets.Length; i++)
+        {
+            int row = note.Row + (i / framesPerRow);
+            int frame = i % framesPerRow;
+            int columnX = KeyboardWidth + (ColumnOf(row) * RowWidth) - _scrollX.Value;
+            double semitones = 12 * Math.Log2(Math.Max(1, baseFrequency + offsets[i]) / baseFrequency);
+            float x = columnX + (frame * RowWidth / (float)framesPerRow);
+            points.Add(new PointF(x, centreY - (float)(semitones * KeyHeight)));
+        }
+
+        points.Add(new PointF(bounds.Right, points[^1].Y));
+
+        var smooth = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var glow = new Pen(DawPalette.WithAlpha(Color.White, 60), 4f))
+            g.DrawLines(glow, points.ToArray());
+        using (var pen = new Pen(ControlPaint.Light(colour, 0.6f), 1.8f))
+            g.DrawLines(pen, points.ToArray());
+        using (var dot = new SolidBrush(Color.White))
+            g.FillEllipse(dot, points[^1].X - 2.5f, points[^1].Y - 2.5f, 5, 5);
+        g.SmoothingMode = smooth;
     }
 
     private void DrawPlayhead(Graphics g)
