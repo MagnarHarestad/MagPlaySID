@@ -16,6 +16,7 @@ internal static class PatternClipboard
 {
     private static List<PatternRow> _rows = [];
     private static List<CopiedNote> _notes = [];
+    private static List<CopiedSlide> _slides = [];
 
     public static bool HasContent => _rows.Count > 0;
 
@@ -26,7 +27,24 @@ internal static class PatternClipboard
     /// whole-pattern copy: one is notes, the other is a pattern's rows.</summary>
     public static IReadOnlyList<CopiedNote> Notes => _notes;
 
-    public static void CopyNotes(IEnumerable<CopiedNote> notes) => _notes = [.. notes];
+    public static void CopyNotes(IEnumerable<CopiedNote> notes)
+    {
+        _notes = [.. notes];
+        LastCopied = ClipboardKind.Notes;
+    }
+
+    /// <summary>A stretch of the piano roll's slide lane: the rate on each row, placed by its
+    /// distance in columns from the first - the same shape wherever it is pasted.</summary>
+    public static IReadOnlyList<CopiedSlide> Slides => _slides;
+
+    public static void CopySlides(IEnumerable<CopiedSlide> slides)
+    {
+        _slides = [.. slides];
+        LastCopied = ClipboardKind.Slides;
+    }
+
+    /// <summary>Which of the roll's two copies was made last - what Ctrl+V puts down.</summary>
+    public static ClipboardKind LastCopied { get; private set; } = ClipboardKind.Notes;
 
     /// <summary>Writes the copied rows over <paramref name="pattern"/> from <paramref name="row"/>
     /// on, growing it with holds if the copy runs past its end. Returns false when there is nothing
@@ -55,3 +73,13 @@ internal static class PatternClipboard
 /// <summary>One note on the clipboard: how many beats after the first copied note it starts, and
 /// what it is.</summary>
 internal sealed record CopiedNote(int BeatOffset, NoteName Note, int Instrument, int Length);
+
+/// <summary>One row of the slide lane on the clipboard: how many columns after the first copied
+/// one it sits, and the rate in force there.</summary>
+internal sealed record CopiedSlide(int ColumnOffset, int Rate);
+
+internal enum ClipboardKind
+{
+    Notes,
+    Slides,
+}

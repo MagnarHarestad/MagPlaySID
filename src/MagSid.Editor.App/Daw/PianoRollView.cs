@@ -78,6 +78,11 @@ internal sealed class PianoRollView : Control
 
     // A stroke being drawn in the slide lane: column -> rate, written when the button comes up.
     private Dictionary<int, int>? _slideStroke;
+
+    // The slide lane's selection under Object Selection: a run of columns, both ends included,
+    // and the column a drag started on (-1 when none is under way).
+    private (int From, int To)? _slideSelection;
+    private int _slideSelectAnchor = -1;
     private (int Column, int Rate) _slideStrokeLast;
     private (int Column, int Rate)? _slideHover;
     private IReadOnlyList<ReleaseBlock> _releases = [];
@@ -120,6 +125,7 @@ internal sealed class PianoRollView : Control
             _lineStart = null;
             _bandStart = null;
             _selection.Clear();
+            _slideSelection = null;
             Cursor = CursorFor(value);
             Invalidate();
         }
@@ -416,9 +422,34 @@ internal sealed class PianoRollView : Control
     private bool HandleToolKey(KeyEventArgs e, Pattern pattern)
     {
         bool selected = _tool == RollTool.Select && _selection.Count > 0;
+        bool slides = _tool == RollTool.Select && _slideSelection is not null;
 
         switch (e.KeyCode)
         {
+            // The slide lane's selection first: while it is there, it is what the keys act on.
+            case Keys.C when e.Control && slides:
+                CopySlides();
+                break;
+
+            case Keys.X when e.Control && slides:
+                CopySlides();
+                ClearSlides(pattern);
+                break;
+
+            case Keys.Delete when slides:
+                ClearSlides(pattern);
+                break;
+
+            case Keys.Escape when _slideSelection is not null:
+                _slideSelection = null;
+                Invalidate();
+                break;
+
+            case Keys.V when e.Control && PatternClipboard.LastCopied == ClipboardKind.Slides
+                             && PatternClipboard.Slides.Count > 0 && _selectedRow >= 0:
+                PasteSlides(pattern);
+                break;
+
             // Every note in the pattern, under Object Selection so the selection can be cut,
             // copied, moved or deleted at once.
             case Keys.A when e.Control:
@@ -453,7 +484,8 @@ internal sealed class PianoRollView : Control
                 EraseSelection(pattern);
                 break;
 
-            case Keys.V when e.Control && PatternClipboard.Notes.Count > 0 && _selectedRow >= 0:
+            case Keys.V when e.Control && PatternClipboard.LastCopied == ClipboardKind.Notes
+                             && PatternClipboard.Notes.Count > 0 && _selectedRow >= 0:
                 PasteNotes(pattern);
                 break;
 
@@ -474,6 +506,70 @@ internal sealed class PianoRollView : Control
         int first = ColumnOf(notes[0].Row);
         PatternClipboard.CopyNotes(notes.Select(n =>
             new CopiedNote(ColumnOf(n.Row) - first, n.Note, n.InstrumentNumber, n.Length)));
+    }
+
+    /// <summary>The selected stretch of the slide lane: the rate on each row a slide can go on,
+    /// by its column's distance from the first.</summary>
+    private void CopySlides()
+    {
+        if (_slideSelection is not { } range)
+            return;
+
+        var slides = new List<CopiedSlide>();
+        for (int column = range.From; column <= range.To; column++)
+        {
+            int row = RowOf(column);
+            if (row >= 0 && row < _slidable.Length && _slidable[row])
+                slides.Add(new CopiedSlide(column - range.From, _slideRates[row]));
+        }
+
+        if (slides.Count > 0)
+            PatternClipboard.CopySlides(slides);
+    }
+
+    /// <summary>No slide over the selected stretch - the rows after it keep the rate they had.</summary>
+    private void ClearSlides(Pattern pattern)
+    {
+        if (_slideSelection is not { } range)
+            return;
+
+        var rates = new Dictionary<int, int>();
+        for (int column = range.From; column <= range.To; column++)
+        {
+            if (RowOf(column) is var row and >= 0)
+                rates[row] = 0;
+        }
+
+        PatternSlides.SetRates(pattern, rates);
+        Commit();
+    }
+
+    /// <summary>
+    /// Puts the copied slide rates down from the selected row on - a click in the slide lane or
+    /// the beat bar picks it, in this pattern or another - and leaves the pasted stretch selected.
+    /// Rows past the pattern's end are cut off, rows that cannot take a slide are skipped, and the
+    /// rows after the paste keep the rate they had.
+    /// </summary>
+    private void PasteSlides(Pattern pattern)
+    {
+        int start = ColumnOf(_selectedRow);
+        int last = start;
+        var rates = new Dictionary<int, int>();
+
+        foreach (var slide in PatternClipboard.Slides)
+        {
+            int column = start + slide.ColumnOffset;
+            if (column >= ColumnCount || RowOf(column) is not (var row and >= 0))
+                continue;
+
+            rates[row] = slide.Rate;
+            last = Math.Max(last, column);
+        }
+
+        PatternSlides.SetRates(pattern, rates);
+        _selection.Clear();
+        _slideSelection = (start, last);
+        Commit();
     }
 
     private void EraseSelection(Pattern pattern)
@@ -627,6 +723,18 @@ internal sealed class PianoRollView : Control
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        if (_slideSelectAnchor >= 0)
+        {
+            _slideSelectAnchor = -1;
+            Capture = false;
+            if (_slideSelection is { } picked)
+                _selectedRow = RowOf(picked.From);
+
+            Invalidate();
+            base.OnMouseUp(e);
+            return;
+        }
+
         if (_slideStroke is { } stroke)
         {
             _slideStroke = null;
@@ -678,6 +786,9 @@ internal sealed class PianoRollView : Control
             _slideStroke = null;            // lost mid-stroke: nothing written
             Invalidate();
         }
+
+        if (!Capture)
+            _slideSelectAnchor = -1;        // the selection made so far stays
 
         if (!Capture)
         {
@@ -738,6 +849,7 @@ internal sealed class PianoRollView : Control
         _pattern = _song?.Patterns.FirstOrDefault(p => p.Number == patternNumber)
                    ?? _song?.Patterns.FirstOrDefault();
         _selectedRow = -1;
+        _slideSelection = null;
         Reread();
         UpdateScrollRange();
         Invalidate();
@@ -1275,6 +1387,20 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        if (_slideSelectAnchor >= 0)
+        {
+            int column = Math.Clamp(ColumnAtX(e.X), 0, Math.Max(0, ColumnCount - 1));
+            var selection = (Math.Min(_slideSelectAnchor, column), Math.Max(_slideSelectAnchor, column));
+            if (selection != _slideSelection)
+            {
+                _slideSelection = selection;
+                Invalidate();
+            }
+
+            base.OnMouseMove(e);
+            return;
+        }
+
         var slideHover = SlideLaneColumnAt(e.Location) is { } hoverColumn
             ? (hoverColumn, SlideRateAtY(e.Y))
             : ((int, int)?)null;
@@ -1434,14 +1560,37 @@ internal sealed class PianoRollView : Control
             return;
         }
 
-        // The slide lane: a stroke, written when the button comes up. Right-click draws 0.
-        if (SlideLaneColumnAt(e.Location) is { } slideColumn && e.Button is MouseButtons.Left or MouseButtons.Right)
+        // A click anywhere but the slide lane lets go of what was selected there.
+        bool inSlideLane = SlideLaneColumnAt(e.Location) is not null;
+        if (_slideSelection is not null && !inSlideLane)
         {
-            int rate = e.Button == MouseButtons.Right ? 0 : SlideRateAtY(e.Y);
-            _slideStroke = new Dictionary<int, int> { [slideColumn] = rate };
-            _slideStrokeLast = (slideColumn, rate);
-            Capture = true;
+            _slideSelection = null;
             Invalidate();
+        }
+
+        // The slide lane. Draw draws a stroke, written when the button comes up - right-click
+        // draws 0. Object Selection picks a run of rows to copy, cut, delete or paste over. The
+        // other tools leave the lane alone.
+        if (SlideLaneColumnAt(e.Location) is { } slideColumn)
+        {
+            if (_tool == RollTool.Draw && e.Button is MouseButtons.Left or MouseButtons.Right)
+            {
+                int rate = e.Button == MouseButtons.Right ? 0 : SlideRateAtY(e.Y);
+                _slideStroke = new Dictionary<int, int> { [slideColumn] = rate };
+                _slideStrokeLast = (slideColumn, rate);
+                Capture = true;
+                Invalidate();
+            }
+            else if (_tool == RollTool.Select && e.Button == MouseButtons.Left)
+            {
+                _selection.Clear();
+                _slideSelectAnchor = slideColumn;
+                _slideSelection = (slideColumn, slideColumn);
+                _selectedRow = RowOf(slideColumn);
+                Capture = true;
+                Invalidate();
+            }
+
             return;
         }
 
@@ -2318,6 +2467,17 @@ internal sealed class PianoRollView : Control
         var clip = g.Save();
         g.SetClip(new Rectangle(KeyboardWidth + 1, top + 1, Math.Max(0, right - KeyboardWidth - 1), bottom - top - 1));
 
+        // The selected stretch, under the bars.
+        if (_slideSelection is { } range)
+        {
+            int x0 = KeyboardWidth + (range.From * RowWidth) - _scrollX.Value;
+            int x1 = KeyboardWidth + ((range.To + 1) * RowWidth) - _scrollX.Value;
+            using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 36)))
+                g.FillRectangle(fill, x0, top + 1, x1 - x0, bottom - top - 2);
+            using (var edge = new Pen(DawPalette.WithAlpha(DawPalette.Effect, 170)))
+                g.DrawRectangle(edge, x0, top + 2, x1 - x0 - 1, bottom - top - 5);
+        }
+
         using var barInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.Effect, 110));
         using var changeInk = new SolidBrush(DawPalette.Effect);
         using var lockedInk = new SolidBrush(DawPalette.WithAlpha(DawPalette.TextFaint, 120));
@@ -2364,7 +2524,7 @@ internal sealed class PianoRollView : Control
         }
 
         // What a click here would write.
-        if (_slideHover is { } hover && _slideStroke is null && RowOf(hover.Column) is var hoverRow and >= 0
+        if (_tool == RollTool.Draw && _slideHover is { } hover && _slideStroke is null && RowOf(hover.Column) is var hoverRow and >= 0
             && hoverRow < _slidable.Length && _slidable[hoverRow])
         {
             int x = KeyboardWidth + (hover.Column * RowWidth) - _scrollX.Value;
