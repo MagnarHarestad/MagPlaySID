@@ -319,6 +319,9 @@ public sealed class AboutForm : Form
              "  Note program step     Double-click to type the note (C-4, D#5, C4). Enter keeps,\n" +
              "                        Escape cancels\n" +
              "  LOOP / HOLD / ROOT    What happens after the last note step (FROM: loop start)\n" +
+             "  REC (note program)    The chord held on the MIDI keyboard becomes the note\n" +
+             "                        program, low to high, looping - an arpeggio. Each key\n" +
+             "                        down rewrites it from the keys held; letting go keeps it\n" +
              "  Filter step           Click a step to edit it, double-click to type the cutoff\n" +
              "                        in hex ($40 or 40). SETUP makes it a setup record\n" +
              "                        with mode, volume, resonance, routing and sweep\n" +

@@ -24,6 +24,9 @@ internal sealed class ToggleButton : Control
 
     public Color Accent { get; set; } = DawPalette.Envelope;
 
+    /// <summary>A REC button: red when off too, a dot before the caption, and filled red when on.</summary>
+    public bool IsRecord { get; set; }
+
     public bool Checked
     {
         get => _checked;
@@ -65,6 +68,12 @@ internal sealed class ToggleButton : Control
 
         var box = new Rectangle(0, 0, Width - 1, Height - 1);
 
+        if (IsRecord)
+        {
+            PaintRecord(g, box);
+            return;
+        }
+
         using (var fill = new SolidBrush(_checked
                    ? DawPalette.WithAlpha(Accent, 38)
                    : _hovered ? Color.FromArgb(0x1D, 0x26, 0x38) : Color.FromArgb(0x16, 0x1D, 0x2B)))
@@ -77,5 +86,30 @@ internal sealed class ToggleButton : Control
         using var ink = new SolidBrush(_checked ? Accent : DawPalette.TextDim);
         var centred = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         g.DrawString(Text, font, ink, box, centred);
+    }
+
+    private static readonly Color RecRed = Color.FromArgb(0xF0, 0x3E, 0x4E);
+
+    private void PaintRecord(Graphics g, Rectangle box)
+    {
+        using (var fill = new SolidBrush(_checked ? RecRed : _hovered ? Color.FromArgb(0x1D, 0x26, 0x38) : Color.FromArgb(0x10, 0x14, 0x1E)))
+            g.FillRectangle(fill, box);
+        using (var border = new Pen(_checked ? RecRed : DawPalette.WithAlpha(RecRed, 110)))
+            g.DrawRectangle(border, box);
+
+        using var font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+        var size = g.MeasureString(Text, font);
+        float width = 8 + 4 + size.Width;
+        float left = box.X + ((box.Width - width) / 2f);
+        float middle = box.Y + (box.Height / 2f);
+
+        var smooth = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var dot = new SolidBrush(_checked ? Color.White : RecRed))
+            g.FillEllipse(dot, left, middle - 4, 8, 8);
+        g.SmoothingMode = smooth;
+
+        using var ink = new SolidBrush(_checked ? Color.White : DawPalette.WithAlpha(RecRed, 220));
+        g.DrawString(Text, font, ink, left + 12, middle - (size.Height / 2f));
     }
 }

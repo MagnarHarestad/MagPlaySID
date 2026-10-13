@@ -51,6 +51,11 @@ internal sealed class DawInstrumentView : Panel
     private readonly ToggleButton _endingLoop = new("LOOP");
     private readonly ToggleButton _endingHold = new("HOLD");
     private readonly ToggleButton _endingRoot = new("ROOT");
+
+    /// <summary>REC beside the endings: while it is lit, the chord held on the MIDI keyboard is
+    /// written as the note program.</summary>
+    private readonly ToggleButton _noteRecord = new("REC") { IsRecord = true };
+    private readonly HashSet<NoteName> _chordHeld = [];
     private readonly KnobControl _arpLoopFrom = new();
 
     /// <summary>Opened over a note program or filter program step on a double-click, for typing
@@ -119,6 +124,35 @@ internal sealed class DawInstrumentView : Panel
 
     public void SetCutoffPlayhead((int Frame, int Cutoff)? at) => _filterStep.SetPlayhead(at);
 
+    /// <summary>The note program's REC is lit, on an instrument, on a page that is showing.</summary>
+    public bool IsRecordingChord => _noteRecord.Checked && _instrument is not null && Visible;
+
+    /// <summary>
+    /// A key went down while REC is lit: the keys held now, low to high, become the note program,
+    /// looping from its first step - an arpeggio of the chord. Letting go changes nothing, so the
+    /// chord stays once the hand is off the keys; the next key pressed starts from what is held
+    /// then. The notes are absolute, as every step of a note program is.
+    /// </summary>
+    public void RecordChordNote(NoteName note)
+    {
+        if (!IsRecordingChord)
+            return;
+
+        _chordHeld.Add(note);
+        var chord = _chordHeld.OrderBy(n => n.TableIndex).ToList();
+
+        Commit(instrument =>
+        {
+            instrument.Arpeggio.Clear();
+            instrument.Arpeggio.AddRange(chord);
+            instrument.ArpeggioEnding = ArpeggioEnding.Loop;
+            instrument.ArpeggioLoopPoint = 0;
+        });
+        ShowEnding(_instrument);
+    }
+
+    public void RecordChordRelease(NoteName note) => _chordHeld.Remove(note);
+
     /// <summary>The chip the oscillator's waveform is drawn from - the one playback uses.</summary>
     public MagSid.Sid.ChipModel ChipModel
     {
@@ -132,7 +166,11 @@ internal sealed class DawInstrumentView : Panel
         // the waveform tabs at a step nobody picked.
         bool changed = !ReferenceEquals(instrument, _instrument);
         if (changed)
+        {
             _wavetable.ClearSelection();
+            _noteRecord.Checked = false;
+            _chordHeld.Clear();
+        }
 
         _instrument = instrument;
         _loading = true;
@@ -754,7 +792,7 @@ internal sealed class DawInstrumentView : Panel
     /// start step only means anything for LOOP, which is the only time it is shown.</summary>
     private Control BuildEndingStrip()
     {
-        var strip = new Panel { Dock = DockStyle.Right, Width = 108, BackColor = DawPalette.Background };
+        var strip = new Panel { Dock = DockStyle.Right, Width = 162, BackColor = DawPalette.Background };
 
         var caption = new Label
         {
@@ -793,9 +831,15 @@ internal sealed class DawInstrumentView : Panel
             strip.Controls.Add(button);
         }
 
+        // Right of ROOT, as the piano roll's REC sits beside the pattern's name.
+        _noteRecord.Size = new Size(50, 22);
+        _noteRecord.Location = new Point(56, 56);
+        _noteRecord.CheckedChanged += _ => _chordHeld.Clear();
+        strip.Controls.Add(_noteRecord);
+
         Knob(_arpLoopFrom, "From", DawPalette.Oscillator, 0, 63, value => value.ToString());
         _arpLoopFrom.Size = new Size(50, 62);
-        _arpLoopFrom.Location = new Point(56, 56);
+        _arpLoopFrom.Location = new Point(110, 30);
         _arpLoopFrom.ValueChanged += value => Commit(instrument => instrument.ArpeggioLoopPoint = value);
         strip.Controls.Add(_arpLoopFrom);
 

@@ -158,6 +158,13 @@ internal sealed class DawView : Panel
 
     public bool IsRecording => _pianoRoll.IsRecording;
 
+    /// <summary>The instrument page's note-program REC is lit: keys held become its arpeggio.</summary>
+    public bool IsRecordingChord => _instrument.IsRecordingChord;
+
+    public void RecordChordNote(MagSid.Core.Model.NoteName note) => _instrument.RecordChordNote(note);
+
+    public void RecordChordRelease(MagSid.Core.Model.NoteName note) => _instrument.RecordChordRelease(note);
+
     /// <summary>The clip a take records into - the selected one, whose place in the song the
     /// playback starts from so the other channels play what really sounds against it.</summary>
     public (int Channel, int Index)? RecordingFrom { get; private set; }

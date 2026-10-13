@@ -688,6 +688,10 @@ public sealed class MainForm : Form
             {
                 _dawView.RecordNote(note, instrument);
             }
+            else if (_dawView.IsRecordingChord)
+            {
+                _dawView.RecordChordNote(note);
+            }
             else if (_trackerGrid.EditMode && _dawView.RollHasFocus)
             {
                 _dawView.StepInput(note);
@@ -708,6 +712,8 @@ public sealed class MainForm : Form
     {
         if (_dawView.IsRecording)
             _dawView.RecordRelease(note);
+
+        _dawView.RecordChordRelease(note);
 
         ReleaseJamNote(note);
     }
