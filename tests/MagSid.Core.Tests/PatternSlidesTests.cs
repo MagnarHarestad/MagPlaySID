@@ -72,6 +72,58 @@ public class PatternSlidesTests
         Assert.Equal(new SlideRow(9), pattern.Rows[5]);
     }
 
+    /// <summary>Outlaws.s PAT04's F-3 from row 0: a glide of slide rows right after it, and a
+    /// release far behind.</summary>
+    private static Pattern GlideThenLongHold()
+    {
+        var pattern = Make(N("F-3"), new SlideRow(2), new SlideRow(9), new SlideRow(0x1B), new SlideRow(0x0F), new SlideRow(0));
+        for (int i = 0; i < 22; i++)
+            pattern.Rows.Add(new HoldRow());
+        pattern.Rows.Add(new NoteOffRow());
+        pattern.Rows.Add(new HoldRow());
+        return pattern;
+    }
+
+    [Fact]
+    public void Lengthening_a_note_over_a_slide_in_its_release_keeps_that_slide()
+    {
+        // The release tail slides up from row 12 and stops at 14. Grown to 12, the note's new
+        // release takes row 12's place, and the "105" moves to row 13.
+        var pattern = Make(N("F-3"));
+        for (int i = 1; i < 10; i++)
+            pattern.Rows.Add(new HoldRow());
+        pattern.Rows.Add(new NoteOffRow());
+        pattern.Rows.Add(new HoldRow());
+        pattern.Rows.Add(new SlideRow(5));
+        pattern.Rows.Add(new HoldRow());
+        pattern.Rows.Add(new SlideRow(0));
+        pattern.Rows.Add(new HoldRow());
+        var before = PatternSlides.Rates(pattern);
+
+        PatternNotes.SetLength(pattern, 0, 12);
+
+        Assert.IsType<NoteOffRow>(pattern.Rows[12]);
+        Assert.Equal(new SlideRow(5), pattern.Rows[13]);
+        Assert.Equal(new SlideRow(0), pattern.Rows[14]);
+        Assert.Equal(before.Skip(13), PatternSlides.Rates(pattern).Skip(13));
+    }
+
+    [Fact]
+    public void A_release_landing_on_a_slide_row_keeps_every_rate_after_it()
+    {
+        // Length 5 puts the release on row 5, the "100" that stopped the glide: the stop moves
+        // to row 6, and from there on the rows have the rates they had.
+        var pattern = GlideThenLongHold();
+        var before = PatternSlides.Rates(pattern);
+
+        PatternNotes.SetLength(pattern, 0, 5);
+
+        Assert.IsType<NoteOffRow>(pattern.Rows[5]);
+        Assert.Equal(new SlideRow(0), pattern.Rows[6]);
+        Assert.Equal(before.Skip(6), PatternSlides.Rates(pattern).Skip(6));
+        Assert.Equal(new SlideRow(0x0F), pattern.Rows[4]);
+    }
+
     [Fact]
     public void A_slide_runs_on_through_a_note_off()
     {

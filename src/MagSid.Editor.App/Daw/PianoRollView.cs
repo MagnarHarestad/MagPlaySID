@@ -1443,8 +1443,10 @@ internal sealed class PianoRollView : Control
     }
 
     /// <summary>
-    /// How far a drag may pull a note's end: over the holds behind it, and over its own release and
-    /// whatever that release was holding, but never over the next note.
+    /// How far a drag may pull a note's end: over the holds and slide rows behind it, and over its
+    /// own release and whatever that release was holding, but never over the next note. Stopping
+    /// at a slide row - one right after the note - left the note one row long at the first move,
+    /// and its release written over the slide.
     ///
     /// SetLength would happily take it further - a tracker lets a note be written straight over the
     /// rows after it, and that is right for typing. It is wrong for a mouse, where overshooting by
@@ -1453,7 +1455,7 @@ internal sealed class PianoRollView : Control
     private static int DraggableLength(Pattern pattern, int row)
     {
         int length = 1;
-        for (int next = row + 1; next < pattern.Rows.Count && pattern.Rows[next] is HoldRow or NoteOffRow; next++)
+        for (int next = row + 1; next < pattern.Rows.Count && pattern.Rows[next] is HoldRow or NoteOffRow or SlideRow; next++)
         {
             length++;
         }
@@ -1490,26 +1492,36 @@ internal sealed class PianoRollView : Control
         // and forth never drifts.
         int column = (x - KeyboardWidth + _scrollX.Value) / RowWidth;
         int delta = (column - ColumnOf(_resizingRow) + 1) - grabbedFrom;
-
-        bool changed = false;
-        foreach (var (row, from) in _resizeFrom)
-        {
-            int length = Math.Clamp(from + delta, 1, DraggableLength(pattern, row));
-            changed |= PatternNotes.SetLength(pattern, row, length);
-        }
-
-        if (!changed)
+        if (delta == _resizeDelta || _resizeSnapshot is not { } snapshot)
         {
             return;
         }
 
-        _resizeChanged = true;
+        // From the rows as they were when the drag began, every time: an end dragged back over
+        // slide rows puts its release on them on the way, and only starting again from the
+        // original leaves them as they were once the end has moved on.
+        _resizeDelta = delta;
+        pattern.Rows.Clear();
+        pattern.Rows.AddRange(snapshot);
+
+        foreach (var (row, from) in _resizeFrom)
+        {
+            int length = Math.Clamp(from + delta, 1, DraggableLength(pattern, row));
+            PatternNotes.SetLength(pattern, row, length);
+        }
+
+        _resizeChanged = !pattern.Rows.SequenceEqual(snapshot);
         Reread();
         Invalidate();
     }
 
     /// <summary>The notes a resize drag is stretching, and how long each was when it began.</summary>
     private readonly Dictionary<int, int> _resizeFrom = [];
+
+    /// <summary>The pattern's rows when the resize drag began, and the change in length it last
+    /// applied to them.</summary>
+    private List<PatternRow>? _resizeSnapshot;
+    private int _resizeDelta;
 
     /// <summary>Starts dragging a note's end - that note alone, or with <paramref name="together"/>
     /// every selected note, each keeping its own length plus whatever the drag adds.</summary>
@@ -1524,6 +1536,8 @@ internal sealed class PianoRollView : Control
 
         _resizingRow = grabbed.Row;
         _resizeChanged = false;
+        _resizeSnapshot = _pattern is { } pattern ? [.. pattern.Rows] : null;
+        _resizeDelta = 0;
         _selectedRow = grabbed.Row;
         Capture = true;
         Invalidate();

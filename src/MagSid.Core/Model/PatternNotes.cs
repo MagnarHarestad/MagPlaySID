@@ -214,6 +214,10 @@ public static class PatternNotes
         if (allowed == current)
             return false;
 
+        // The slides belong to the rows, not to the note: whatever rate each row after the note
+        // had, it keeps. Only the row the release lands on cannot carry one.
+        var slides = PatternSlides.Rates(pattern);
+
         if (allowed > current)
         {
             for (int i = current; i < allowed; i++)
@@ -227,6 +231,7 @@ public static class PatternNotes
             if (row + allowed < rows.Count && rows[row + allowed] is HoldRow or SlideRow)
                 rows[row + allowed] = new NoteOffRow();
 
+            KeepSlides(pattern, row, slides);
             return true;
         }
 
@@ -240,7 +245,22 @@ public static class PatternNotes
         if (row + current < rows.Count && rows[row + current] is NoteOffRow)
             rows[row + current] = new HoldRow();
 
+        KeepSlides(pattern, row, slides);
         return true;
+    }
+
+    /// <summary>
+    /// Puts every row after <paramref name="row"/> back at the slide rate it had before a length
+    /// change. A release written over a slide row took that row's place, so its rate moves to the
+    /// row after the release - where it stops mattering only if that row sets a rate of its own.
+    /// </summary>
+    private static void KeepSlides(Pattern pattern, int row, int[] before)
+    {
+        var rates = new Dictionary<int, int>();
+        for (int r = row + 1; r < before.Length && r < pattern.Rows.Count; r++)
+            rates[r] = before[r];
+
+        PatternSlides.SetRates(pattern, rates);
     }
 
     /// <summary>
