@@ -317,7 +317,9 @@ public sealed class AboutForm : Form
              "  Envelope graph        While the song plays, a dot follows the instrument's\n" +
              "                        envelope as the SID plays it (the loudest voice using it)\n" +
              "  Program lanes         Click + to add, wheel or Up / Down to change (Shift: x16),\n" +
-             "                        right-click or Delete to remove, Insert to add\n" +
+             "                        right-click or Delete to remove. Insert copies the\n" +
+             "                        selected step in right after it (the rest move along);\n" +
+             "                        with none selected it adds a step at the end\n" +
              "  Wavetable step        Double-click to type the control byte in hex ($41, 11),\n" +
              "                        $01-$FF\n" +
              "  Note program step     Double-click to type the note (C-4, D#5, C4). Enter keeps,\n" +

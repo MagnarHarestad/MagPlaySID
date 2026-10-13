@@ -519,6 +519,15 @@ internal sealed class DawInstrumentView : Panel
                 program.Add(program.Count > 0 ? program[^1] : (byte)(i.Waveform | 0x01));
                 Apply(i, program);
             },
+            duplicate: (i, step) =>
+            {
+                var program = Wavetable(i);
+                if (step < program.Count)
+                {
+                    program.Insert(step + 1, program[step]);
+                    Apply(i, program);
+                }
+            },
             remove: (i, step) =>
             {
                 var program = Wavetable(i);
@@ -537,6 +546,22 @@ internal sealed class DawInstrumentView : Panel
                     i.Arpeggio[step] = Transpose(i.Arpeggio[step], by);
             },
             append: i => i.Arpeggio.Add(i.Arpeggio.Count > 0 ? i.Arpeggio[^1] : NoteName.Parse("C-4")),
+            duplicate: (i, step) =>
+            {
+                // The ending cell after the last note is not a note: Insert there adds one.
+                if (step >= i.Arpeggio.Count)
+                {
+                    i.Arpeggio.Add(i.Arpeggio.Count > 0 ? i.Arpeggio[^1] : NoteName.Parse("C-4"));
+                    return;
+                }
+
+                i.Arpeggio.Insert(step + 1, i.Arpeggio[step]);
+
+                // The loop goes back to the same note it did, which is one step further along now
+                // when the copy went in before it.
+                if (i.ArpeggioLoopPoint > step)
+                    i.ArpeggioLoopPoint++;
+            },
             remove: (i, step) =>
             {
                 if (step < i.Arpeggio.Count)
@@ -553,6 +578,11 @@ internal sealed class DawInstrumentView : Panel
             append: i => i.Filter.Add(i.Filter.Count > 0
                 ? FilterStep.Sweep(i.Filter[^1].Cutoff)
                 : FilterStep.Sweep(0x40)),
+            duplicate: (i, step) =>
+            {
+                if (step < i.Filter.Count)
+                    i.Filter.Insert(step + 1, i.Filter[step]);
+            },
             remove: (i, step) =>
             {
                 if (step < i.Filter.Count)
@@ -588,10 +618,12 @@ internal sealed class DawInstrumentView : Panel
         ProgramLaneControl lane,
         Action<Instrument, int, int> nudge,
         Action<Instrument> append,
-        Action<Instrument, int> remove)
+        Action<Instrument, int> remove,
+        Action<Instrument, int> duplicate)
     {
         lane.StepNudged += (step, by) => Commit(i => nudge(i, step, by));
         lane.StepAppended += () => Commit(append);
+        lane.StepDuplicated += step => Commit(i => duplicate(i, step));
         lane.StepRemoved += step => Commit(i => remove(i, step));
     }
 

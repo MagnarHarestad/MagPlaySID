@@ -65,6 +65,10 @@ internal sealed class ProgramLaneControl : Control
     /// <summary>The trailing "+" was used.</summary>
     public event Action? StepAppended;
 
+    /// <summary>Insert with a step selected: a copy of it goes in right after, the steps behind
+    /// it move one along, and the copy is selected.</summary>
+    public event Action<int>? StepDuplicated;
+
     public event Action<int>? StepRemoved;
 
     public Color Accent { get; set; } = DawPalette.Envelope;
@@ -209,6 +213,22 @@ internal sealed class ProgramLaneControl : Control
                 e.Handled = true;
                 break;
 
+            // With a step selected, its copy goes in right after it; with none, a step at the end.
+            case Keys.Insert when _selected >= 0:
+            {
+                int copied = _selected;
+                StepDuplicated?.Invoke(copied);
+                if (copied + 1 < _steps.Count)
+                {
+                    _selected = copied + 1;
+                    Invalidate();
+                    StepSelected?.Invoke(_selected);
+                }
+
+                e.Handled = true;
+                break;
+            }
+
             case Keys.Insert:
                 StepAppended?.Invoke();
                 e.Handled = true;
@@ -298,7 +318,7 @@ internal sealed class ProgramLaneControl : Control
             g.DrawString(Hint, hintFont, hintInk, 14 + titleWidth, 7);
 
             string count = Focused
-                ? "↑↓ value  ·  Del removes  ·  Ins adds"
+                ? "↑↓ value  ·  Del removes  ·  Ins copies"
                 : _steps.Count == 1 ? "1 step" : $"{_steps.Count} steps";
             var far = new StringFormat { Alignment = StringAlignment.Far };
             g.DrawString(count, hintFont, hintInk, new RectangleF(0, 7, Width - 10, 14), far);
