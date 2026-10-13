@@ -193,7 +193,10 @@ public sealed class SongSequencer
         var state = _channels[ch];
         state.OrderPos = captured.OrderPos;
         state.CurrentPatternNumber = captured.CurrentPatternNumber;
-        state.RowIndex = Math.Clamp(captured.RowIndex, 0, pattern.Rows.Count - 1);
+        // Up to Rows.Count, not Rows.Count - 1: a channel that has just played its pattern's last
+        // row sits one past it, waiting to move to its next entry. Pulled back onto that row, it
+        // played it a second time and came out a row behind the other channels.
+        state.RowIndex = Math.Clamp(captured.RowIndex, 0, pattern.Rows.Count);
         state.LoopStartRowIndex = Math.Clamp(captured.LoopStartRowIndex, 0, pattern.Rows.Count - 1);
         state.LoopRepeatCounter = captured.LoopRepeatCounter;
         state.Duration = captured.Duration;

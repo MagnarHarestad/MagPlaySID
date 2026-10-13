@@ -274,4 +274,54 @@ public class ResumeTests
         var notes = FirstNotePerChannel(song, beyond);
         Assert.All(notes, n => Assert.True(n is not null, "every channel should still have triggered a row"));
     }
+
+    [Fact]
+    public void Starting_where_one_channel_changes_pattern_plays_what_the_song_plays_from_the_top()
+    {
+        // Channel 1 runs one eight-row pattern while channel 3 plays two four-row ones, so channel
+        // 3's second entry starts as channel 1 reaches row 4. At that boundary channel 3 sits one
+        // past its pattern's last row; restored onto that row instead, it played it again and
+        // came out a row behind - what the piano roll's REC starts from.
+        var song = new Song { Speed = 0 };
+        song.Instruments.Add(Instr(1));
+
+        var eight = new Pattern { Number = 1 };
+        var four = new Pattern { Number = 2 };
+        for (int row = 0; row < 8; row++)
+            eight.Rows.Add(new NoteRow(NoteName.AllNotes[24 + row], 1));
+        for (int row = 0; row < 4; row++)
+            four.Rows.Add(new NoteRow(NoteName.AllNotes[48 + row], 1));
+        song.Patterns.Add(eight);
+        song.Patterns.Add(four);
+
+        song.ChannelOrders[0].Tokens.Add(new PatternRefToken(1));
+        song.ChannelOrders[1].Tokens.Add(new PatternRefToken(1));
+        song.ChannelOrders[2].Tokens.Add(new PatternRefToken(2));
+        song.ChannelOrders[2].Tokens.Add(new PatternRefToken(2));
+
+        var from = SongSequencer.FindPosition(song, channel: 2, orderIndex: 1, rowIndex: 0);
+        Assert.NotNull(from);
+
+        static List<string> Triggers(Song song, SongSequencer.SequencerPosition? from, int frames)
+        {
+            var heard = new List<string>();
+            var frame = new List<string>();
+            var sequencer = new SongSequencer(song, (_, _) => { }, from);
+            sequencer.RowTriggered += (ch, pattern, row, _, _) => frame.Add($"{ch}:{pattern}:{row}");
+            for (int i = 0; i < frames; i++)
+            {
+                frame.Clear();
+                sequencer.Frame();
+                heard.Add(string.Join(" ", frame));
+            }
+
+            return heard;
+        }
+
+        var fromTop = Triggers(song, null, from!.Frame + 12);
+        var started = Triggers(song, from, 12);
+
+        Assert.Equal("0:1:4 1:1:4 2:2:0", started[0]);
+        Assert.Equal(fromTop.Skip(from.Frame), started);
+    }
 }
