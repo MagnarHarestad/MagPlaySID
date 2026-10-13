@@ -119,6 +119,13 @@ internal sealed class DawInstrumentView : Panel
 
     public void SetCutoffPlayhead((int Frame, int Cutoff)? at) => _filterStep.SetPlayhead(at);
 
+    /// <summary>The chip the oscillator's waveform is drawn from - the one playback uses.</summary>
+    public MagSid.Sid.ChipModel ChipModel
+    {
+        get => _waveform.ChipModel;
+        set => _waveform.ChipModel = value;
+    }
+
     public void LoadInstrument(Instrument? instrument)
     {
         // Another instrument's step 02 is not this one's: a selection carried across would point
@@ -381,6 +388,7 @@ internal sealed class DawInstrumentView : Panel
 
         int step = WaveformStep(instrument);
         _waveform.Waveform = step >= 0 ? Wavetable(instrument)[step] : instrument.Waveform;
+        _waveform.PulseWidth = instrument.PulseWidth;
     }
 
     /// <summary>

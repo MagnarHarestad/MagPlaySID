@@ -113,6 +113,13 @@ internal sealed class DawView : Panel
     /// <summary>Every knob the DAW shows, for MIDI learn.</summary>
     public IEnumerable<KnobControl> Knobs() => _instrument.Knobs();
 
+    /// <summary>The chip playback runs on, for the waveforms drawn from reSID.</summary>
+    public MagSid.Sid.ChipModel ChipModel
+    {
+        get => _instrument.ChipModel;
+        set => _instrument.ChipModel = value;
+    }
+
     /// <summary>A key was pressed on a MIDI keyboard. Writes into the piano roll when that is the
     /// view on screen, and reports whether it did - the caller sounds the note either way, because
     /// hearing what you played is not conditional on it being recorded.</summary>

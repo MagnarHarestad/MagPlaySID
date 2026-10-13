@@ -275,10 +275,22 @@ public sealed class AboutForm : Form
              "pattern on that channel. REC again, or Stop, ends the take - one undo step.\n\n");
 
         Heading("Slide lane");
+        Body("With the Draw tool:\n\n");
         Mono("  Click / drag       Draw the slide rate on those rows: above the line 1xx up,\n" +
              "                     below it 2xx down, farther out is faster\n" +
              "  Right-click / drag Back to 0 (no slide)\n" +
              "  Hover              Shows the value a click would write\n\n");
+        Body("With Object Selection:\n\n");
+        Mono("  Click / drag       Select a run of rows in the lane\n" +
+             "  Ctrl+C / Ctrl+X    Copy / cut the slide rates there\n" +
+             "  Delete             No slide over the selection\n" +
+             "  Ctrl+V             Paste from the selected row - click the lane or the beat\n" +
+             "                     bar to pick it, in this pattern or another\n" +
+             "  Escape             Deselect\n\n");
+        Body("The other tools leave the lane alone. A paste puts each row's rate down at the same " +
+             "distance from where it is aimed; rows past the pattern's end are cut off, and the rows " +
+             "after it keep the slide they had. Ctrl+V pastes whichever was copied last, notes or " +
+             "slides.\n\n");
         Body("The lane is the pattern's 1xx / 2xx rows seen as a level on every row. Only the rows " +
              "where the rate changes become slide rows - bright bars with their value under them - " +
              "and each costs two bytes, so a run drawn at one level is a single row. A note's own " +
@@ -292,6 +304,8 @@ public sealed class AboutForm : Form
              "                        With a wavetable step selected it changes that step\n" +
              "                        (click the step again or Escape to go back)\n" +
              "  Silence               $09: no waveform, test bit on - a drum's usual first step\n" +
+             "  Waveform strip        reSID's own output for the waveform and pulse width, on\n" +
+             "                        the SID chosen in the toolbar - turn Pulse to see it\n" +
              "  Sync / Ring           Modulate against the previous voice\n" +
              "  Knob                  Drag up / down (Shift: fine), wheel, double-click to\n" +
              "                        reset, right-click for Learn MIDI / Forget\n" +

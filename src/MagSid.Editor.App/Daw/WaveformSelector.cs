@@ -1,4 +1,6 @@
 ﻿using System.Drawing.Drawing2D;
+using MagSid.Playback;
+using MagSid.Sid;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -73,6 +75,41 @@ internal sealed class WaveformSelector : Control
     public event Action<byte>? WaveformChanged;
 
     public Color Accent { get; set; } = DawPalette.Oscillator;
+
+    private int _pulseWidth = MagSid.Core.Model.Instrument.DefaultPulseWidth;
+    private ChipModel _chipModel = ChipModel.Mos8580;
+    private float[]? _rendered;
+    private (byte, int, ChipModel, int) _renderedFor;
+
+    /// <summary>The chip the preview is rendered on - the one playback uses.</summary>
+    public ChipModel ChipModel
+    {
+        get => _chipModel;
+        set
+        {
+            if (_chipModel == value)
+                return;
+
+            _chipModel = value;
+            Invalidate();
+        }
+    }
+
+    /// <summary>The instrument's pulse width, the top nibble of the SID's 12-bit width: the pulse
+    /// is drawn with the duty it really has.</summary>
+    public int PulseWidth
+    {
+        get => _pulseWidth;
+        set
+        {
+            int width = Math.Clamp(value, 0, 15);
+            if (_pulseWidth == width)
+                return;
+
+            _pulseWidth = width;
+            Invalidate();
+        }
+    }
 
     public byte Waveform
     {
@@ -234,7 +271,10 @@ internal sealed class WaveformSelector : Control
         using var hexFont = new Font("Consolas", 7f);
         using var hexInk = new SolidBrush(DawPalette.TextFaint);
         var far = new StringFormat { Alignment = StringAlignment.Far };
-        g.DrawString($"${_waveform:X2}", hexFont, hexInk,
+        string hex = (_waveform & 0x40) != 0
+            ? $"PW ${_pulseWidth:X}00 · {100 - (_pulseWidth * 100 / 16)}% high    ${_waveform:X2}"
+            : $"${_waveform:X2}";
+        g.DrawString(hex, hexFont, hexInk,
             new RectangleF(0, preview.Y + 2, preview.Width - 5, 12), far);
 
         // A gesture nobody can see is a gesture nobody finds.
@@ -257,57 +297,24 @@ internal sealed class WaveformSelector : Control
         g.DrawString(label, font, ink, box, centred);
     }
 
-    /// <summary>Sums whichever waveforms are selected. Combined waveforms on a real SID are an AND
-    /// of the oscillator's own outputs and not a sum, so this is an impression rather than a
-    /// simulation - enough to tell four choices apart, which is all a tab strip needs.</summary>
+    /// <summary>The voice as reSID plays it - see <see cref="WaveformRender"/>: three periods of
+    /// the chip's own output for this control byte and pulse width, on the chip model chosen in
+    /// the toolbar. Rendered again only when one of those, or the width, changes.</summary>
     private void DrawWaveform(Graphics g, Rectangle box)
     {
         int steps = Math.Max(16, box.Width);
+        var key = (_waveform, _pulseWidth, ChipModel, steps);
+        if (_rendered is null || _renderedFor != key)
+        {
+            _rendered = WaveformRender.Render(_waveform, _pulseWidth, ChipModel, steps);
+            _renderedFor = key;
+        }
+
         var points = new PointF[steps];
         float mid = box.Y + (box.Height / 2f);
         float amplitude = (box.Height / 2f) - 5f;
-
-        var random = new Random(7);
-        float noiseHeld = 0f;
-
         for (int i = 0; i < steps; i++)
-        {
-            float phase = i / (float)steps * 3f;
-            float fractional = phase - (float)Math.Floor(phase);
-            float value = 0f;
-            int voices = 0;
-
-            if ((_waveform & 0x10) != 0)
-            {
-                value += fractional < 0.5f ? (fractional * 4f) - 1f : 3f - (fractional * 4f);
-                voices++;
-            }
-
-            if ((_waveform & 0x20) != 0)
-            {
-                value += (fractional * 2f) - 1f;
-                voices++;
-            }
-
-            if ((_waveform & 0x40) != 0)
-            {
-                value += fractional < 0.5f ? 1f : -1f;
-                voices++;
-            }
-
-            if ((_waveform & 0x80) != 0)
-            {
-                if (i % 5 == 0)
-                    noiseHeld = ((float)random.NextDouble() * 2f) - 1f;
-                value += noiseHeld;
-                voices++;
-            }
-
-            if (voices > 1)
-                value /= voices;
-
-            points[i] = new PointF(box.X + i, mid - (value * amplitude));
-        }
+            points[i] = new PointF(box.X + i, mid - (_rendered[i] * amplitude));
 
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using (var glow = new Pen(DawPalette.WithAlpha(DawPalette.Envelope, 45), 3f))

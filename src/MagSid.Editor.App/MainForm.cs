@@ -938,6 +938,7 @@ public sealed class MainForm : Form
     private void UpdateChipModelButton()
     {
         _chipModelButton.Text = _chipModel == ChipModel.Mos6581 ? "SID: 6581" : "SID: 8580";
+        _dawView.ChipModel = _chipModel;
     }
 
     /// <summary>Flips which chip reSID emulates. Live playback is restarted on the new model
