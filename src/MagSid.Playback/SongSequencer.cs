@@ -120,8 +120,42 @@ public sealed class SongSequencer
     ///
     /// Returns null if the target is never reached - a row no order entry leads to.
     /// </summary>
-    public static SequencerPosition? FindPosition(Song song, int channel, int orderIndex, int rowIndex)
+    public static SequencerPosition? FindPosition(Song song, int channel, int orderIndex, int rowIndex) =>
+        FindTrigger(song, channel, orderIndex, rowIndex, out _);
+
+    /// <summary>
+    /// The song's state at exactly that row - not at the note sounding there, as
+    /// <see cref="FindPosition"/> gives, but that many rows further into it: what a play-from
+    /// marker means. A note started before the row is under way there and does not sound until
+    /// the next one, the same as starting a DAW from a locator.
+    /// </summary>
+    public static SequencerPosition? FindExactPosition(Song song, int channel, int orderIndex, int rowIndex)
     {
+        var trigger = FindTrigger(song, channel, orderIndex, rowIndex, out int triggeredRow);
+        if (trigger is null || triggeredRow >= rowIndex)
+            return trigger;
+
+        // Each tick from the trigger plays the next row, so the row wanted is that many ticks on;
+        // the boundary just before that tick is where it starts.
+        int ticksOn = rowIndex - triggeredRow;
+        var probe = new SongSequencer(song, (_, _) => { }, trigger);
+        for (int ticks = 0, frame = 0; frame < 1_000_000; frame++)
+        {
+            var before = probe.Capture();
+            if (probe.Frame())
+            {
+                if (ticks == ticksOn)
+                    return before;
+                ticks++;
+            }
+        }
+
+        return trigger;
+    }
+
+    private static SequencerPosition? FindTrigger(Song song, int channel, int orderIndex, int rowIndex, out int bestRow)
+    {
+        bestRow = -1;
         // Enough for any song this format can hold - a 255-entry order of 255-row patterns at
         // the slowest speed - while still refusing to spin forever on an unreachable target.
         const int MaxFrames = 2_000_000;
@@ -163,6 +197,7 @@ public sealed class SongSequencer
                 if (triggeredRow <= rowIndex)
                 {
                     best = before;
+                    bestRow = triggeredRow;
                 }
                 else if (best is not null)
                 {

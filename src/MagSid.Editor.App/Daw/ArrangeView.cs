@@ -58,6 +58,10 @@ internal sealed class ArrangeView : Control
     private (int Channel, int Index) _hovered = (-1, -1);
     private readonly int[] _playheads = [-1, -1, -1];
 
+    /// <summary>Where F2 plays from, in rows along the lanes - set by a click in the ruler, cleared
+    /// by a right-click there. Null: F2 does what it does in the tracker.</summary>
+    private int? _playFromRow;
+
     /// <summary>The selected channel's RST block is selected rather than a clip. _selectedIndex
     /// stays on the last clip meanwhile, so everything that reads it still finds a clip.</summary>
     private bool _onRestart;
@@ -241,6 +245,40 @@ internal sealed class ArrangeView : Control
     }
 
     private int LaneLength(ChannelOrder order) => OffsetOf(order, order.Tokens.Count);
+
+    /// <summary>
+    /// The play-from marker as a place in the song: a clip and a row in it, which the sequencer
+    /// can find in the music. The lanes are drawn row for row, but loops play their rows again and
+    /// the three channels need not line up, so the marker is read in one lane - the selected
+    /// channel's when it has a clip there, otherwise the first that does. Null without a marker,
+    /// or with one past every lane's end.
+    /// </summary>
+    public (int Channel, int Index, int Row)? PlayFrom
+    {
+        get
+        {
+            if (_song is not { } song || _playFromRow is not { } markerRow)
+                return null;
+
+            int x = markerRow * PixelsPerRow;
+            foreach (int channel in new[] { _selectedChannel, 0, 1, 2 })
+            {
+                var order = song.ChannelOrders[channel];
+                for (int i = 0; i < order.Tokens.Count; i++)
+                {
+                    if (order.Tokens[i] is not PatternRefToken token)
+                        continue;
+
+                    int start = OffsetOf(order, i);
+                    int rows = RowsOf(token.PatternNumber);
+                    if (x >= start && x < start + (rows * PixelsPerRow))
+                        return (channel, i, Math.Clamp((x - start) / PixelsPerRow, 0, Math.Max(0, rows - 1)));
+                }
+            }
+
+            return null;
+        }
+    }
 
     private void UpdateScrollRange()
     {
@@ -528,6 +566,17 @@ internal sealed class ArrangeView : Control
         if (HeaderAt(e.Location) is { } header)
         {
             MuteToggled?.Invoke(header);
+            Invalidate();
+            base.OnMouseDown(e);
+            return;
+        }
+
+        // The ruler: where F2 plays from. Right-click takes the marker away again.
+        if (e.Y < RulerHeight && e.X >= GutterWidth)
+        {
+            _playFromRow = e.Button == MouseButtons.Right
+                ? null
+                : Math.Max(0, (e.X - GutterWidth + _scroll.Value) / PixelsPerRow);
             Invalidate();
             base.OnMouseDown(e);
             return;
@@ -968,6 +1017,34 @@ internal sealed class ArrangeView : Control
         for (int channel = 0; channel < Song.ChannelCount; channel++)
             DrawLane(g, song, channel);
 
+        DrawPlayFrom(g);
+
+    }
+
+    /// <summary>The play-from marker: a small flag in the ruler and a faint line down the lanes -
+    /// there to be found, not to compete with the clips.</summary>
+    private void DrawPlayFrom(Graphics g)
+    {
+        if (_playFromRow is not { } row)
+            return;
+
+        int x = GutterWidth + (row * PixelsPerRow) - _scroll.Value;
+        if (x < GutterWidth || x > Width)
+            return;
+
+        var colour = DawPalette.Oscillator;
+        using (var line = new Pen(DawPalette.WithAlpha(colour, 70)) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot })
+            g.DrawLine(line, x, RulerHeight, x, Height - ScrollHeight);
+
+        var smooth = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var flag = new SolidBrush(DawPalette.WithAlpha(colour, 200)))
+            g.FillPolygon(flag, new PointF[] { new(x - 5, RulerHeight - 9), new(x + 5, RulerHeight - 9), new(x, RulerHeight - 1) });
+        g.SmoothingMode = smooth;
+
+        using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+        using var ink = new SolidBrush(DawPalette.WithAlpha(colour, 200));
+        g.DrawString("F2", font, ink, x + 5, RulerHeight - 13);
     }
 
     private void DrawRuler(Graphics g, Song song)

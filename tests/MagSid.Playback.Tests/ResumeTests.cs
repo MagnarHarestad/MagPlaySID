@@ -324,4 +324,57 @@ public class ResumeTests
         Assert.Equal("0:1:4 1:1:4 2:2:0", started[0]);
         Assert.Equal(fromTop.Skip(from.Frame), started);
     }
+
+    [Fact]
+    public void An_exact_position_starts_on_the_row_itself_even_inside_a_held_note()
+    {
+        // Speed 2, three frames a row. Channel 1 holds one note for eight rows, channel 2 plays a
+        // note every row - so row 5 is a hold on channel 1, and FindPosition would go back to the
+        // note at row 0, five rows early.
+        var song = new Song { Speed = 2 };
+        song.Instruments.Add(Instr(1));
+
+        var held = new Pattern { Number = 1 };
+        held.Rows.Add(new NoteRow(NoteName.Parse("C-3"), 1));
+        for (int row = 1; row < 8; row++)
+            held.Rows.Add(new HoldRow());
+        var busy = new Pattern { Number = 2 };
+        for (int row = 0; row < 8; row++)
+            busy.Rows.Add(new NoteRow(NoteName.AllNotes[40 + row], 1));
+        song.Patterns.Add(held);
+        song.Patterns.Add(busy);
+
+        song.ChannelOrders[0].Tokens.Add(new PatternRefToken(1));
+        song.ChannelOrders[0].Tokens.Add(new PatternRefToken(1));
+        song.ChannelOrders[1].Tokens.Add(new PatternRefToken(2));
+        song.ChannelOrders[1].Tokens.Add(new PatternRefToken(2));
+        song.ChannelOrders[2].Tokens.Add(new PatternRefToken(2));
+        song.ChannelOrders[2].Tokens.Add(new PatternRefToken(2));
+
+        var exact = SongSequencer.FindExactPosition(song, channel: 0, orderIndex: 1, rowIndex: 5);
+        Assert.NotNull(exact);
+        Assert.Equal((8 + 5) * 3, exact!.Frame);
+
+        static List<string> Triggers(Song song, SongSequencer.SequencerPosition? from, int frames)
+        {
+            var heard = new List<string>();
+            var frame = new List<string>();
+            var sequencer = new SongSequencer(song, (_, _) => { }, from);
+            sequencer.RowTriggered += (ch, pattern, row, _, _) => frame.Add($"{ch}:{pattern}:{row}");
+            for (int i = 0; i < frames; i++)
+            {
+                frame.Clear();
+                sequencer.Frame();
+                heard.Add(string.Join(" ", frame));
+            }
+
+            return heard;
+        }
+
+        var fromTop = Triggers(song, null, exact.Frame + 30);
+        var started = Triggers(song, exact, 30);
+
+        Assert.Equal("1:2:5 2:2:5", started[0]);
+        Assert.Equal(fromTop.Skip(exact.Frame), started);
+    }
 }

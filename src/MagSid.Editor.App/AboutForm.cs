@@ -212,7 +212,10 @@ public sealed class AboutForm : Form
              "  Right-click        Add, Copy, Delete\n\n");
 
         Heading("Arrange");
-        Mono("  Click a clip       Show it in the piano roll\n" +
+        Mono("  Click ROW ruler    Set where F2 plays from (a small F2 flag); right-click\n" +
+             "                     removes it. F2 then starts on exactly that row, the other\n" +
+             "                     channels wherever the song really has them\n" +
+             "  Click a clip       Show it in the piano roll\n" +
              "  Two digits         Set the selected clip's pattern\n" +
              "  Drag a clip's end  Change the pattern's length (later clips follow)\n" +
              "  Ctrl+Left / Right  Move the clip\n" +

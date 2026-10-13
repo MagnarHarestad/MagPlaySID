@@ -158,6 +158,9 @@ internal sealed class DawView : Panel
 
     public bool IsRecording => _pianoRoll.IsRecording;
 
+    /// <summary>The arrange ruler's play-from marker, as a clip and a row - or null.</summary>
+    public (int Channel, int Index, int Row)? PlayFrom => _arrange.PlayFrom;
+
     /// <summary>The instrument page's note-program REC is lit: keys held become its arpeggio.</summary>
     public bool IsRecordingChord => _instrument.IsRecordingChord;
 

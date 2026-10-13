@@ -1087,7 +1087,18 @@ public sealed class MainForm : Form
         {
             if (_waveOut is null)
             {
-                StartFromCurrentPosition();
+                // In the DAW, the arrange ruler's marker says where, when one is set - found by
+                // the sequencer like any other start, so the other channels are where they are.
+                if (_dawShowing && _dawView.PlayFrom is { } marker)
+                {
+                    StartPlaybackFrom(marker.Index == 0 && marker.Row == 0
+                        ? null
+                        : SongSequencer.FindExactPosition(_session.Song, marker.Channel, marker.Index, marker.Row));
+                }
+                else
+                {
+                    StartFromCurrentPosition();
+                }
             }
             return true;
         }
