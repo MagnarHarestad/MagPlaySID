@@ -1,8 +1,8 @@
 var v_Song_Speed = 6
 
 INSTRUMENTS:
-; nr, waveform, AD, SR [, WAVE $81 $41] [, ARP "C-6" ROOT] [, FLT ($1f $f1 $08) $20] [, PW 8 +2] [, SLIDE +8] [, VIB $32 $10] [, NOHR]
-01, $11, $a6, $a9, ARP ROOT, VIB $f1 $10, SOFTHR
+; nr, waveform, AD, SR [, WAVE $81 $41] [, ARP "C-6" ROOT] [, FLT ($1f $f1 $08) $20] [, PW 8 +2] [, VIB $32 $10] [, NOHR]
+01, $11, $a6, $a9, ARP ROOT, VIB $41 $12, SOFTHR
 END:
 
 PAT01:
@@ -18,7 +18,7 @@ PAT01:
 "...", 00
 "...", 00
 "---", 00
-"...", 00
+"220", 00
 "...", 00
 "...", 00
 "...", 00
