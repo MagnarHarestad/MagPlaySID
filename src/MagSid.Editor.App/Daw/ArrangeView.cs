@@ -547,6 +547,13 @@ internal sealed class ArrangeView : Control
             return;
         }
 
+        if (e.Button == MouseButtons.Right)
+        {
+            ShowClipMenu(e.Location);
+            base.OnMouseDown(e);
+            return;
+        }
+
         if (ClipAt(e.Location) is { } at)
         {
             _selectedChannel = at.Channel;
@@ -646,26 +653,12 @@ internal sealed class ArrangeView : Control
                 break;
 
             case Keys.Delete:
-                // A channel with no entries at all cannot be assembled - Tables.s asserts it - so
-                // the last clip in a lane refuses to go.
-                if (order.Tokens.Count > 1)
-                {
-                    order.RemoveEntryAt(_selectedIndex);
-                    _selectedIndex = Math.Min(_selectedIndex, order.Tokens.Count - 1);
-                    Edited();
-                }
-
+                DeleteClip(_selectedChannel, _selectedIndex);
                 e.Handled = true;
                 break;
 
             case Keys.Insert:
-                if (order.Tokens[_selectedIndex] is PatternRefToken existing)
-                {
-                    order.InsertEntry(_selectedIndex + 1, existing.PatternNumber);
-                    _selectedIndex++;
-                    Edited();
-                }
-
+                InsertClip(_selectedChannel, _selectedIndex + 1, newPattern: e.Shift);
                 e.Handled = true;
                 break;
 
@@ -724,7 +717,170 @@ internal sealed class ArrangeView : Control
                 BeginRestartEntry(_selectedChannel);
                 e.Handled = e.SuppressKeyPress = true;
                 break;
+
+            // The lane's end: Insert adds a clip there, before RST, and Delete takes the last one.
+            case Keys.Insert:
+                InsertClip(_selectedChannel, order.Tokens.Count, newPattern: e.Shift);
+                e.Handled = true;
+                break;
+
+            case Keys.Delete:
+                DeleteClip(_selectedChannel, order.Tokens.Count - 1);
+                SelectRestart(_selectedChannel);
+                e.Handled = true;
+                break;
         }
+    }
+
+    /// <summary>The most patterns a song can be given here: a clip's pattern is typed as two
+    /// digits, so a pattern 100 could be made but never typed back.</summary>
+    private const int MaxPatterns = 99;
+
+    private bool CanAddPattern => _song is { } song && song.Patterns.Count < MaxPatterns;
+
+    /// <summary>
+    /// A new clip at <paramref name="index"/> in a lane - a copy of the clip before it (the first
+    /// clip's pattern at the start of a lane), or a new, empty pattern of its own: the next number,
+    /// the same one typing it would create. The new clip is selected, so two digits retype it.
+    /// </summary>
+    private void InsertClip(int channel, int index, bool newPattern)
+    {
+        if (_song is not { } song)
+            return;
+
+        var order = song.ChannelOrders[channel];
+        index = Math.Clamp(index, 0, order.Tokens.Count);
+
+        int pattern;
+        if (newPattern)
+        {
+            if (!CanAddPattern)
+                return;
+            pattern = song.ResolveTypedPatternNumber(song.Patterns.Count + 1);
+        }
+        else
+        {
+            int from = Math.Clamp(index - 1, 0, order.Tokens.Count - 1);
+            if (order.Tokens.Count == 0 || order.Tokens[from] is not PatternRefToken copy)
+                return;
+            pattern = copy.PatternNumber;
+        }
+
+        order.InsertEntry(index, pattern);
+        _selectedChannel = channel;
+        _selectedIndex = index;
+        _onRestart = false;
+        Edited();
+        AnnounceSelection();
+    }
+
+    /// <summary>Takes a clip out of its lane. A channel with no entries at all cannot be assembled
+    /// - Tables.s asserts it - so the last clip in a lane refuses to go.</summary>
+    private void DeleteClip(int channel, int index)
+    {
+        if (_song is not { } song)
+            return;
+
+        var order = song.ChannelOrders[channel];
+        if (order.Tokens.Count <= 1 || index < 0 || index >= order.Tokens.Count)
+            return;
+
+        order.RemoveEntryAt(index);
+        _selectedChannel = channel;
+        _selectedIndex = Math.Min(index, order.Tokens.Count - 1);
+        Edited();
+        AnnounceSelection();
+    }
+
+    /// <summary>
+    /// Right-click: picks the clip or RST block under the mouse, then offers what the keys do
+    /// there. A click on a lane's empty end counts as its RST block.
+    /// </summary>
+    private void ShowClipMenu(Point point)
+    {
+        if (BuildClipMenu(point) is not { } menu)
+            return;
+
+        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
+        menu.Show(this, point);
+    }
+
+    private ContextMenuStrip? BuildClipMenu(Point point)
+    {
+        if (_song is not { } song)
+            return null;
+
+        int channel;
+        bool onClip;
+        if (ClipAt(point) is { } at)
+        {
+            _selectedChannel = at.Channel;
+            _selectedIndex = at.Index;
+            _onRestart = false;
+            channel = at.Channel;
+            onClip = true;
+            Invalidate();
+            AnnounceSelection();
+        }
+        else if ((RestartAt(point) is var restart and >= 0 ? restart : LaneAt(point)) is var lane and >= 0)
+        {
+            SelectRestart(lane);
+            channel = lane;
+            onClip = false;
+        }
+        else
+        {
+            return null;
+        }
+
+        var order = song.ChannelOrders[channel];
+        int index = _selectedIndex;
+        int insertAt = onClip ? index + 1 : order.Tokens.Count;
+        int deleteAt = onClip ? index : order.Tokens.Count - 1;
+        bool canDelete = order.Tokens.Count > 1;
+
+        var menu = new ContextMenuStrip();
+        if (onClip)
+        {
+            menu.Items.Add(new ToolStripMenuItem("Insert copy after", null, (_, _) => InsertClip(channel, insertAt, newPattern: false)) { ShortcutKeyDisplayString = "Ins" });
+            menu.Items.Add(new ToolStripMenuItem($"Insert new pattern {song.Patterns.Count + 1:00} after", null, (_, _) => InsertClip(channel, insertAt, newPattern: true)) { ShortcutKeyDisplayString = "Shift+Ins", Enabled = CanAddPattern });
+            menu.Items.Add(new ToolStripMenuItem("Delete clip", null, (_, _) => DeleteClip(channel, deleteAt)) { ShortcutKeyDisplayString = "Del", Enabled = canDelete });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Restart here", null, (_, _) =>
+            {
+                order.RestartPosition = index + 1;
+                Edited();
+            }) { ShortcutKeyDisplayString = "Ctrl+R" });
+        }
+        else
+        {
+            menu.Items.Add(new ToolStripMenuItem("Add clip before RST (copy of the last)", null, (_, _) => InsertClip(channel, insertAt, newPattern: false)) { ShortcutKeyDisplayString = "Ins" });
+            menu.Items.Add(new ToolStripMenuItem($"Add new pattern {song.Patterns.Count + 1:00} before RST", null, (_, _) => InsertClip(channel, insertAt, newPattern: true)) { ShortcutKeyDisplayString = "Shift+Ins", Enabled = CanAddPattern });
+            menu.Items.Add(new ToolStripMenuItem("Delete last clip", null, (_, _) =>
+            {
+                DeleteClip(channel, deleteAt);
+                SelectRestart(channel);
+            }) { ShortcutKeyDisplayString = "Del", Enabled = canDelete });
+        }
+
+        DarkTheme.Apply(menu);
+        return menu;
+    }
+
+    /// <summary>The lane under a point, by height alone - or -1.</summary>
+    private int LaneAt(Point point)
+    {
+        if (_song is null || point.X < GutterWidth)
+            return -1;
+
+        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        {
+            int top = LaneTop(channel);
+            if (point.Y >= top && point.Y < top + LaneHeight)
+                return channel;
+        }
+
+        return -1;
     }
 
     private void ClampSelection()

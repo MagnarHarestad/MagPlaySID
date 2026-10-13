@@ -217,10 +217,14 @@ public sealed class AboutForm : Form
              "  Drag a clip's end  Change the pattern's length (later clips follow)\n" +
              "  Ctrl+Left / Right  Move the clip\n" +
              "  Insert             Duplicate the clip\n" +
-             "  Delete             Remove the clip\n" +
+             "  Shift+Insert       Insert a clip with a new, empty pattern (the next number)\n" +
+             "  Delete             Remove the clip (a channel keeps at least one)\n" +
+             "  Right-click        The same as a menu, on a clip or a lane's RST block\n" +
              "  RST block          After the last clip: where the channel restarts (entry and\n" +
              "                     pattern). Hover or select it to see the target clip.\n" +
-             "                     Double-click, Enter or two digits to set it\n" +
+             "                     Double-click, Enter or two digits to set it. Insert adds a\n" +
+             "                     clip before it (Shift: a new pattern), Delete removes the\n" +
+             "                     last clip\n" +
              "  Ctrl+R             Channel restarts at this clip\n" +
              "  Click CH name      Mute / unmute the channel\n" +
              "  Arrows             Move between clips and channels\n\n");
