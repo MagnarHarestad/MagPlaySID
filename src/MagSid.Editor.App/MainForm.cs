@@ -1203,8 +1203,16 @@ public sealed class MainForm : Form
             var engine = new SongPlaybackEngine(_session.Song, _chipModel, resume);
             StartLiveRaster(resume?.Frame ?? 0);
             ApplyChannelMutes(engine);
-            _waveOut = new WaveOutEvent();
-            _waveOut.PlaybackStopped += (_, _) => BeginInvoke(StopPlayback);
+            // The device that stopped, not whichever is playing by the time the posted call runs:
+            // a stop followed straight by a new start (F2 on the marker, a SID model switch) had
+            // the old device's notice arrive after the new one began, and stop that instead.
+            var waveOut = new WaveOutEvent();
+            _waveOut = waveOut;
+            _waveOut.PlaybackStopped += (_, _) => BeginInvoke(() =>
+            {
+                if (ReferenceEquals(_waveOut, waveOut))
+                    StopPlayback();
+            });
             _waveOut.Init(engine);
             _waveOut.Play();
             _playbackEngine = engine;
