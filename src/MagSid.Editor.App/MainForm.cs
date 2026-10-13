@@ -1085,20 +1085,19 @@ public sealed class MainForm : Form
         }
         if (keyData == Keys.F2 && ActiveControl is not NumericUpDown)
         {
-            if (_waveOut is null)
+            // In the DAW, the arrange ruler's marker says where, when one is set - found by the
+            // sequencer like any other start, so the other channels are where they are. It is a
+            // locator: F2 goes back to it while the song is playing too.
+            if (_dawShowing && _dawView.PlayFrom is { } marker)
             {
-                // In the DAW, the arrange ruler's marker says where, when one is set - found by
-                // the sequencer like any other start, so the other channels are where they are.
-                if (_dawShowing && _dawView.PlayFrom is { } marker)
-                {
-                    StartPlaybackFrom(marker.Index == 0 && marker.Row == 0
-                        ? null
-                        : SongSequencer.FindExactPosition(_session.Song, marker.Channel, marker.Index, marker.Row));
-                }
-                else
-                {
-                    StartFromCurrentPosition();
-                }
+                StopAnyPlayback();
+                StartPlaybackFrom(marker.Index == 0 && marker.Row == 0
+                    ? null
+                    : SongSequencer.FindExactPosition(_session.Song, marker.Channel, marker.Index, marker.Row));
+            }
+            else if (_waveOut is null)
+            {
+                StartFromCurrentPosition();
             }
             return true;
         }

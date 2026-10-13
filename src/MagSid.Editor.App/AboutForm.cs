@@ -214,7 +214,8 @@ public sealed class AboutForm : Form
         Heading("Arrange");
         Mono("  Click ROW ruler    Set where F2 plays from (a small F2 flag); right-click\n" +
              "                     removes it. F2 then starts on exactly that row, the other\n" +
-             "                     channels wherever the song really has them\n" +
+             "                     channels wherever the song really has them - also while\n" +
+             "                     the song is playing, which jumps back to the marker\n" +
              "  Click a clip       Show it in the piano roll\n" +
              "  Two digits         Set the selected clip's pattern\n" +
              "  Drag a clip's end  Change the pattern's length (later clips follow)\n" +
