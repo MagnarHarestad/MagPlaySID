@@ -50,6 +50,12 @@ internal sealed class FilterStepEditor : Panel
 
     public event Action? Edited;
 
+    /// <summary>A step grabbed in the cutoff graph.</summary>
+    public event Action<int>? StepPicked;
+
+    /// <summary>A step's cutoff dragged in the graph, raised once when the drag ends.</summary>
+    public event Action<int, int>? CutoffDragged;
+
     public void SetPlayhead((int Frame, int Cutoff)? at) => _cutoffGraph.SetPlayhead(at);
 
     public void ShowStep(Instrument? instrument, int step)
@@ -154,6 +160,9 @@ internal sealed class FilterStepEditor : Panel
 
         foreach (var toggle in new[] { _setup, _lowPass, _bandPass, _highPass, _voice1, _voice2, _voice3 })
             toggle.CheckedChanged += _ => Commit();
+
+        _cutoffGraph.StepPicked += step => StepPicked?.Invoke(step);
+        _cutoffGraph.CutoffDragged += (step, cutoff) => CutoffDragged?.Invoke(step, cutoff);
     }
 
     private void BuildLayout()

@@ -64,4 +64,9 @@ public readonly record struct FilterStep
         Cutoff = cutoff,
         SweepRate = sweepRate,
     };
+
+    /// <summary>The same step with another cutoff, kept inside $01..$FE - $00 ends a program and
+    /// $FF opens a setup record, so neither is a cutoff.</summary>
+    public FilterStep WithCutoff(int cutoff) =>
+        this with { Cutoff = (byte)Math.Clamp(cutoff, MinCutoff, MaxCutoff) };
 }

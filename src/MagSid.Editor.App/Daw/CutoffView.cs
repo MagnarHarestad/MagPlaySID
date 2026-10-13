@@ -10,6 +10,9 @@ namespace MagSid.Editor.App.Daw;
 /// The curve is not drawn from the step values but played: the program runs through the player's
 /// own <see cref="FilterEngine"/> frame by frame, so a sweep's triangle, a setup step stopping it
 /// and the cutoff staying put after the last step all look the way they will sound.
+///
+/// Each step is one frame of the curve and can be dragged up or down (Shift: fine). The drag is
+/// played live here and handed over once, when the button comes up.
 /// </summary>
 internal sealed class CutoffView : Control
 {
@@ -19,6 +22,14 @@ internal sealed class CutoffView : Control
     private int _sweep;
     private (int Frame, int Cutoff)? _playhead;
 
+    private int _hoverStep = -1;
+    private int _dragStep = -1;
+    private int _dragStartY;
+    private int _dragStartCutoff;
+    private int _dragCutoff;
+    private int _dragCeiling;
+    private double _dragPerPixel;
+
     public CutoffView()
     {
         SetStyle(
@@ -27,11 +38,19 @@ internal sealed class CutoffView : Control
         BackColor = DawPalette.Inset;
     }
 
+    /// <summary>A step grabbed with the mouse, before it is dragged.</summary>
+    public event Action<int>? StepPicked;
+
+    /// <summary>A step's new cutoff, raised once when its drag ends - and only if it moved.</summary>
+    public event Action<int, int>? CutoffDragged;
+
     /// <summary>Shows a program, with one of its steps marked, or -1 for none.</summary>
     public void SetProgram(IReadOnlyList<FilterStep> program, int selectedStep)
     {
         _program = [.. program];
-        _cutoffs = Play(_program);
+        if (_dragStep >= _program.Count)
+            _dragStep = -1;
+        _cutoffs = Play(Dragged());
         _selected = selectedStep;
         _sweep = SweepOf(_program);
         Invalidate();
@@ -46,6 +65,145 @@ internal sealed class CutoffView : Control
 
         _playhead = at;
         Invalidate();
+    }
+
+    /// <summary>The program with the step being dragged at its dragged cutoff.</summary>
+    private IReadOnlyList<FilterStep> Dragged()
+    {
+        if (_dragStep < 0)
+            return _program;
+
+        var program = _program.ToList();
+        program[_dragStep] = program[_dragStep].WithCutoff(_dragCutoff);
+        return program;
+    }
+
+    /// <summary>The plot area and the scale's top. While a step is dragged the scale only grows,
+    /// when the step goes past the top - shrinking under the mouse would make it run away.</summary>
+    private (int Left, int Right, int Top, int Bottom, int Ceiling) Plot()
+    {
+        int highest = _cutoffs.Length > 0 ? _cutoffs.Max() : 0;
+
+        // Most programs live low in the range, and on a full $00-$FF scale their shape is a flat
+        // line. The scale tops out a little above the highest cutoff instead, and says where.
+        int ceiling = Math.Clamp(((highest * 9 / 8) + 0x0F) & ~0x0F, 0x10, 0xFF);
+        if (_dragStep >= 0)
+            ceiling = Math.Max(ceiling, _dragCeiling);
+
+        return (8, Width - 8, 18, Height - 8, ceiling);
+    }
+
+    /// <summary>The step under an x position: the step frame it is over, as long as the point is
+    /// over the program rather than the tail after it. -1 for none.</summary>
+    private int StepAt(int x)
+    {
+        var (left, right, _, _, _) = Plot();
+        if (_program.Count == 0 || _cutoffs.Length == 0 || right <= left)
+            return -1;
+
+        float frameWidth = (right - left) / (float)_cutoffs.Length;
+        float programEnd = left + (_program.Count * frameWidth);
+        if (x < left - 4 || x > programEnd + 4)
+            return -1;
+
+        return Math.Clamp((int)((x - left) / frameWidth), 0, _program.Count - 1);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        int step = e.Button == MouseButtons.Left ? StepAt(e.X) : -1;
+        if (step < 0)
+            return;
+
+        // Picked first: the host shows the step, which hands this graph its program again.
+        StepPicked?.Invoke(step);
+        if (step >= _program.Count)
+            return;
+
+        var (_, _, top, bottom, ceiling) = Plot();
+        _dragCeiling = ceiling;
+        _dragPerPixel = ceiling / (double)Math.Max(1, bottom - top);
+        _dragStep = step;
+        _dragStartY = e.Y;
+        _dragStartCutoff = _program[step].Cutoff;
+        _dragCutoff = _dragStartCutoff;
+        _cutoffs = Play(Dragged());
+        Capture = true;
+        Invalidate();
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+
+        if (_dragStep >= 0)
+        {
+            double perPixel = _dragPerPixel;
+            if ((ModifierKeys & Keys.Shift) != 0)
+                perPixel = Math.Min(perPixel, 0.25);
+
+            int cutoff = Math.Clamp(
+                _dragStartCutoff + (int)Math.Round((_dragStartY - e.Y) * perPixel),
+                FilterStep.MinCutoff, FilterStep.MaxCutoff);
+            if (cutoff != _dragCutoff)
+            {
+                _dragCutoff = cutoff;
+                _cutoffs = Play(Dragged());
+                Invalidate();
+            }
+
+            return;
+        }
+
+        int hover = StepAt(e.X);
+        Cursor = hover >= 0 ? Cursors.SizeNS : Cursors.Default;
+        if (hover != _hoverStep)
+        {
+            _hoverStep = hover;
+            Invalidate();
+        }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (_dragStep < 0)
+            return;
+
+        int step = _dragStep;
+        int cutoff = _dragCutoff;
+        bool moved = cutoff != _dragStartCutoff;
+        _dragStep = -1;
+        Capture = false;
+        _cutoffs = Play(_program);
+        Invalidate();
+
+        if (moved)
+            CutoffDragged?.Invoke(step, cutoff);
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        // Lost mid-drag (a dialog, Alt+Tab): nothing is written.
+        if (!Capture && _dragStep >= 0)
+        {
+            _dragStep = -1;
+            _cutoffs = Play(_program);
+            Invalidate();
+        }
+
+        base.OnMouseCaptureChanged(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        if (_hoverStep >= 0)
+        {
+            _hoverStep = -1;
+            Invalidate();
+        }
     }
 
     /// <summary>The sweep left running when the program ends - the last setup step's.</summary>
@@ -111,17 +269,9 @@ internal sealed class CutoffView : Control
         using (var border = new Pen(DawPalette.BorderSoft))
             g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
 
-        int left = 8;
-        int right = Width - 8;
-        int top = 18;
-        int bottom = Height - 8;
+        var (left, right, top, bottom, ceiling) = Plot();
         if (right <= left || bottom <= top || _cutoffs.Length == 0)
             return;
-
-        // Most programs live low in the range, and on a full $00-$FF scale their shape is a flat
-        // line. The scale tops out a little above the highest cutoff instead, and says where.
-        int highest = _cutoffs.Max();
-        int ceiling = Math.Clamp(((highest * 9 / 8) + 0x0F) & ~0x0F, 0x10, 0xFF);
 
         float frameWidth = (right - left) / (float)_cutoffs.Length;
         float X(int frame) => left + (frame * frameWidth);
@@ -173,6 +323,33 @@ internal sealed class CutoffView : Control
                 g.DrawLines(pen, curve.ToArray());
 
             g.SmoothingMode = SmoothingMode.Default;
+        }
+
+        // The step under the mouse, or being dragged: a handle on its value, and the value.
+        int handle = _dragStep >= 0 ? _dragStep : _hoverStep;
+        if (handle >= 0 && handle < _program.Count && handle < _cutoffs.Length && _cutoffs[handle] >= 0)
+        {
+            float x = X(handle) + (frameWidth / 2);
+            float y = Y(_cutoffs[handle]);
+
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var ring = new Pen(DawPalette.Filter, 1.5f))
+                g.DrawEllipse(ring, x - 4, y - 4, 8, 8);
+            if (_dragStep >= 0)
+            {
+                using var fill = new SolidBrush(DawPalette.Filter);
+                g.FillEllipse(fill, x - 2.5f, y - 2.5f, 5, 5);
+            }
+
+            g.SmoothingMode = SmoothingMode.Default;
+
+            using var valueFont = new Font("Consolas", 7f, FontStyle.Bold);
+            using var valueInk = new SolidBrush(DawPalette.HeaderInk(DawPalette.Filter));
+            string text = $"{handle:00}: ${_cutoffs[handle]:X2}";
+            var size = g.MeasureString(text, valueFont);
+            float textX = Math.Min(x + 7, right - size.Width);
+            float textY = Math.Clamp(y - size.Height - 2, top, bottom - size.Height);
+            g.DrawString(text, valueFont, valueInk, textX, textY);
         }
 
         // The playing frame, at the cutoff the SID really has: a sweep runs on from wherever its

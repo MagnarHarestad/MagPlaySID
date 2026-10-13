@@ -295,7 +295,9 @@ public sealed class AboutForm : Form
              "  Cutoff graph          The filter program played frame by frame, sweep included.\n" +
              "                        Scaled to its highest cutoff (shown top left). While the\n" +
              "                        song plays, a dot shows the frame and the real cutoff\n" +
-             "                        (a running sweep can put it off the drawn curve)\n\n");
+             "                        (a running sweep can put it off the drawn curve).\n" +
+             "                        Drag a step up / down to change its cutoff (Shift:\n" +
+             "                        fine) - one undo step per drag\n\n");
 
         // ------------------------------------------------------------------------------------
         Heading("Tools");

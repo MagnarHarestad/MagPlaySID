@@ -257,7 +257,7 @@ internal sealed class DawInstrumentView : Panel
 
         BeginStepEntry(_filter, cell, $"${instrument.Filter[step].Cutoff:X2}", text =>
             ParseTypedHex(text, FilterStep.MinCutoff, FilterStep.MaxCutoff) is { } cutoff
-                ? i => { if (step < i.Filter.Count) i.Filter[step] = WithCutoff(i.Filter[step], cutoff - i.Filter[step].Cutoff); }
+                ? i => { if (step < i.Filter.Count) i.Filter[step] = i.Filter[step].WithCutoff(cutoff); }
                 : null);
     }
 
@@ -535,16 +535,8 @@ internal sealed class DawInstrumentView : Panel
         return NoteName.AllNotes[index];
     }
 
-    /// <summary>Nudges a filter step's cutoff, keeping it inside $01..$FE - $00 ends a program and
-    /// $FF opens a setup record, so neither is a cutoff.</summary>
-    private static FilterStep WithCutoff(FilterStep step, int by)
-    {
-        byte cutoff = (byte)Math.Clamp(step.Cutoff + by, FilterStep.MinCutoff, FilterStep.MaxCutoff);
-
-        return step.IsSetup
-            ? FilterStep.Setup(step.ModeVolume!.Value, step.ResonanceRouting!.Value, cutoff, step.SweepRate)
-            : FilterStep.Sweep(cutoff);
-    }
+    /// <summary>Nudges a filter step's cutoff, kept inside $01..$FE.</summary>
+    private static FilterStep WithCutoff(FilterStep step, int by) => step.WithCutoff(step.Cutoff + by);
 
     private void WireProgram(
         ProgramLaneControl lane,
@@ -694,6 +686,19 @@ internal sealed class DawInstrumentView : Panel
         // lane alone could never edit them.
         _filter.StepSelected += step => _filterStep.ShowStep(_instrument, step);
         _filterStep.Edited += () => Commit(_ => { });
+
+        // A step grabbed in the cutoff graph is picked in the lane too, and its drag lands as one
+        // edit - one undo step - when the button comes up.
+        _filterStep.StepPicked += step =>
+        {
+            _filter.SelectStep(step);
+            _filterStep.ShowStep(_instrument, step);
+        };
+        _filterStep.CutoffDragged += (step, cutoff) =>
+        {
+            Commit(i => { if (step < i.Filter.Count) i.Filter[step] = i.Filter[step].WithCutoff(cutoff); });
+            _filterStep.ShowStep(_instrument, step);
+        };
         _filterStep.Dock = DockStyle.Bottom;
 
         _filter.Title = "FILTER PROGRAM";
