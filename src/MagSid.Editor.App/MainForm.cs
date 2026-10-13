@@ -546,6 +546,13 @@ public sealed class MainForm : Form
         // own release is - see RollPreviewRelease.
         _dawView.NotePreviewRequested += (note, instrument) => PreviewNote(note, instrument, RollPreviewRelease);
         _dawView.NotePreviewReleased += ReleaseJamNote;
+        _dawView.RecordToggled += on =>
+        {
+            if (on)
+                StartRecording();
+            else
+                StopAnyPlayback();
+        };
         _dawView.MuteToggleRequested += channel => _trackerGrid.ToggleChannelMute(channel);
         _dawView.IsChannelMuted = _trackerGrid.IsChannelMuted;
 
@@ -648,7 +655,7 @@ public sealed class MainForm : Form
 
         midi.ControlChanged += (controller, value) => _midiBindings!.HandleControlChange(controller, value);
         midi.NotePressed += OnMidiNote;
-        midi.NoteReleased += ReleaseJamNote;
+        midi.NoteReleased += OnMidiNoteReleased;
     }
 
     private MidiKnobBindings CreateBindings()
@@ -669,17 +676,22 @@ public sealed class MainForm : Form
     {
         if (_dawShowing)
         {
-            // Written into the roll only in Edit mode, and only when the roll is where you are
-            // working - clicked into, the note grid or the beat bar. Jam mode, or a note played
-            // from the lanes or the instrument page, only sounds.
-            if (_trackerGrid.EditMode && _dawView.RollHasFocus)
-            {
-                _dawView.StepInput(note);
-            }
-
             int instrument = _dawView.SelectedInstrumentNumber
                              ?? _instrumentList.SelectedInstrument?.Number
                              ?? 1;
+
+            // A take writes where the song is, whatever has the focus. Otherwise a note is written
+            // into the roll only in Edit mode, and only when the roll is where you are working -
+            // clicked into, the note grid or the beat bar. Jam mode, or a note played from the
+            // lanes or the instrument page, only sounds.
+            if (_dawView.IsRecording)
+            {
+                _dawView.RecordNote(note, instrument);
+            }
+            else if (_trackerGrid.EditMode && _dawView.RollHasFocus)
+            {
+                _dawView.StepInput(note);
+            }
             PreviewNote(note, instrument);
             return;
         }
@@ -688,6 +700,16 @@ public sealed class MainForm : Form
         // only plays it, advances the cursor, and picks the instrument. It raises NoteEntered on
         // the way, and that is already wired to PreviewNote - so the audition is not repeated here.
         _trackerGrid.EnterNote(note);
+    }
+
+    /// <summary>A key let go on the MIDI keyboard, or the computer keyboard's piano keys in the
+    /// DAW: a recorded note's length is settled there, and the audition is released.</summary>
+    private void OnMidiNoteReleased(NoteName note)
+    {
+        if (_dawView.IsRecording)
+            _dawView.RecordRelease(note);
+
+        ReleaseJamNote(note);
     }
 
     private void CloseMidi()
@@ -1043,7 +1065,7 @@ public sealed class MainForm : Form
     {
         if (_dawHeldKeys.Remove(e.KeyCode, out var note))
         {
-            ReleaseJamNote(note);
+            OnMidiNoteReleased(note);
         }
     }
 
@@ -1115,7 +1137,41 @@ public sealed class MainForm : Form
     /// <summary>F2: starts (or, mid-song, restarts) from wherever <see cref="ResumePosition"/>
     /// says - the exact spot playback last stopped if the cursor hasn't moved since, or the
     /// cursor's own position otherwise. No-op if already playing; F4 stops first.</summary>
-    private void StartFromCurrentPosition()
+    private void StartFromCurrentPosition() => StartPlaybackFrom(ResumePosition());
+
+    /// <summary>
+    /// The piano roll's REC: plays the song from the selected clip's place in it, and the notes
+    /// played go into that clip's pattern. The place is found by running the song silently up to
+    /// it, the same as playing from the cursor - so the other two channels are wherever they
+    /// really are at that moment, on their own patterns, loop counts and all, however the three
+    /// orders differ in length.
+    /// </summary>
+    private void StartRecording()
+    {
+        StopAnyPlayback();
+        if (_session.Song.Instruments.Count == 0 || !_dawView.BeginRecording()
+            || _dawView.RecordingFrom is not { } clip)
+        {
+            return;
+        }
+
+        var from = clip.Index == 0
+            ? null
+            : SongSequencer.FindPosition(_session.Song, clip.Channel, clip.Index, 0);
+        if (clip.Index > 0 && from is null)
+        {
+            _dawView.EndRecording();
+            return;
+        }
+
+        _resumeFrom = null;
+        _resumeCursor = null;
+        StartPlaybackFrom(from);
+        if (_waveOut is null)
+            _dawView.EndRecording();
+    }
+
+    private void StartPlaybackFrom(SongSequencer.SequencerPosition? resume)
     {
         StopPatternPreview();
 
@@ -1127,7 +1183,6 @@ public sealed class MainForm : Form
             _jamEngine?.Dispose();
             _jamEngine = null;
 
-            var resume = ResumePosition();
             var engine = new SongPlaybackEngine(_session.Song, _chipModel, resume);
             StartLiveRaster(resume?.Frame ?? 0);
             ApplyChannelMutes(engine);
@@ -1335,6 +1390,11 @@ public sealed class MainForm : Form
         _playbackPollTimer.Stop();
         _playbackEngine = null;
         StopLiveRaster();
+
+        // A take ends with the song: a held key is let go where it got to, and the take becomes
+        // one edit - one undo step.
+        if (_dawView.IsRecording)
+            _dawView.EndRecording();
         _trackerGrid.SetPlaybackActive(false);
         _playStopButton.Text = "▶ Play";
         _instrumentEditorPanel.SetPlaybackCoverage(null);

@@ -261,6 +261,15 @@ public sealed class AboutForm : Form
              "- use it to place markers, note offs or a paste on an empty row. Loop markers show " +
              "there: click to select (Up / Down change an LE's count), right-click to remove.\n\n");
 
+        Heading("Recording");
+        Body("REC, next to the pattern's name, plays the song from the selected clip's place in it " +
+             "- the other channels play whatever really sounds against that clip - and records " +
+             "the MIDI keyboard (or the computer keyboard's piano keys) into its pattern, with the " +
+             "selected instrument. A key lands on the nearest row and lasts until it is let go, " +
+             "where a \"---\" stops it; one channel plays one note, so a new key ends the last. " +
+             "Notes are added on top of what is there, every time the song plays the clip's " +
+             "pattern on that channel. REC again, or Stop, ends the take - one undo step.\n\n");
+
         Heading("Slide lane");
         Mono("  Click / drag       Draw the slide rate on those rows: above the line 1xx up,\n" +
              "                     below it 2xx down, farther out is faster\n" +

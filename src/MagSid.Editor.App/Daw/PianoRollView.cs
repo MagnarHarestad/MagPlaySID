@@ -58,6 +58,15 @@ internal sealed class PianoRollView : Control
     private Song? _song;
     private Pattern? _pattern;
     private int _channel = -1;
+
+    // Recording: the pattern the take goes into, the row the recording channel is at (fed only
+    // while that channel plays it), the key being held and where it went down, and whether the
+    // take has written anything - committed as one edit, one undo step, when recording stops.
+    private Pattern? _recordPattern;
+    private int _recordRow = -1;
+    private double _recordFraction;
+    private (NoteName Note, int Row)? _recordHeld;
+    private bool _takeWritten;
     private int _defaultInstrument = 1;
     private RollGrid _grid = RollGrid.Beats;
 
@@ -577,6 +586,9 @@ internal sealed class PianoRollView : Control
     /// snapshot, and refreshes the tracker showing the same pattern.</summary>
     public event Action? Edited;
 
+    /// <summary>The REC button was pressed: true to start a take, false to stop it.</summary>
+    public event Action<bool>? RecordToggled;
+
     /// <summary>Sound a note, so placing one is heard rather than only seen - the same audition the
     /// tracker gives when a note is typed.</summary>
     public event Action<NoteName, int>? NotePreviewRequested;
@@ -743,6 +755,103 @@ internal sealed class PianoRollView : Control
     /// Returns false when there is nowhere to write - no pattern, or the cursor sitting on a loop
     /// marker, which owns its row.
     /// </summary>
+    public bool IsRecording => _recordPattern is not null;
+
+    /// <summary>The number of the pattern a take goes into, or -1.</summary>
+    public int RecordPatternNumber => _recordPattern?.Number ?? -1;
+
+    /// <summary>Starts a take into the pattern on screen. The host starts the song from this
+    /// pattern's place in it and feeds <see cref="SetRecordRow"/>.</summary>
+    public void BeginRecording()
+    {
+        if (_pattern is null)
+            return;
+
+        _recordPattern = _pattern;
+        _recordRow = -1;
+        _recordHeld = null;
+        _takeWritten = false;
+        Invalidate();
+    }
+
+    /// <summary>Ends the take: a key still held is let go where playback got to, and whatever
+    /// was written becomes one edit.</summary>
+    public void EndRecording()
+    {
+        if (_recordPattern is null)
+            return;
+
+        if (_recordHeld is { } held)
+            RecordRelease(held.Note);
+
+        _recordPattern = null;
+        _recordRow = -1;
+        if (_takeWritten)
+            Commit();
+        else
+            Invalidate();
+    }
+
+    /// <summary>The row the recording channel is playing in the take's pattern, and how far
+    /// through it - or -1 while that channel is somewhere else.</summary>
+    public void SetRecordRow(int row, double fraction)
+    {
+        _recordRow = row;
+        _recordFraction = fraction;
+    }
+
+    /// <summary>The row a key lands on: the one playing, or the next if more than half of it has
+    /// gone - the nearest row, which is what a tracker's realtime record quantises to. Not past
+    /// the pattern's end, which belongs to whatever the song plays next.</summary>
+    private int RecordQuantised(Pattern pattern) =>
+        _recordFraction >= 0.5 && _recordRow + 1 < pattern.Rows.Count ? _recordRow + 1 : _recordRow;
+
+    /// <summary>A key went down during a take. Writes the note where playback is; its length is
+    /// settled when the key comes up. One channel plays one note, so a new key ends the last.</summary>
+    public bool RecordNote(NoteName note, int instrumentNumber)
+    {
+        if (_recordPattern is not { } pattern || _recordRow < 0 || pattern.Rows.Count == 0)
+            return false;
+
+        if (_recordHeld is { } previous)
+            RecordRelease(previous.Note);
+
+        if (WritableRowFrom(pattern, RecordQuantised(pattern)) is not { } row)
+            return false;
+
+        PatternNotes.SetNote(pattern, row, note, instrumentNumber);
+        _recordHeld = (note, row);
+        _takeWritten = true;
+        if (ReferenceEquals(pattern, _pattern))
+        {
+            Reread();
+            Invalidate();
+        }
+
+        return true;
+    }
+
+    /// <summary>The held key came up: the note lasts to the row playback has reached, rounded the
+    /// same way, and a "---" stops it there. Released after the pattern ended or wrapped, it runs
+    /// to the pattern's end.</summary>
+    public void RecordRelease(NoteName note)
+    {
+        if (_recordPattern is not { } pattern || _recordHeld is not { } held || held.Note != note)
+            return;
+
+        // Unlike a key going down, a release may round past the last row: it then runs to the end.
+        _recordHeld = null;
+        int end = _recordRow < 0 ? pattern.Rows.Count : _recordRow + (_recordFraction >= 0.5 ? 1 : 0);
+        int length = end > held.Row ? end - held.Row : end == held.Row ? 1 : pattern.Rows.Count - held.Row;
+
+        PatternNotes.SetLength(pattern, held.Row, length);
+        if (ReferenceEquals(pattern, _pattern))
+        {
+            Reread();
+            Invalidate();
+        }
+    }
+
     public bool StepInput(NoteName note)
     {
         if (_pattern is not { } pattern || pattern.Rows.Count == 0)
@@ -1318,6 +1427,13 @@ internal sealed class PianoRollView : Control
             return;
         }
 
+        // REC: the host starts or stops the take, since it owns the song's playback.
+        if (_pattern is not null && e.Button == MouseButtons.Left && RecButtonBounds.Contains(e.Location))
+        {
+            RecordToggled?.Invoke(!IsRecording);
+            return;
+        }
+
         // The slide lane: a stroke, written when the button comes up. Right-click draws 0.
         if (SlideLaneColumnAt(e.Location) is { } slideColumn && e.Button is MouseButtons.Left or MouseButtons.Right)
         {
@@ -1662,6 +1778,40 @@ internal sealed class PianoRollView : Control
 
     private Rectangle GridToggleBounds => new(Width - _scrollY.Width - 168, 3, 156, 20);
 
+    /// <summary>Where the header's name, REC and row count end. The bar numbers share the strip
+    /// with them, and none is drawn under them.</summary>
+    private int _headerTextRight;
+
+    /// <summary>REC, between the pattern's name and its row count.</summary>
+    private static Rectangle RecButtonBounds => new(56, 3, 44, 18);
+
+    private static readonly Color RecRed = Color.FromArgb(0xF0, 0x3E, 0x4E);
+
+    /// <summary>Lit red while a take runs; a dim outline with a red dot while it does not.</summary>
+    private void DrawRecButton(Graphics g)
+    {
+        if (_pattern is null)
+            return;
+
+        var box = RecButtonBounds;
+        bool on = IsRecording;
+
+        using (var fill = new SolidBrush(on ? RecRed : Color.FromArgb(0x10, 0x14, 0x1E)))
+            g.FillRectangle(fill, box);
+        using (var border = new Pen(on ? RecRed : DawPalette.WithAlpha(RecRed, 110)))
+            g.DrawRectangle(border, box);
+
+        var smooth = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var dot = new SolidBrush(on ? Color.White : RecRed))
+            g.FillEllipse(dot, box.X + 6, box.Y + 5, 8, 8);
+        g.SmoothingMode = smooth;
+
+        using var font = new Font("Segoe UI", 7f, FontStyle.Bold);
+        using var ink = new SolidBrush(on ? Color.White : DawPalette.WithAlpha(RecRed, 220));
+        g.DrawString("REC", font, ink, box.X + 17, box.Y + 3);
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -1711,9 +1861,17 @@ internal sealed class PianoRollView : Control
             using var metaFont = new Font("Consolas", 7.5f);
             using var metaInk = new SolidBrush(DawPalette.TextFaint);
             string channel = _channel >= 0 ? $"CH {_channel + 1} · " : string.Empty;
-            g.DrawString($"{channel}{pattern.Rows.Count} rows · {_notes.Count} notes", metaFont, metaInk, 80, 6);
+            string meta = $"{channel}{pattern.Rows.Count} rows · {_notes.Count} notes";
+            int metaX = RecButtonBounds.Right + 10;
+            g.DrawString(meta, metaFont, metaInk, metaX, 6);
+            _headerTextRight = metaX + (int)Math.Ceiling(g.MeasureString(meta, metaFont).Width);
+        }
+        else
+        {
+            _headerTextRight = 0;
         }
 
+        DrawRecButton(g);
         DrawGridToggle(g);
         DrawRulerNumbers(g);
     }
@@ -1771,7 +1929,7 @@ internal sealed class PianoRollView : Control
         for (int column = 0; column < ColumnCount; column += every)
         {
             int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
-            if (x < KeyboardWidth || x > Width)
+            if (x < KeyboardWidth || x > Width || x < _headerTextRight)
                 continue;
 
             g.DrawLine(tick, x, 14, x, RulerHeight);

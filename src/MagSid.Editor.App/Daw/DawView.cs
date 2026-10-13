@@ -145,6 +145,37 @@ internal sealed class DawView : Panel
     public bool StepInput(MagSid.Core.Model.NoteName note) =>
         _pianoRoll.Visible && _pianoRoll.StepInput(note);
 
+    /// <summary>The roll's REC button: true to start a take, false to stop it. The host plays the
+    /// song from <see cref="RecordingFrom"/>.</summary>
+    public event Action<bool>? RecordToggled;
+
+    public bool IsRecording => _pianoRoll.IsRecording;
+
+    /// <summary>The clip a take records into - the selected one, whose place in the song the
+    /// playback starts from so the other channels play what really sounds against it.</summary>
+    public (int Channel, int Index)? RecordingFrom { get; private set; }
+
+    public bool BeginRecording()
+    {
+        if (_arrange.Selection is not { } clip || _pianoRoll.Pattern is null)
+            return false;
+
+        RecordingFrom = clip;
+        _pianoRoll.BeginRecording();
+        return true;
+    }
+
+    public void EndRecording()
+    {
+        RecordingFrom = null;
+        _pianoRoll.EndRecording();
+    }
+
+    public bool RecordNote(MagSid.Core.Model.NoteName note, int instrumentNumber) =>
+        _pianoRoll.RecordNote(note, instrumentNumber);
+
+    public void RecordRelease(MagSid.Core.Model.NoteName note) => _pianoRoll.RecordRelease(note);
+
     /// <summary>Lights the roll's own key for a note being held, wherever that note came from.
     /// Harmless while the DAW is hidden - the roll simply repaints into nothing.</summary>
     public void SetNoteSounding(MagSid.Core.Model.NoteName note, bool sounding) =>
@@ -160,7 +191,8 @@ internal sealed class DawView : Panel
 
         // Autoscroll: the selection follows the selected channel's playhead, so the roll below
         // turns to each pattern as it starts playing.
-        if (_autoScroll.Checked)
+        // Not during a take, which stays on its own pattern while the song moves on.
+        if (_autoScroll.Checked && !IsRecording)
             _arrange.FollowPlayhead();
     }
 
@@ -178,6 +210,17 @@ internal sealed class DawView : Panel
     {
         int showing = _pianoRoll.Pattern?.Number ?? -1;
         var channels = new[] { channel1, channel2, channel3 };
+
+        // A take follows the clip's own channel only: another channel playing the same pattern
+        // number is at a different moment of it.
+        if (RecordingFrom is { } take)
+        {
+            var at = channels[take.Channel];
+            if (at.Pattern == _pianoRoll.RecordPatternNumber)
+                _pianoRoll.SetRecordRow(at.Row, at.Fraction);
+            else
+                _pianoRoll.SetRecordRow(-1, 0);
+        }
 
         int preferred = _arrange.Selection?.Channel ?? 0;
         foreach (int ch in new[] { preferred, 0, 1, 2 })
@@ -429,6 +472,7 @@ internal sealed class DawView : Panel
 
         _pianoRoll.Dock = DockStyle.Fill;
         _pianoRoll.Edited += () => PatternEdited?.Invoke();
+        _pianoRoll.RecordToggled += on => RecordToggled?.Invoke(on);
         _pianoRoll.NotePreviewRequested += (note, instrument) => NotePreviewRequested?.Invoke(note, instrument);
         _pianoRoll.NotePreviewReleased += note => NotePreviewReleased?.Invoke(note);
 
