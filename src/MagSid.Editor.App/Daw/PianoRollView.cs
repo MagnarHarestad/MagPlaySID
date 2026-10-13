@@ -2122,8 +2122,8 @@ internal sealed class PianoRollView : Control
     /// <summary>
     /// The slide lane: a bar per column for the rate in force on that row - up for "1xx", down for
     /// "2xx" - with the rows where the rate changes, the ones that become slide rows and cost two
-    /// bytes, marked and labelled. A note's own row and the rows after a release cannot take a
-    /// slide, and show as a small dot.
+    /// bytes, marked and labelled. A note's own row and a note off cannot take a slide, and show
+    /// as a small dot - the rows after a note off can, since the release slides on.
     /// </summary>
     private void DrawSlideLane(Graphics g)
     {
@@ -2177,7 +2177,7 @@ internal sealed class PianoRollView : Control
                 ? drawn
                 : _slideRates[row];
             bool changes = _slidable[row] && rate != previousRate;
-            previousRate = pattern.Rows[row] is NoteRow or NoteOffRow ? 0 : rate;
+            previousRate = pattern.Rows[row] is NoteRow ? 0 : rate;
 
             int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
             if (x + RowWidth < KeyboardWidth || x > right)

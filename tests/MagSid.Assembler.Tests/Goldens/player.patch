@@ -24,7 +24,21 @@
  		m_ZP.b "filter_pos"
  		m_ZP.b "filter_phase"
  		m_ZP.b "filter_delta"
-@@ -238,6 +248,9 @@
+@@ -114,10 +124,9 @@
+ 		lda voice_last_waveform,x
+ 		and #$fe                               ; clear gate bit only - keep the waveform-select
+ 		sta $d404,y                            ; bits set, or the oscillator goes instantly
+-		move8 #0, voice_wt_pos,x                ; silent and masks the envelope's release entirely.
+-		rts                                    ; Stopping the wavetable matters just as much: it
+-		                                       ; writes the control register every frame and would
+-		                                       ; put the gate straight back on.
++		move8 #wt_hold-wt_data, voice_wt_pos,x  ; silent and masks the envelope's release entirely.
++		rts                                    ; The wavetable parks on a $00 hold, so pulse, notes,
++		                                       ; vibrato and slide run on through the release.
+ 
+ Voice_AdvanceOrder:
+ .read:
+@@ -238,6 +247,9 @@
  		sta voice_off_lo,x                     ; vibrato and slide both start from the bare note
  		sta voice_off_hi,x
  		endif
@@ -34,7 +48,7 @@
  		pla
  		tay                                    ; park pw_init while testing it - Y is free from
  		sta voice_prev_pw,x                    ; here to the end of this routine. Stashed for the
-@@ -344,17 +357,15 @@
+@@ -344,17 +356,15 @@
  		; rewrites the bare note every frame. Both move one signed 16-bit offset; slide adds
  		; slide_rate a frame, vibrato traces a triangle from vib_ds (delay/speed) and vib_depth.
  .freqmod:
@@ -59,7 +73,7 @@
  		endif
  		; offset += rate, sign-extended. None of pla/and/beq/lda touches the carry the adc
  		; produced, the same idiom the pulse-width sweep uses.
-@@ -572,7 +583,12 @@
+@@ -572,7 +582,12 @@
  		cmp #CMD_OFF
  		bcc .setinstrument                     ; $C0..$CF
  		cmp #LOOP_END
@@ -72,7 +86,7 @@
  		                                       ; command byte itself, which is what NOTE_OFF/ROW_WAIT
  		                                       ; are defined to be. Falls through on $D2 into .loopend,
  		                                       ; which is why that block has to stay right here.
-@@ -604,6 +620,17 @@
+@@ -604,6 +619,17 @@
  		tay                                    ; same reasoning - jump straight in with Y set
  		jmp .nextcmd
  
@@ -140,7 +154,19 @@
                  else
                      assert(instruments[row.inst] ~= nil,
                          "PAT" .. NN .. ": instrument " .. tostring(row.inst) .. " is not defined in INSTRUMENTS")
-@@ -898,20 +916,6 @@
+@@ -871,7 +889,11 @@
+     EmitByteTable("ad_table:", ad_values)
+     EmitByteTable("sr_table:", sr_values)
+     EmitByteTable("wt_start:", wt_values)
++    -- The pool's last byte is always the $00 ending the last program: wt_hold, where a note off
++    -- parks voice_wt_pos so the release runs on without the wavetable re-gating.
++    local wt_last = table.remove(wt_pool)
+     EmitByteTable("wt_data:", wt_pool)
++    EmitByteTable("wt_hold:", { wt_last })
+     EmitByteTable("arp_start:", arp_values)
+     EmitByteTable("arp_data:", arp_pool)
+     EmitByteTable("flt_start:", flt_values)
+@@ -898,20 +920,6 @@
          EmitByteTable("vib_depth:", vib_depth_values)
      end
  
@@ -161,7 +187,7 @@
  end
  
  -- Song-order resolution per channel: a list of pattern numbers, optionally followed by
-@@ -1064,8 +1068,8 @@
+@@ -1064,8 +1072,8 @@
                  in_instruments = false
              elseif in_instruments and t:match("^%d+%s*,") then
                  if t:upper():match(",%s*VIB%s") then v_vibrato_scan = true end

@@ -36,10 +36,17 @@ byte; every GateOff image is exactly two bytes longer.
 
 `slide_only.bin` and `slide_and_vib.bin` were reassembled on **2026-10-08**, when slide moved from an
 instrument setting to pattern rows (`"1xx"` up, `"2xx"` down, a `$D3` command and its rate). The
-player and song reader from commit `6221867` were ported to that in a scratch copy - the change is
-`pattern-slide.patch` beside this file, against that commit's `Code/musicplayer.s` and
-`Startup/Tables.s` - and the fixtures rewritten to slide rows. The nine images without a slide came
-out byte for byte as before. Rebuilding any golden from now on means applying that patch first.
+player and song reader from commit `6221867` were ported to that in a scratch copy, and the
+fixtures rewritten to slide rows. The nine images without a slide came out byte for byte as before.
+
+All eleven were reassembled on **2026-10-13**, when a note off stopped stopping the voice: it now
+parks `voice_wt_pos` on `wt_hold`, the wavetable pool's closing `$00`, so pulse, note program,
+vibrato and slide run on through the release (`lda #wt_hold-wt_data` for `lda #0`, same size). Each
+image differs from the one before in that single immediate byte at `$1011`.
+
+`player.patch` beside this file is every change the scratch player carries - pattern slides, SOFTHR
+and the release - against commit `6221867`'s `Code/musicplayer.s` and `Startup/Tables.s` (apply with
+`patch -p0 --binary`; the sources are CRLF). Rebuilding any golden means applying it first.
 
 `opcodes.txt` is the emitter's opcode table, one `mnemonic mode hex` line each, frozen after
 `OpcodeTableTests` had checked all 106 of them against c6510 instruction by instruction.

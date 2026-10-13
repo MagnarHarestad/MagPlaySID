@@ -236,7 +236,7 @@ public class InstrumentProgramTests
     }
 
     [Fact]
-    public void Note_off_stops_the_wavetable_arpeggio_and_pulse_writes()
+    public void Note_off_stops_the_wavetable_but_the_release_keeps_its_pulse_and_note_program()
     {
         var instrument = Plain(waveform: 0x41);
         instrument.Arpeggio.AddRange([NoteName.Parse("C-4"), NoteName.Parse("G-4")]);
@@ -256,8 +256,39 @@ public class InstrumentProgramTests
         sequencer.Frame();
         sequencer.Frame();
 
-        // Nothing on this voice at all: the whole automation hangs off one position byte, so
-        // clearing it silences the arpeggio and the pulse sweep along with the wavetable.
-        Assert.Empty(writes.Where(w => w.Offset < 7));
+        // The wavetable is parked on a hold, so nothing puts the gate back on - but the pulse
+        // sweep and the note program run on through the release, as they do in GoatTracker.
+        Assert.Empty(writes.Where(w => w.Offset == 4));
+        Assert.Equal(2, writes.Count(w => w.Offset == 2));
+        Assert.Equal(2, writes.Count(w => w.Offset == 1));
+    }
+
+    [Fact]
+    public void Vibrato_runs_on_through_the_release()
+    {
+        var instrument = Plain(waveform: 0x41);
+        instrument.VibratoDelaySpeed = 0x02;
+        instrument.VibratoDepth = 0x20;
+
+        var (writes, sequencer) = Build(instrument,
+            new NoteRow(NoteName.Parse("C-5"), 1),
+            new NoteOffRow(),
+            new HoldRow(), new HoldRow(), new HoldRow(), new HoldRow());
+
+        sequencer.Frame(); // trigger
+        sequencer.Frame(); // note off
+        writes.Clear();
+
+        var frequencies = new List<int>();
+        int lo = 0;
+        for (int frame = 0; frame < 4; frame++)
+        {
+            sequencer.Frame();
+            lo = writes.LastOrDefault(w => w.Offset == 0).Value;
+            frequencies.Add(lo);
+        }
+
+        Assert.Empty(writes.Where(w => w.Offset == 4));
+        Assert.True(frequencies.Distinct().Count() > 1, "the pitch froze at the note off");
     }
 }

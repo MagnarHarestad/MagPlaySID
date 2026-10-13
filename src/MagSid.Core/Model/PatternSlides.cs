@@ -12,8 +12,9 @@ namespace MagSid.Core.Model;
 public static class PatternSlides
 {
     /// <summary>The rate in force on every row: 0 from each note, a slide row's own rate from that
-    /// row on. Rows before the pattern's first note start at 0 - what carries in from the
-    /// previous pattern is not this pattern's to know.</summary>
+    /// row on - through a note off too, since the release slides on. Rows before the pattern's
+    /// first note start at 0: what carries in from the previous pattern is not this pattern's to
+    /// know.</summary>
     public static int[] Rates(Pattern pattern)
     {
         var rows = pattern.Rows;
@@ -24,7 +25,7 @@ public static class PatternSlides
         {
             running = rows[row] switch
             {
-                NoteRow or NoteOffRow => 0,
+                NoteRow => 0,
                 SlideRow slide => slide.Rate,
                 _ => running,
             };
@@ -35,35 +36,13 @@ public static class PatternSlides
     }
 
     /// <summary>
-    /// Whether a slide can be put on a row: one a note is sounding through. Not a note's own row -
-    /// a slide row takes the place a note would - and not after a release, where nothing sounds
-    /// for it to move. A loop marker has no time to slide in. Before the pattern's first note a
-    /// slide carries on whatever the previous pattern left sounding, so those rows are open too.
+    /// Whether a slide can be put on a row: any hold or slide row. Not a note's own row or a note
+    /// off - a slide row takes the place of either - and not a loop marker, which has no time to
+    /// slide in. After a note off the release runs on and slides with it; before the pattern's
+    /// first note a slide carries on whatever the previous pattern left sounding.
     /// </summary>
-    public static bool[] Slidable(Pattern pattern)
-    {
-        var rows = pattern.Rows;
-        var open = new bool[rows.Count];
-        bool released = false;
-
-        for (int row = 0; row < rows.Count; row++)
-        {
-            switch (rows[row])
-            {
-                case NoteRow:
-                    released = false;
-                    break;
-                case NoteOffRow:
-                    released = true;
-                    break;
-                case HoldRow or SlideRow:
-                    open[row] = !released;
-                    break;
-            }
-        }
-
-        return open;
-    }
+    public static bool[] Slidable(Pattern pattern) =>
+        [.. pattern.Rows.Select(row => row is HoldRow or SlideRow)];
 
     /// <summary>
     /// How far a note's slides have moved its 16-bit frequency on every frame it sounds, from its
@@ -123,7 +102,6 @@ public static class PatternSlides
 
                 case NoteOffRow:
                     beforeFirstNote = false;
-                    running = 0;
                     break;
 
                 case HoldRow or SlideRow when open[row]:

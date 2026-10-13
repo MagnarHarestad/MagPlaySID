@@ -25,6 +25,10 @@ public sealed class SongTableLabels
 
     public Label? VibDs { get; init; }
     public Label? VibDepth { get; init; }
+
+    /// <summary>wt_hold - wt_data: the wavetable pool's last byte, always the $00 that ends the
+    /// last program. A note off parks voice_wt_pos there.</summary>
+    public required int WtHold { get; init; }
 }
 
 /// <summary>The per-song constants baked into the player code: v_Song_Speed and the three
@@ -105,7 +109,7 @@ public static class PlayerProgram
         asm.Jmp(musicInit);
         asm.Jmp(musicPlay);
 
-        EmitVoiceNoteOff(asm, zp, voiceNoteOff, sidChannelOffset);
+        EmitVoiceNoteOff(asm, tables, zp, voiceNoteOff, sidChannelOffset);
         EmitVoiceAdvanceOrder(asm, tables, zp, voiceAdvanceOrder, voiceOrderPos);
         EmitVoiceSetFreq(asm, tables, features, zp, voiceSetFreq, sidChannelOffset);
         EmitVoicePlayCurrent(asm, tables, features, zp, voicePlayCurrent, voiceNoteOff, voiceSetFreq, sidChannelOffset);
@@ -122,16 +126,18 @@ public static class PlayerProgram
             throw new ArgumentException("A song with vibrato needs both vib_ds and vib_depth.", nameof(tables));
     }
 
-    /// <summary>Clears the gate bit and stops the wavetable, keeping the waveform-select bits - the
-    /// oscillator would go instantly silent otherwise, masking the envelope's release.</summary>
-    private static void EmitVoiceNoteOff(Emitter6502 asm, ZeroPageLayout zp, Label entry, Label sidChannelOffset)
+    /// <summary>Clears the gate bit, keeping the waveform-select bits - the oscillator would go
+    /// instantly silent otherwise, masking the envelope's release. The wavetable is parked on a
+    /// $00 hold rather than stopped, so it never puts the gate back on while pulse, note program,
+    /// vibrato and slide run on through the release.</summary>
+    private static void EmitVoiceNoteOff(Emitter6502 asm, SongTableLabels tables, ZeroPageLayout zp, Label entry, Label sidChannelOffset)
     {
         asm.Define(entry);
         asm.Ldy(MemX(sidChannelOffset));
         asm.Lda(MemX(zp.VoiceLastWaveform));
         asm.And(Imm(0xFE));
         asm.Sta(MemY(SidControl));
-        asm.Move8(Imm(0), MemX(zp.VoiceWtPos));
+        asm.Move8(Imm(tables.WtHold), MemX(zp.VoiceWtPos));
         asm.Rts();
     }
 
@@ -324,7 +330,7 @@ public static class PlayerProgram
 
     /// <summary>One wavetable step plus ADSR for channel X, every frame rather than every tick - an
     /// attack transient needs frame resolution. Pool offset 0 is a dummy $00, so voice_wt_pos = 0
-    /// doubles as "nothing running".</summary>
+    /// doubles as "nothing played yet". A released note sits on wt_hold and runs on.</summary>
     private static void EmitVoiceAutomation(
         Emitter6502 asm, SongTableLabels tables, PlayerFeatures features, ZeroPageLayout zp,
         Label entry, Label voiceSetFreq, Label sidChannelOffset)

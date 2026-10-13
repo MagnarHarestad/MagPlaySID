@@ -27,6 +27,10 @@ public sealed class SongSequencer
     private readonly Action<int, int> _write;
     private readonly Dictionary<int, Pattern> _patternsByNumber;
     private readonly Dictionary<int, Instrument> _instrumentsByNumber;
+
+    /// <summary>Instrument index 0 in the player's tables - what a release before a voice's
+    /// first note runs on.</summary>
+    private readonly Instrument? _firstInstrument;
     private readonly ChannelState[] _channels = [new(), new(), new()];
 
     private int _speedCounter;
@@ -75,6 +79,7 @@ public sealed class SongSequencer
         _write = writeRegister;
         _patternsByNumber = song.Patterns.ToDictionary(p => p.Number);
         _instrumentsByNumber = song.Instruments.ToDictionary(i => i.Number);
+        _firstInstrument = song.Instruments.MinBy(i => i.Number);
 
         bool slides = MagSid.Core.SongSizeCalculator.UsesSlide(song);
         foreach (var channel in _channels)
@@ -221,7 +226,7 @@ public sealed class SongSequencer
     public (int Instrument, int WavetableStep, int ArpeggioStep) VoicePlayhead(int channel)
     {
         var voice = _channels[channel].Voice;
-        return voice.IsActive
+        return voice.IsActive && !voice.IsReleased
             ? (voice.InstrumentNumber, voice.LastWavetableStep, voice.LastArpeggioStep)
             : (-1, -1, -1);
     }
@@ -418,7 +423,7 @@ public sealed class SongSequencer
 
             if (row is NoteOffRow)
             {
-                state.Voice.ReleaseNote(RegisterBase(ch), _write);
+                state.Voice.ReleaseNote(RegisterBase(ch), _write, _firstInstrument);
             }
             else if (row is SlideRow slide)
             {

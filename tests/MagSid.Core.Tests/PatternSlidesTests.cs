@@ -58,18 +58,27 @@ public class PatternSlidesTests
     }
 
     [Fact]
-    public void A_note_its_release_and_the_rows_after_a_release_take_no_slide()
+    public void A_note_and_its_release_take_no_slide_but_the_rows_after_the_release_do()
     {
         var pattern = Make(N("C-4"), new HoldRow(), new NoteOffRow(), new HoldRow(), N("E-4"), new HoldRow());
 
-        Assert.Equal([false, true, false, false, false, true], PatternSlides.Slidable(pattern));
+        Assert.Equal([false, true, false, true, false, true], PatternSlides.Slidable(pattern));
 
         PatternSlides.SetRates(pattern, new Dictionary<int, int> { [0] = 9, [2] = 9, [3] = 9, [5] = 9 });
 
         Assert.IsType<NoteRow>(pattern.Rows[0]);
         Assert.IsType<NoteOffRow>(pattern.Rows[2]);
-        Assert.IsType<HoldRow>(pattern.Rows[3]);
+        Assert.Equal(new SlideRow(9), pattern.Rows[3]);
         Assert.Equal(new SlideRow(9), pattern.Rows[5]);
+    }
+
+    [Fact]
+    public void A_slide_runs_on_through_a_note_off()
+    {
+        // The player's note off leaves voice_slide alone, and the release now slides with it.
+        var pattern = Make(N("C-4"), new SlideRow(8), new NoteOffRow(), new HoldRow(), new SlideRow(0));
+
+        Assert.Equal([0, 8, 8, 8, 0], PatternSlides.Rates(pattern));
     }
 
     [Fact]

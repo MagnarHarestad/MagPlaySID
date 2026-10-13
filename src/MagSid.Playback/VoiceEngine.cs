@@ -14,10 +14,14 @@ namespace MagSid.Playback;
 /// </summary>
 public sealed class VoiceEngine
 {
-    /// <summary>0 = nothing running on this voice; otherwise the 1-based step the instrument's
-    /// wavetable has reached. Doubles as the master switch for all of the per-frame automation,
-    /// exactly as voice_wt_pos does in the assembly.</summary>
+    /// <summary>0 = nothing has played on this voice yet; otherwise the 1-based step the
+    /// instrument's wavetable has reached. Doubles as the master switch for all of the per-frame
+    /// automation, exactly as voice_wt_pos does in the assembly - a released note keeps it on, so
+    /// pulse, note program, vibrato and slide run on through the release.</summary>
     public bool IsActive => _wavetablePosition != 0;
+
+    /// <summary>The note has been released: its automation runs on, the wavetable no longer.</summary>
+    public bool IsReleased { get; private set; }
 
     /// <summary>True once the WAVE program has stepped past its own last frame and is now just
     /// holding the final control byte - i.e. it has "played through once" - false while nothing
@@ -157,6 +161,7 @@ public sealed class VoiceEngine
         InstrumentNumber = instrumentNumber;
         _instrument = instrument;
         _wavetablePosition = 1;
+        IsReleased = false;
         _arpeggioIndex = instrument.HasArpeggio ? 0 : -1;
         _arpeggioCompleted = false;
         LastWavetableStep = -1;
@@ -182,16 +187,23 @@ public sealed class VoiceEngine
         }
     }
 
-    /// <summary>Clears only the gate bit - clearing the whole register would also wipe the
-    /// waveform-select bits, silencing the oscillator instantly and masking whatever release
-    /// curve the envelope generator is still gracefully doing. Stopping the wavetable matters
-    /// just as much: it writes the control register every frame and would put the gate straight
-    /// back on. It also stops the ADSR, pulse and arpeggio writes, since all of them hang off
-    /// this one position.</summary>
-    public void ReleaseNote(int baseReg, Action<int, int> write)
+    /// <summary>
+    /// Clears only the gate bit - clearing the whole register would also wipe the waveform-select
+    /// bits, silencing the oscillator instantly and masking whatever release curve the envelope
+    /// generator is still gracefully doing. The wavetable is parked past its end, the way the
+    /// player parks voice_wt_pos on wt_hold: it would put the gate straight back on otherwise,
+    /// while pulse, note program, vibrato and slide carry on through the release.
+    ///
+    /// A release before anything has played still starts that automation in the player, on
+    /// instrument index 0 - <paramref name="firstInstrument"/> - over a silent voice.
+    /// </summary>
+    public void ReleaseNote(int baseReg, Action<int, int> write, Instrument? firstInstrument = null)
     {
         write(baseReg + 4, _lastControlValue & ~0x01);
-        _wavetablePosition = 0;
+
+        _instrument ??= firstInstrument;
+        _wavetablePosition = _instrument is null ? 0 : WavetableOf(_instrument).Count + 1;
+        IsReleased = _instrument is not null;
     }
 
     /// <summary>A "panic button" reset rather than a release: forces this voice silent right now,
@@ -214,12 +226,13 @@ public sealed class VoiceEngine
         write(baseReg + 6, 0x07);
         write(baseReg + 4, 0x08); // gate off, TEST on - no waveform bits, so this stays silent
         _wavetablePosition = 0;
+        IsReleased = false;
     }
 
     /// <summary>One frame of automation: a wavetable step, the instrument's ADSR, the pulse
     /// width, and an arpeggio step - every frame, not every tick. Does nothing while
-    /// <see cref="IsActive"/> is false, which is how <see cref="ReleaseNote"/> silences all four
-    /// at once by clearing a single position.</summary>
+    /// <see cref="IsActive"/> is false - before the voice's first note - and runs on through a
+    /// release with the wavetable parked.</summary>
     public void Automate(int baseReg, Action<int, int> write)
     {
         if (!IsActive)

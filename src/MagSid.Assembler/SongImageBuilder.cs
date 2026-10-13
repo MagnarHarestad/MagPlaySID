@@ -53,6 +53,7 @@ public static class SongImageBuilder
             TblSongOrder = asm.NewLabel("tbl_songorder"),
             NoteFreqLow = asm.NewLabel("note_freq_low"),
             NoteFreqHigh = asm.NewLabel("note_freq_high"),
+            WtHold = instrumentTables.WavetablePool.Length - 1,
         };
 
         PlayerProgram.Emit(

@@ -154,6 +154,8 @@ public sealed class AboutForm : Form
              "  PAT   Pattern number, and loop markers LS / LE04\n" +
              "  NOT   Note, \"...\" hold, \"---\" note off, 1xx / 2xx slide (orange)\n" +
              "  INS   Instrument number (hex, two quick keys make two digits)\n\n");
+        Body("A note off (\"---\") releases the gate and stops the wavetable; pulse sweep, note " +
+             "program, vibrato and slide run on through the release.\n\n");
         Mono("  Arrows             Move between rows and fields\n" +
              "  Tab / Shift+Tab    Next / previous channel\n" +
              "  Home / End         First / last row\n" +
@@ -267,8 +269,9 @@ public sealed class AboutForm : Form
         Body("The lane is the pattern's 1xx / 2xx rows seen as a level on every row. Only the rows " +
              "where the rate changes become slide rows - bright bars with their value under them - " +
              "and each costs two bytes, so a run drawn at one level is a single row. A note's own " +
-             "row and the rows after a note off take no slide (a dot). The notes above show the " +
-             "glide the player will play, frame by frame, ending in a dot at the pitch reached.\n\n");
+             "row and a note off take no slide (a dot); the release after a note off does. The " +
+             "notes above show the glide the player will play, frame by frame, ending in a dot at " +
+             "the pitch reached.\n\n");
 
         Heading("Instrument page");
         Mono("  Click the name        Rename\n" +
