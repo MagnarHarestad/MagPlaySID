@@ -1881,6 +1881,14 @@ internal sealed class PianoRollView : Control
     /// to move or shorten, and falling through would leave the row unreachable from the keyboard.
     /// Returns true when the key belonged here.
     /// </summary>
+    private int _loopDigit = -1;
+    private DateTime _loopDigitTime;
+
+    /// <summary>An LE is selected in a focused roll: the digit keys type its count rather than play.</summary>
+    public bool LoopEndSelected =>
+        _pattern is { } pattern && _selectedRow >= 0 && _selectedRow < pattern.Rows.Count
+        && pattern.Rows[_selectedRow] is LoopEndRow;
+
     private bool HandleMarkerKey(KeyEventArgs e, Pattern pattern)
     {
         var marker = PatternNotes.Markers(pattern).FirstOrDefault(m => m.Row == _selectedRow);
@@ -1889,17 +1897,47 @@ internal sealed class PianoRollView : Control
         {
             // Ctrl+L and Ctrl+E, the tracker's own bindings. Bare S and E used to do this, but
             // they are also C# and E on the piano keys, and the roll plays those now.
+            // Inserted as rows of their own - LS before the selected row, LE after it - so no note
+            // loses a row to them and the loop is as long as the rows it brackets. The marker is
+            // selected afterwards, ready for its count to be typed.
             case Keys.L when e.Control:
-                PatternNotes.SetLoopStart(pattern, _selectedRow);
-                Commit();
+                if (PatternNotes.InsertLoopStart(pattern, _selectedRow) is var start and >= 0)
+                {
+                    _selectedRow = start;
+                    Commit();
+                }
+
                 e.Handled = true;
                 return true;
 
             case Keys.E when e.Control:
-                PatternNotes.SetLoopEnd(pattern, _selectedRow, null);
-                Commit();
+                if (PatternNotes.InsertLoopEnd(pattern, _selectedRow, null) is var end and >= 0)
+                {
+                    _selectedRow = end;
+                    _loopDigit = -1;
+                    Commit();
+                }
+
                 e.Handled = true;
                 return true;
+
+            // The count typed straight into a selected LE: two digits within a moment make one
+            // number, the way a clip's pattern is typed in the arrange lanes. 0 is a bare LE, which
+            // loops forever.
+            case >= Keys.D0 and <= Keys.D9 or >= Keys.NumPad0 and <= Keys.NumPad9
+                when marker is { IsStart: false } && !e.Control && !e.Alt:
+            {
+                int digit = e.KeyCode >= Keys.NumPad0 ? e.KeyCode - Keys.NumPad0 : e.KeyCode - Keys.D0;
+                bool combine = _loopDigit >= 0 && (DateTime.UtcNow - _loopDigitTime) < TimeSpan.FromMilliseconds(800);
+                int count = combine ? (_loopDigit * 10) + digit : digit;
+                _loopDigit = combine ? -1 : digit;
+                _loopDigitTime = DateTime.UtcNow;
+
+                PatternNotes.SetLoopEnd(pattern, _selectedRow, count);
+                Commit();
+                e.Handled = e.SuppressKeyPress = true;
+                return true;
+            }
 
             case Keys.Delete when marker is not null:
                 PatternNotes.RemoveMarker(pattern, _selectedRow);

@@ -262,12 +262,14 @@ public sealed class AboutForm : Form
              "  Delete             Delete the note, or the row if it is empty\n" +
              "  Shift+Delete       Delete the row\n" +
              "  Shift+End          Cut the pattern off after the selected row\n" +
-             "  Ctrl+L / Ctrl+E    Loop start / loop end\n" +
+             "  Ctrl+L / Ctrl+E    Loop start before / loop end after the selected row - added\n" +
+             "                     as a row of its own, so no note gets shorter\n" +
+             "  Digits on an LE    Its loop count (two digits = one number, 0 = forever)\n" +
              "  Shift+C / Shift+V  Copy / paste the whole pattern\n" +
              "  BEATS / ROWS       Grid in bars and beats, or in rows\n\n");
         Body("The beat bar between the header and the grid selects a row without writing a note " +
              "- use it to place markers, note offs or a paste on an empty row. Loop markers show " +
-             "there: click to select (Up / Down change an LE's count), right-click to remove.\n\n");
+             "there: click to select (type an LE's count, or Up / Down), right-click to remove.\n\n");
 
         Heading("Recording");
         Body("REC, next to the pattern's name, plays the song from the selected clip's place in it " +

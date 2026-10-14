@@ -312,4 +312,50 @@ public class PatternNotesTests
 
         Assert.Equal(before, PatternNotes.Read(pattern));
     }
+
+    /// <summary>A bar of Outlaws.s PAT01's bass: sixteen rows, the last note held over two.</summary>
+    private static Pattern SixteenRowBar() => PatternOf(
+        new NoteRow(Note("C-2"), 1), new HoldRow(), new NoteRow(Note("C-1"), 1), new HoldRow(),
+        new NoteRow(Note("C-2"), 1), new HoldRow(), new NoteRow(Note("C-1"), 1), new NoteRow(Note("C-2"), 1),
+        new NoteRow(Note("C-1"), 1), new HoldRow(), new NoteRow(Note("C-2"), 1), new HoldRow(),
+        new NoteRow(Note("C-2"), 1), new NoteRow(Note("C-2"), 1), new NoteRow(Note("C-1"), 1), new HoldRow());
+
+    [Fact]
+    public void A_loop_end_goes_in_after_the_row_and_no_note_loses_a_row()
+    {
+        var pattern = SixteenRowBar();
+        var before = PatternNotes.Read(pattern);
+
+        int marker = PatternNotes.InsertLoopEnd(pattern, 15, 4);
+
+        Assert.Equal(16, marker);
+        Assert.Equal(17, pattern.Rows.Count);
+        Assert.Equal(new LoopEndRow(4), pattern.Rows[16]);
+        Assert.Equal(before, PatternNotes.Read(pattern));   // the last C-1 still holds two rows
+    }
+
+    [Fact]
+    public void A_loop_start_goes_in_before_the_row_and_the_notes_keep_their_lengths()
+    {
+        var pattern = SixteenRowBar();
+        var lengths = PatternNotes.Read(pattern).Select(n => n.Length).ToList();
+
+        int marker = PatternNotes.InsertLoopStart(pattern, 4);
+
+        Assert.Equal(4, marker);
+        Assert.IsType<LoopStartRow>(pattern.Rows[4]);
+        Assert.Equal(new NoteRow(Note("C-2"), 1), pattern.Rows[5]);
+        Assert.Equal(lengths, PatternNotes.Read(pattern).Select(n => n.Length));
+    }
+
+    [Fact]
+    public void A_marker_put_on_a_marker_changes_it_in_place()
+    {
+        var pattern = SixteenRowBar();
+        int end = PatternNotes.InsertLoopEnd(pattern, 15, null);
+
+        Assert.Equal(end, PatternNotes.InsertLoopEnd(pattern, end, 2));
+        Assert.Equal(17, pattern.Rows.Count);
+        Assert.Equal(new LoopEndRow(2), pattern.Rows[end]);
+    }
 }

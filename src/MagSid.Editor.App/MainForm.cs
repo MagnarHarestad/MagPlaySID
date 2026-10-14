@@ -1039,6 +1039,13 @@ public sealed class MainForm : Form
             return;
         }
 
+        // A selected LE in the roll takes the digits as its loop count; 2, 3, 5, 6 and 7 would
+        // otherwise be piano keys.
+        if (_dawView.RollTakesDigits && e.KeyCode is >= Keys.D0 and <= Keys.D9 or >= Keys.NumPad0 and <= Keys.NumPad9)
+        {
+            return;
+        }
+
         if (e.KeyCode == PianoKeyMap.OctaveKey)
         {
             _dawView.StepOctave(e.Shift);

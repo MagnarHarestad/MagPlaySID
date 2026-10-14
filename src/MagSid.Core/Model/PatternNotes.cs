@@ -138,6 +138,48 @@ public static class PatternNotes
         pattern.Rows[row] = new LoopEndRow(clamped);
     }
 
+    /// <summary>
+    /// Adds an LS in front of <paramref name="row"/>, as a row of its own: the loop starts with
+    /// that row. A marker takes no time, so putting it in a row's place - as
+    /// <see cref="SetLoopStart"/> does - cost the note there a row and the loop a row of length;
+    /// inserting it leaves every note and every length as it was. A marker already on the row is
+    /// changed in place. Returns the marker's row.
+    /// </summary>
+    public static int InsertLoopStart(Pattern pattern, int row)
+    {
+        if (row < 0 || row >= pattern.Rows.Count)
+            return -1;
+
+        if (pattern.Rows[row] is LoopStartRow or LoopEndRow)
+        {
+            pattern.Rows[row] = new LoopStartRow();
+            return row;
+        }
+
+        pattern.Rows.Insert(row, new LoopStartRow());
+        return row;
+    }
+
+    /// <summary>
+    /// Adds an LE after <paramref name="row"/>, as a row of its own: the loop ends with that row,
+    /// and every note keeps its length. A marker already on the row is changed in place. Returns
+    /// the marker's row. See <see cref="SetLoopEnd"/> for <paramref name="repeatCount"/>.
+    /// </summary>
+    public static int InsertLoopEnd(Pattern pattern, int row, int? repeatCount)
+    {
+        if (row < 0 || row >= pattern.Rows.Count)
+            return -1;
+
+        if (pattern.Rows[row] is not (LoopStartRow or LoopEndRow))
+        {
+            row++;
+            pattern.Rows.Insert(row, new HoldRow());
+        }
+
+        SetLoopEnd(pattern, row, repeatCount);
+        return row;
+    }
+
     /// <summary>Takes a marker away, leaving a hold - the same nothing a removed note leaves, since
     /// this format has no blank row. Returns false when that row held no marker.</summary>
     public static bool RemoveMarker(Pattern pattern, int row)

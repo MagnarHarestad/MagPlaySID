@@ -145,6 +145,9 @@ internal sealed class DawView : Panel
     /// an instrument is being listened to, not entered.</summary>
     public bool RollHasFocus => _pianoRoll.ContainsFocus;
 
+    /// <summary>The roll has the keyboard and an LE selected: digits are its loop count.</summary>
+    public bool RollTakesDigits => _pianoRoll.ContainsFocus && _pianoRoll.LoopEndSelected;
+
     /// <summary>The arrange lanes have the keyboard, and the digits typed there are pattern numbers
     /// rather than notes.</summary>
     public bool ArrangeHasFocus => _arrange.ContainsFocus;
