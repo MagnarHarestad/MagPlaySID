@@ -124,3 +124,15 @@ the c6510 assembler, its include library, and the Python tools that measure byte
 player's register writes. Every change made to the player since — pattern slides, soft hard restart,
 and a note off that lets the release run on — is in `tests/MagSid.Assembler.Tests/Goldens/player.patch`,
 against that version.
+
+## License
+
+MagSID Editor is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 2 of the License,
+or (at your option) any later version. It is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+The editor's SID emulation is a C# translation of reSID by Dag Lem, which is licensed under the GPL,
+version 2 or later - so the editor is too. It also includes NAudio, under the MIT license. Both are
+credited in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
