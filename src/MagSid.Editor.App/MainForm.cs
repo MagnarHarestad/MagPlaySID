@@ -246,7 +246,7 @@ public sealed class MainForm : Form
         var saveItem = new ToolStripMenuItem("&Save", null, (_, _) => DoSave());
         var saveAsItem = new ToolStripMenuItem("Save &As...", null, (_, _) => DoSaveAs());
         var exportSidItem = new ToolStripMenuItem("&Export to .sid...", null, (_, _) => DoExportSid());
-        var playInVsidItem = new ToolStripMenuItem("&Load and Play .sid...", null, (_, _) => DoLoadAndPlaySid());
+        var loadAndPlaySidItem = new ToolStripMenuItem("&Load and Play .sid...", null, (_, _) => DoLoadAndPlaySid());
 
         // Moved here from a checkbox inside the instrument editor panel itself - it is a
         // once-in-a-while display preference (see EditorPalette... no, EditorSettings.ShowHighHex
@@ -299,7 +299,7 @@ public sealed class MainForm : Form
         exportSidItem.ShortcutKeys = Keys.F9;
 
         file.DropDownItems.AddRange([aboutItem, new ToolStripSeparator(), _undoItem, _redoItem,
-            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, playInVsidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
+            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
         menu.Items.Add(file);
 
         var signalPathItem = new ToolStripMenuItem("&Signal Path", null, (_, _) => DoSignalPath());
