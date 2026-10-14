@@ -374,7 +374,43 @@ public class ResumeTests
         var fromTop = Triggers(song, null, exact.Frame + 30);
         var started = Triggers(song, exact, 30);
 
-        Assert.Equal("1:2:5 2:2:5", started[0]);
-        Assert.Equal(fromTop.Skip(exact.Frame), started);
+        // Channels 2 and 3 play row 5; channel 1 is named on the hold it is already sounding.
+        Assert.Equal("1:2:5 2:2:5 0:1:5", started[0]);
+        Assert.Equal(fromTop.Skip(exact.Frame + 1), started.Skip(1));
+    }
+
+    [Fact]
+    public void A_resume_inside_a_held_note_names_the_row_being_held_without_retriggering_it()
+    {
+        // Channel 1 holds C-3 for eight rows. Resumed on row 5, it triggers nothing until row 8 -
+        // and the retro view, which follows RowTriggered, had nothing to draw for it until then.
+        var song = new Song { Speed = 2 };
+        song.Instruments.Add(Instr(1));
+        var held = new Pattern { Number = 1 };
+        held.Rows.Add(new NoteRow(NoteName.Parse("C-3"), 1));
+        for (int row = 1; row < 8; row++)
+            held.Rows.Add(new HoldRow());
+        song.Patterns.Add(held);
+        for (int ch = 0; ch < 3; ch++)
+            song.ChannelOrders[ch].Tokens.Add(new PatternRefToken(1));
+
+        var from = SongSequencer.FindExactPosition(song, channel: 0, orderIndex: 0, rowIndex: 5);
+        var named = new List<(int Channel, int Row)>();
+        var controlWrites = new List<int>();
+        var sequencer = new SongSequencer(song, (register, value) =>
+        {
+            if (register == 4)
+                controlWrites.Add(value);
+        }, from);
+        sequencer.RowTriggered += (ch, _, row, _, _) => named.Add((ch, row));
+
+        sequencer.Frame();
+
+        Assert.Equal([(0, 5), (1, 5), (2, 5)], named);
+        Assert.Empty(controlWrites);    // no hard restart, no gate - the note is not played again
+
+        named.Clear();
+        sequencer.Frame();
+        Assert.Empty(named);            // once
     }
 }

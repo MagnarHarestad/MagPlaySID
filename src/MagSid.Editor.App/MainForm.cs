@@ -1224,6 +1224,7 @@ public sealed class MainForm : Form
             _waveOut.Play();
             _playbackEngine = engine;
             _trackerGrid.SetPlaybackActive(true);
+            _trackerGrid.SetPlaybackStartEntries(resume is null ? null : [.. resume.Channels.Select(c => c.PlayingEntry)]);
             _playbackPollTimer.Start();
             _playStopButton.Text = "■ Stop";
         }

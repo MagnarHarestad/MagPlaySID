@@ -99,10 +99,43 @@ public sealed class SongSequencer
         {
             if (resumeFrom is not null && TryRestore(ch, resumeFrom.Channels[ch]))
             {
+                _announceRestored = true;
                 continue;
             }
 
             AdvanceOrder(ch);
+        }
+    }
+
+    /// <summary>Set by a resume: the first frame tells <see cref="RowTriggered"/> which row each
+    /// restored channel is already sounding.</summary>
+    private bool _announceRestored;
+
+    /// <summary>Which channels raised <see cref="RowTriggered"/> in the frame being played.</summary>
+    private readonly bool[] _triggeredThisFrame = new bool[3];
+
+    /// <summary>
+    /// A channel restored part-way through a long note triggers nothing until its next row, and
+    /// whatever follows playback from RowTriggered - the retro view's scrolling columns - had
+    /// nothing to show for it until then. So a resumed song names, once, the row each channel is
+    /// on: the hold being heard, raised as a trigger of that row. The voice is not touched.
+    /// </summary>
+    private void AnnounceRestoredRows()
+    {
+        for (int ch = 0; ch < 3; ch++)
+        {
+            var state = _channels[ch];
+            if (_triggeredThisFrame[ch] || !_patternsByNumber.TryGetValue(state.CurrentPatternNumber, out var pattern))
+            {
+                continue;
+            }
+
+            // At the end of the frame: the last tick played the row before the remaining holds.
+            int row = state.RowIndex - state.Duration - 1;
+            if (row >= 0 && row < pattern.Rows.Count && pattern.Rows[row] is not (LoopStartRow or LoopEndRow))
+            {
+                RowTriggered?.Invoke(ch, state.CurrentPatternNumber, row, state.OrderEntrySequence, pattern.Rows[row]);
+            }
         }
     }
 
@@ -318,6 +351,9 @@ public sealed class SongSequencer
     public bool Frame()
     {
         _frame++;
+        bool announce = _announceRestored;
+        _announceRestored = false;
+        Array.Clear(_triggeredThisFrame);
 
         for (int ch = 0; ch < 3; ch++)
         {
@@ -349,6 +385,11 @@ public sealed class SongSequencer
 
             ticked = true;
         }
+
+        // After the tick, so a channel that played a hold this frame is named on that hold, and
+        // one that triggered a row of its own already has.
+        if (announce)
+            AnnounceRestoredRows();
 
         return ticked;
     }
@@ -480,6 +521,7 @@ public sealed class SongSequencer
                 }
             }
 
+            _triggeredThisFrame[ch] = true;
             RowTriggered?.Invoke(ch, triggeredPatternNumber, triggeredRowIndex, state.OrderEntrySequence, row);
             return;
         }

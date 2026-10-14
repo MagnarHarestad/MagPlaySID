@@ -439,6 +439,15 @@ public sealed class TrackerGridControl : Control
             ticks++;
         }
 
+        // The channel's first row since Play: its rows start where its pattern is first met
+        // walking its order from the song position. Started from the top of the song that is row
+        // 0, but a song resumed part-way has each channel in a pattern of its own - with orders of
+        // different lengths, not the one at the song position.
+        if (_lastOrderEntrySequence[channel] is null)
+        {
+            _nextAvailableRow[channel] = FirstRowOfPattern(channel, pattern, _startEntry[channel]);
+        }
+
         if (_lastOrderEntrySequence[channel] != orderEntrySequence)
         {
             // A genuinely new pattern occurrence began (AdvanceOrder ran) - reserve the next
@@ -1335,6 +1344,57 @@ public sealed class TrackerGridControl : Control
     /// <summary>How many of a pattern's rows are real, displayable events - excludes
     /// LoopStartRow/LoopEndRow, which render as an inline prefix on an adjacent real row
     /// instead of occupying a display row of their own (see <see cref="PrefixForRow"/>).</summary>
+    /// <summary>The order entry each channel was in when playback started, or -1 for the top
+    /// of the song - see <see cref="SetPlaybackStartEntries"/>.</summary>
+    private readonly int[] _startEntry = [-1, -1, -1];
+
+    /// <summary>Which order entry each channel is in as a resumed song starts. A pattern can come
+    /// twice in a row in an order, so its number alone does not say which of them is playing.</summary>
+    public void SetPlaybackStartEntries(IReadOnlyList<int>? entries)
+    {
+        for (int ch = 0; ch < 3; ch++)
+            _startEntry[ch] = entries is not null && ch < entries.Count ? entries[ch] : -1;
+    }
+
+    /// <summary>The display row where <paramref name="pattern"/> starts in a channel, walking its
+    /// order from the song position and round its restart - from <paramref name="startEntry"/>
+    /// on when that is known. 0 when it is not found.</summary>
+    private int FirstRowOfPattern(int channel, Pattern pattern, int startEntry)
+    {
+        int row = 0;
+        bool reached = startEntry < 0;
+        for (int hop = 0; hop < 512; hop++)
+        {
+            if (ResolveDisplayRow(channel, row) is not { } resolved)
+                return 0;
+
+            reached |= resolved.OrderIndex == startEntry;
+            if (reached && ReferenceEquals(resolved.Pattern, pattern))
+                return row;
+
+            int rows = RealRowCount(resolved.Pattern);
+            if (rows == 0)
+                return 0;
+
+            row += rows - RealRowsBefore(resolved.Pattern, resolved.LocalRow);
+        }
+
+        return 0;
+    }
+
+    /// <summary>How many display rows - markers left out - come before a pattern row.</summary>
+    private static int RealRowsBefore(Pattern pattern, int localRow)
+    {
+        int count = 0;
+        for (int i = 0; i < Math.Min(localRow, pattern.Rows.Count); i++)
+        {
+            if (pattern.Rows[i] is not LoopStartRow and not LoopEndRow)
+                count++;
+        }
+
+        return count;
+    }
+
     private static int RealRowCount(Pattern pattern)
     {
         int count = 0;
