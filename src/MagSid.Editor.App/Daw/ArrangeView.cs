@@ -58,9 +58,19 @@ internal sealed class ArrangeView : Control
     private (int Channel, int Index) _hovered = (-1, -1);
     private readonly int[] _playheads = [-1, -1, -1];
 
-    /// <summary>Where F2 plays from, in rows along the lanes - set by a click in the ruler, cleared
-    /// by a right-click there. Null: F2 does what it does in the tracker.</summary>
-    private int? _playFromRow;
+    /// <summary>
+    /// The project cursor, in ticks along the lanes: where F2 plays from. It follows the song while
+    /// it plays and stays where it stopped, so F2 carries on from there; a click in the ruler puts
+    /// it anywhere, a right-click back at the start.
+    /// </summary>
+    private double _cursor;
+
+    /// <summary>Where the cursor was when playback last started - a second stop goes back there.</summary>
+    private double _playStart;
+
+    /// <summary>Each lane's playhead, in ticks along it - NaN while nothing plays. Per lane, since
+    /// a channel with a shorter order has wrapped round its RST while the others play on.</summary>
+    private readonly double[] _lanePlayhead = [double.NaN, double.NaN, double.NaN];
 
     /// <summary>The selected channel's RST block is selected rather than a clip. _selectedIndex
     /// stays on the last clip meanwhile, so everything that reads it still finds a clip.</summary>
@@ -226,8 +236,37 @@ internal sealed class ArrangeView : Control
     public (int Channel, int Index)? Selection =>
         _selectedIndex >= 0 ? (_selectedChannel, _selectedIndex) : null;
 
-    private int RowsOf(int patternNumber) =>
-        _song?.Patterns.FirstOrDefault(p => p.Number == patternNumber)?.Rows.Count ?? 0;
+    /// <summary>
+    /// A clip's width in ticks - the rows it plays, an LS/LE loop's section once per pass - so a
+    /// lane's length is time and the three lanes line up the way the song plays. A loop with no
+    /// count is played until the longest lane reaches its RST.
+    /// </summary>
+    private int RowsOf(int patternNumber)
+    {
+        if (_song?.Patterns.FirstOrDefault(p => p.Number == patternNumber) is not { } pattern)
+            return 0;
+
+        bool endless = pattern.Rows.Any(r => r is LoopEndRow { RepeatCount: null });
+        return PatternLoops.Unroll(pattern, endless ? EndlessLoopCap() : 0).Count;
+    }
+
+    private int EndlessLoopCap()
+    {
+        int longest = 0;
+        foreach (var order in _song!.ChannelOrders)
+        {
+            int total = 0;
+            foreach (var token in order.Tokens)
+            {
+                if (token is PatternRefToken(var number) && _song.Patterns.FirstOrDefault(p => p.Number == number) is { } pattern)
+                    total += PatternLoops.Unroll(pattern, 0).Count;
+            }
+
+            longest = Math.Max(longest, total);
+        }
+
+        return Math.Max(longest, 64);
+    }
 
     /// <summary>Where a lane's entry starts, in pixels from the lane's own beginning. Cumulative
     /// rows, so a channel of short patterns falls behind one of long patterns - which is what
@@ -247,37 +286,107 @@ internal sealed class ArrangeView : Control
     private int LaneLength(ChannelOrder order) => OffsetOf(order, order.Tokens.Count);
 
     /// <summary>
-    /// The play-from marker as a place in the song: a clip and a row in it, which the sequencer
-    /// can find in the music. The lanes are drawn row for row, but loops play their rows again and
-    /// the three channels need not line up, so the marker is read in one lane - the selected
-    /// channel's when it has a clip there, otherwise the first that does. Null without a marker,
-    /// or with one past every lane's end.
+    /// The project cursor as a place in the song: a clip and how many ticks into it, which the
+    /// sequencer can find in the music. Read in the selected channel's lane when it has a clip
+    /// there, otherwise the first that does. Null at the very start, or past every lane's end -
+    /// either way, play from the top.
     /// </summary>
-    public (int Channel, int Index, int Row)? PlayFrom
+    public (int Channel, int Index, int TicksInto)? PlayFrom
     {
         get
         {
-            if (_song is not { } song || _playFromRow is not { } markerRow)
+            if (_song is not { } song)
                 return null;
 
-            int x = markerRow * PixelsPerRow;
+            int ticks = (int)Math.Floor(_cursor);
             foreach (int channel in new[] { _selectedChannel, 0, 1, 2 })
             {
                 var order = song.ChannelOrders[channel];
+                int start = 0;
                 for (int i = 0; i < order.Tokens.Count; i++)
                 {
                     if (order.Tokens[i] is not PatternRefToken token)
                         continue;
 
-                    int start = OffsetOf(order, i);
-                    int rows = RowsOf(token.PatternNumber);
-                    if (x >= start && x < start + (rows * PixelsPerRow))
-                        return (channel, i, Math.Clamp((x - start) / PixelsPerRow, 0, Math.Max(0, rows - 1)));
+                    int length = RowsOf(token.PatternNumber);
+                    if (ticks >= start && ticks < start + length)
+                        return i == 0 && ticks == 0 ? null : (channel, i, ticks - start);
+                    start += length;
                 }
             }
 
             return null;
         }
+    }
+
+    /// <summary>The project cursor, in ticks along the lanes.</summary>
+    public double ProjectCursor => _cursor;
+
+    /// <summary>Playback is starting from the cursor: a second stop comes back here.</summary>
+    public void MarkPlayStart() => _playStart = _cursor;
+
+    /// <summary>The second stop: the cursor goes back to where playback last started.</summary>
+    public void ReturnToPlayStart()
+    {
+        _cursor = _playStart;
+        ScrollToTicks(_cursor);
+        Invalidate();
+    }
+
+    /// <summary>Playing from the top: the cursor starts there too.</summary>
+    public void ResetProjectCursor()
+    {
+        _cursor = 0;
+        _playStart = 0;
+        Invalidate();
+    }
+
+    /// <summary>
+    /// Where each channel is: its order entry and how many ticks into it, or null while it is not
+    /// playing. Each lane draws its own playhead, and the project cursor rides the longest lane's -
+    /// the song's own timeline, which the shorter lanes loop round inside. With
+    /// <paramref name="follow"/>, the lanes scroll to keep the cursor in view.
+    /// </summary>
+    public void SetLanePositions(IReadOnlyList<(int Entry, double Ticks)?> channels, bool follow)
+    {
+        if (_song is not { } song)
+            return;
+
+        int reference = Enumerable.Range(0, Song.ChannelCount).OrderByDescending(ch => LaneLength(song.ChannelOrders[ch])).First();
+        for (int ch = 0; ch < Song.ChannelCount; ch++)
+        {
+            _lanePlayhead[ch] = ch < channels.Count && channels[ch] is { } at && at.Entry >= 0
+                ? (OffsetOf(song.ChannelOrders[ch], at.Entry) / (double)PixelsPerRow) + at.Ticks
+                : double.NaN;
+        }
+
+        if (!double.IsNaN(_lanePlayhead[reference]))
+            _cursor = _lanePlayhead[reference];
+
+        if (follow)
+            ScrollToTicks(_cursor);
+
+        Invalidate();
+    }
+
+    public void ClearLanePlayheads()
+    {
+        Array.Fill(_lanePlayhead, double.NaN);
+        Invalidate();
+    }
+
+    /// <summary>Scrolls just enough to bring a place on the lanes into view - a page at a time, so
+    /// the lanes stand still while the cursor crosses them.</summary>
+    private void ScrollToTicks(double ticks)
+    {
+        if (!_scroll.Enabled)
+            return;
+
+        int x = (int)(ticks * PixelsPerRow);
+        int visible = Math.Max(1, Width - GutterWidth);
+        int max = Math.Max(0, _scroll.Maximum - _scroll.LargeChange + 1);
+        if (x < _scroll.Value || x > _scroll.Value + visible - 20)
+            _scroll.Value = Math.Clamp(x - 40, 0, max);
     }
 
     private void UpdateScrollRange()
@@ -505,19 +614,23 @@ internal sealed class ArrangeView : Control
             return;
         }
 
+        // The clip is as wide as the ticks it plays, so the drag asks for ticks: rows are added
+        // or taken at the pattern's end - one tick each there, after any loop - and taking stops
+        // at a loop marker rather than cut a loop in half.
         int start = GutterWidth + OffsetOf(order, at.Index) - _scroll.Value;
-        int rows = Math.Max(1, (int)Math.Round((x - start) / (double)PixelsPerRow));
-        if (rows == pattern.Rows.Count)
+        int wanted = Math.Max(1, (int)Math.Round((x - start) / (double)PixelsPerRow));
+        int delta = wanted - RowsOf(token.PatternNumber);
+        if (delta == 0)
         {
             return;
         }
 
-        while (pattern.Rows.Count > rows)
+        for (; delta < 0 && pattern.Rows.Count > 1 && pattern.Rows[^1] is not (LoopStartRow or LoopEndRow); delta++)
         {
             pattern.Rows.RemoveAt(pattern.Rows.Count - 1);
         }
 
-        while (pattern.Rows.Count < rows)
+        for (; delta > 0; delta--)
         {
             pattern.Rows.Add(new HoldRow());
         }
@@ -571,12 +684,14 @@ internal sealed class ArrangeView : Control
             return;
         }
 
-        // The ruler: where F2 plays from. Right-click takes the marker away again.
+        // The ruler: the project cursor goes where it is clicked, or back to the start on a
+        // right-click. Placed by hand, it is also where a second stop returns to.
         if (e.Y < RulerHeight && e.X >= GutterWidth)
         {
-            _playFromRow = e.Button == MouseButtons.Right
-                ? null
+            _cursor = e.Button == MouseButtons.Right
+                ? 0
                 : Math.Max(0, (e.X - GutterWidth + _scroll.Value) / PixelsPerRow);
+            _playStart = _cursor;
             Invalidate();
             base.OnMouseDown(e);
             return;
@@ -1018,17 +1133,33 @@ internal sealed class ArrangeView : Control
             DrawLane(g, song, channel);
 
         DrawPlayFrom(g);
+        DrawLanePlayheads(g);
 
     }
 
-    /// <summary>The play-from marker: a small flag in the ruler and a faint line down the lanes -
+    /// <summary>Each lane's playhead: the red of the piano roll's, across that lane only.</summary>
+    private void DrawLanePlayheads(Graphics g)
+    {
+        using var pen = new Pen(Color.FromArgb(0xF0, 0x4A, 0x6E), 2f);
+        for (int ch = 0; ch < Song.ChannelCount; ch++)
+        {
+            if (double.IsNaN(_lanePlayhead[ch]))
+                continue;
+
+            int x = GutterWidth + (int)(_lanePlayhead[ch] * PixelsPerRow) - _scroll.Value;
+            if (x < GutterWidth || x > Width)
+                continue;
+
+            int top = LaneTop(ch);
+            g.DrawLine(pen, x, top + 2, x, top + LaneHeight - 2);
+        }
+    }
+
+    /// <summary>The project cursor: a small flag in the ruler and a faint line down the lanes -
     /// there to be found, not to compete with the clips.</summary>
     private void DrawPlayFrom(Graphics g)
     {
-        if (_playFromRow is not { } row)
-            return;
-
-        int x = GutterWidth + (row * PixelsPerRow) - _scroll.Value;
+        int x = GutterWidth + (int)(_cursor * PixelsPerRow) - _scroll.Value;
         if (x < GutterWidth || x > Width)
             return;
 

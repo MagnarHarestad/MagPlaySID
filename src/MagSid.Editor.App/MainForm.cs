@@ -1039,7 +1039,11 @@ public sealed class MainForm : Form
     /// difference that gets blamed on the song.</summary>
     private void ToggleTransport()
     {
-        if (_waveOut is null)
+        if (_waveOut is null && _dawShowing)
+        {
+            PlayFromProjectCursor();
+        }
+        else if (_waveOut is null)
         {
             StartFromBeginning();
         }
@@ -1123,12 +1127,9 @@ public sealed class MainForm : Form
             // In the DAW, the arrange ruler's marker says where, when one is set - found by the
             // sequencer like any other start, so the other channels are where they are. It is a
             // locator: F2 goes back to it while the song is playing too.
-            if (_dawShowing && _dawView.PlayFrom is { } marker)
+            if (_dawShowing)
             {
-                StopAnyPlayback();
-                StartPlaybackFrom(marker.Index == 0 && marker.Row == 0
-                    ? null
-                    : SongSequencer.FindExactPosition(_session.Song, marker.Channel, marker.Index, marker.Row));
+                PlayFromProjectCursor();
             }
             else if (_waveOut is null)
             {
@@ -1143,7 +1144,12 @@ public sealed class MainForm : Form
         }
         if (keyData == Keys.F4 && ActiveControl is not NumericUpDown)
         {
-            StopAnyPlayback();
+            // Stopped already: a second stop takes the DAW's project cursor back to where
+            // playback last started, as Cubase does.
+            if (_waveOut is null && _patternPreviewOutput is null && _dawShowing)
+                _dawView.ReturnToPlayStart();
+            else
+                StopAnyPlayback();
             return true;
         }
 
@@ -1179,11 +1185,26 @@ public sealed class MainForm : Form
     /// first having to put the cursor somewhere.</summary>
     private void StartFromBeginning()
     {
+        _dawView.ResetProjectCursor();
         StopTransport();
         _resumeFrom = null;
         _resumeCursor = null;
         _trackerGrid.SetSongPosition(0);
         StartFromCurrentPosition();
+    }
+
+    /// <summary>
+    /// The DAW's F2: plays from the project cursor - where the song last stopped, or wherever it
+    /// was put in the arrange ruler - found by the sequencer like any start, so the other
+    /// channels are where they really are. Playing already, it starts again from there.
+    /// </summary>
+    private void PlayFromProjectCursor()
+    {
+        StopAnyPlayback();
+        _dawView.MarkPlayStart();
+        StartPlaybackFrom(_dawView.PlayFrom is { } at
+            ? SongSequencer.FindPositionInEntry(_session.Song, at.Channel, at.Index, at.TicksInto)
+            : null);
     }
 
     /// <summary>F2: starts (or, mid-song, restarts) from wherever <see cref="ResumePosition"/>
@@ -1504,6 +1525,17 @@ public sealed class MainForm : Form
             }
 
             _dawView.SetPlayRow(at[0], at[1], at[2]);
+
+            // How far along its clip each channel is - the arrange lanes' playheads, and the
+            // project cursor that rides them and stays where the song stops.
+            var lanes = new (int Entry, double Ticks)?[3];
+            for (int ch = 0; ch < 3; ch++)
+            {
+                var channel = position.Channels[ch];
+                lanes[ch] = (channel.PlayingEntry, PlayheadPosition.TicksIntoEntry(channel, position.SpeedCounter, speed, subFrame));
+            }
+
+            _dawView.SetSongPositions(lanes);
         }
 
         // The engine accumulates this itself, frame by frame, so polling at whatever rate this

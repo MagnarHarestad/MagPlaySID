@@ -413,4 +413,55 @@ public class ResumeTests
         sequencer.Frame();
         Assert.Empty(named);            // once
     }
+
+    [Fact]
+    public void Ticks_into_an_entry_count_a_loops_repeats_and_survive_a_resume()
+    {
+        // Channel 1: a four-row pattern played four times by its LE04 - sixteen ticks - then a
+        // two-row one. The arrange view draws clips that wide, and its playheads read this count.
+        var song = new Song { Speed = 1 };
+        song.Instruments.Add(Instr(1));
+        var looped = new Pattern { Number = 1 };
+        looped.Rows.Add(new NoteRow(NoteName.Parse("C-3"), 1));
+        looped.Rows.Add(new HoldRow());
+        looped.Rows.Add(new NoteRow(NoteName.Parse("D-3"), 1));
+        looped.Rows.Add(new HoldRow());
+        looped.Rows.Add(new LoopEndRow(4));
+        var after = new Pattern { Number = 2 };
+        after.Rows.Add(new NoteRow(NoteName.Parse("E-3"), 1));
+        after.Rows.Add(new HoldRow());
+        song.Patterns.Add(looped);
+        song.Patterns.Add(after);
+        foreach (var order in song.ChannelOrders)
+        {
+            order.Tokens.Add(new PatternRefToken(1));
+            order.Tokens.Add(new PatternRefToken(2));
+        }
+
+        var sequencer = new SongSequencer(song, (_, _) => { });
+        var seen = new List<(int Entry, int Ticks)>();
+        for (int frame = 0; frame < 2 * 18; frame++)
+        {
+            if (sequencer.Frame())
+            {
+                var channel = sequencer.Capture().Channels[0];
+                seen.Add((channel.PlayingEntry, channel.TicksIntoEntry));
+            }
+        }
+
+        Assert.Equal(Enumerable.Range(1, 16).Select(t => (0, t)), seen.Take(16));
+        Assert.Equal([(1, 1), (1, 2)], seen.Skip(16).Take(2));
+
+        // Captured mid-loop and resumed, the count carries on from where it was.
+        var probe = new SongSequencer(song, (_, _) => { });
+        for (int frame = 0; frame < 2 * 9; frame++)
+            probe.Frame();
+        var mid = probe.Capture();
+        var resumed = new SongSequencer(song, (_, _) => { }, mid);
+        resumed.Frame();
+        resumed.Frame();
+
+        Assert.Equal(9, mid.Channels[0].TicksIntoEntry);
+        Assert.Equal(10, resumed.Capture().Channels[0].TicksIntoEntry);
+    }
 }

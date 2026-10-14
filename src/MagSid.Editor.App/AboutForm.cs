@@ -220,10 +220,16 @@ public sealed class AboutForm : Form
              "  Right-click        Add, Copy, Delete\n\n");
 
         Heading("Arrange");
-        Mono("  Click ROW ruler    Set where F2 plays from (a small F2 flag); right-click\n" +
-             "                     removes it. F2 then starts on exactly that row, the other\n" +
-             "                     channels wherever the song really has them - also while\n" +
-             "                     the song is playing, which jumps back to the marker\n" +
+        Body("A clip is as wide as the time it plays - an LS/LE loop counted once per pass - so " +
+             "the lanes line up the way the song sounds. While the song plays, each lane has its " +
+             "own red playhead (a shorter lane has looped round its RST by itself), and the " +
+             "project cursor rides along the longest lane.\n\n");
+        Mono("  Click ROW ruler    Put the project cursor (the F2 flag) there; right-click\n" +
+             "                     puts it back at the start\n" +
+             "  F2                 Play from the project cursor, the other channels wherever\n" +
+             "                     the song really has them - also while playing\n" +
+             "  F4                 Stop: the cursor stays where the song stopped, so F2 carries\n" +
+             "                     on from there. F4 again: back to where playback started\n" +
              "  Click a clip       Show it in the piano roll\n" +
              "  Two digits         Set the selected clip's pattern\n" +
              "  Drag a clip's end  Change the pattern's length (later clips follow)\n" +

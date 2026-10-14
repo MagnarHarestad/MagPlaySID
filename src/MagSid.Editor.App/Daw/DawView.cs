@@ -161,8 +161,19 @@ internal sealed class DawView : Panel
 
     public bool IsRecording => _pianoRoll.IsRecording;
 
-    /// <summary>The arrange ruler's play-from marker, as a clip and a row - or null.</summary>
-    public (int Channel, int Index, int Row)? PlayFrom => _arrange.PlayFrom;
+    /// <summary>The project cursor, as a clip and the ticks into it - null to play from the top.</summary>
+    public (int Channel, int Index, int TicksInto)? PlayFrom => _arrange.PlayFrom;
+
+    public void MarkPlayStart() => _arrange.MarkPlayStart();
+
+    public void ReturnToPlayStart() => _arrange.ReturnToPlayStart();
+
+    public void ResetProjectCursor() => _arrange.ResetProjectCursor();
+
+    /// <summary>Where each channel is in its order entry while the song plays - the arrange lanes'
+    /// playheads, and the project cursor riding along.</summary>
+    public void SetSongPositions(IReadOnlyList<(int Entry, double Ticks)?> channels) =>
+        _arrange.SetLanePositions(channels, follow: _autoScroll.Checked);
 
     /// <summary>The instrument page's note-program REC is lit: keys held become its arpeggio.</summary>
     public bool IsRecordingChord => _instrument.IsRecordingChord;
@@ -273,6 +284,7 @@ internal sealed class DawView : Panel
         _instrument.SetEnvelopePlayhead(null);
         _instrument.SetCutoffPlayhead(null);
         _arrange.SetPlayheads(-1, -1, -1);
+        _arrange.ClearLanePlayheads();
         _pianoRoll.SetPlayRow(-1, 0);
         _instrument.SetPlayheads(-1, -1, -1);
     }

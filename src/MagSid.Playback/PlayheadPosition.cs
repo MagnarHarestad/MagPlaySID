@@ -36,4 +36,18 @@ public static class PlayheadPosition
         double fraction = (framesGone + Math.Clamp(subFrame, 0.0, 1.0)) / framesPerRow;
         return (row, Math.Clamp(fraction, 0.0, 1.0));
     }
+
+    /// <summary>How far a channel is into its order entry, in ticks and a fraction of one - its
+    /// place along a clip whose width is the ticks it plays. The arrange view's playheads.</summary>
+    public static double TicksIntoEntry(
+        SongSequencer.ChannelPlaybackState channel, int speedCounter, int speed, double subFrame)
+    {
+        if (channel.TicksIntoEntry <= 0)
+            return 0;
+
+        int framesPerRow = Math.Max(1, speed + 1);
+        int framesGone = Math.Clamp(speed - speedCounter, 0, framesPerRow - 1);
+        double fraction = (framesGone + Math.Clamp(subFrame, 0.0, 1.0)) / framesPerRow;
+        return channel.TicksIntoEntry - 1 + Math.Clamp(fraction, 0.0, 1.0);
+    }
 }

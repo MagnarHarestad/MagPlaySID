@@ -336,6 +336,7 @@ public sealed class SongSequencer
         state.LoopStartRowIndex = Math.Clamp(captured.LoopStartRowIndex, 0, pattern.Rows.Count - 1);
         state.LoopRepeatCounter = captured.LoopRepeatCounter;
         state.Duration = captured.Duration;
+        state.TicksIntoEntry = captured.TicksIntoEntry;
         return true;
     }
 
@@ -478,10 +479,15 @@ public sealed class SongSequencer
         if (state.Duration > 0)
         {
             state.Duration--;
-            return;
+        }
+        else
+        {
+            FetchEvent(ch);
         }
 
-        FetchEvent(ch);
+        // After the fetch, which starts a new entry at 0 when the last one has run out: this
+        // tick is then its first.
+        state.TicksIntoEntry++;
     }
 
     private void FetchEvent(int ch)
@@ -618,6 +624,7 @@ public sealed class SongSequencer
         state.LoopStartRowIndex = 0;
         state.LoopRepeatCounter = 0;
         state.OrderEntrySequence++;
+        state.TicksIntoEntry = 0;
     }
 
     private static int RegisterBase(int ch) => ch * 7;
@@ -633,7 +640,8 @@ public sealed class SongSequencer
         int RowIndex,
         int LoopStartRowIndex,
         int LoopRepeatCounter,
-        int Duration)
+        int Duration,
+        int TicksIntoEntry = 0)
     {
         /// <summary>The order entry being played, or -1 before the first. OrderPos is where the
         /// next pattern will be fetched from, one past this - not the entry itself.</summary>
@@ -657,7 +665,7 @@ public sealed class SongSequencer
             var s = _channels[ch];
             channels[ch] = new ChannelPlaybackState(
                 s.OrderPos, s.CurrentPatternNumber, s.RowIndex,
-                s.LoopStartRowIndex, s.LoopRepeatCounter, s.Duration);
+                s.LoopStartRowIndex, s.LoopRepeatCounter, s.Duration, s.TicksIntoEntry);
         }
 
         return new SequencerPosition(_speedCounter, channels, _frame);
@@ -672,6 +680,10 @@ public sealed class SongSequencer
         public int LoopRepeatCounter;
         public int Duration;
         public int OrderEntrySequence;
+
+        /// <summary>Ticks played of the order entry this channel is in, the current one included -
+        /// how far along its clip it is, loops' repeats counted. 0 before its first tick.</summary>
+        public int TicksIntoEntry;
 
         /// <summary>The wavetable/ADSR/pulse/arpeggio automation and note-trigger sequence for
         /// this channel's voice - shared code with JamEngine, see VoiceEngine's own doc comment.
