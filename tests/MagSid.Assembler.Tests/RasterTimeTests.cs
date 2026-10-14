@@ -91,6 +91,7 @@ public class RasterTimeTests
     [InlineData("SOS.s")]
     [InlineData("MysData2026 - Clarity.s")]
     [InlineData("Outlaws.s")]
+    [InlineData("Fairlighty.s")]
     public void The_emulated_player_writes_what_the_sequencer_writes(string file)
     {
         string path = SongPath(file);

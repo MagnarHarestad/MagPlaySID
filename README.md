@@ -10,10 +10,45 @@ A tracker that edits songs as plain text and exports them as `.sid` files, repro
 exactly — note for note, byte for byte. A song sounds in the editor as it will on the machine, and the
 exported file is the same image the assembly player would have produced.
 
-The player itself is written in c6510 assembly and lives in the Censor SVN tree, not here. It is a
-low-memory-footprint rewrite of a GoatTracker-style player: 462 bytes of code with neither optional
-effect, 604 with both vibrato and slide, and a finished song lands at roughly 700–1100 bytes
-including the player.
+The player is a low-memory-footprint rewrite of a GoatTracker-style player, written in c6510 assembly:
+462 bytes of code with neither optional effect, 574 with vibrato, 533 with slides and 608 with both,
+plus 10 bytes when an instrument uses soft hard restart. Code for an effect is only assembled when a
+song uses it. A finished song lands at roughly 750–1250 bytes including the player.
+
+## Using the editor
+
+### Requirements
+
+- Windows 10 or 11, 64-bit
+- The [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) for x64 — Windows
+  offers to fetch it the first time the editor starts if it is missing
+
+Nothing else: no assembler, no emulator. Export to `.sid` and playing a `.sid` back are built in.
+
+### Installing
+
+`MagSID-Editor.exe` is the whole program — put it in any folder and run it. There is no installer.
+
+The exe is not code-signed, so Windows SmartScreen may say it comes from an unknown publisher. Choose
+**More info → Run anyway**.
+
+Settings — MIDI device, knob bindings, view preferences — are kept in
+`%APPDATA%\MagSid.Editor\settings.json`.
+
+### Getting started
+
+- Songs are plain-text `.s` files. Open one from `SongData` with **Menu → Open** (F10).
+- There are two views of the same song: **Retro**, a classic tracker grid, and **DAW**, an
+  arrangement with a piano roll and an instrument page. The menu bar switches between them.
+- F1 plays from the top, F2 from the cursor (in the DAW, from the project cursor), F4 stops. Space
+  or F5 switches between Edit and Jam mode — **Menu → Swap Spacebar Behavior** gives Space the
+  transport instead.
+- A MIDI keyboard is chosen under **MIDI**. The computer keyboard plays notes too, the classic
+  tracker way: `ZSXDCVGBHNJM` is one octave and `Q2W3ER5T6Y7U` the next.
+- **Menu → Export to .sid** (F9) writes a PSID file. **Menu → Load and Play .sid** plays one, and
+  exports it as WAV, MP3 or FLAC.
+
+**Menu → About** lists every key and control, view by view.
 
 ## Layout
 
@@ -22,11 +57,11 @@ MagSid.sln
 src/
   MagSid.Core/            the song model, file format, sizing, undo, optimiser
   MagSid.Sid/             a reSID port - the chip itself
-  MagSid.Playback/        voices, sequencer, jam mode, filter
+  MagSid.Playback/        voices, sequencer, jam mode, filter, the .sid player
   MagSid.Assembler/       the .sid export: a 6502 emitter and the player expressed against it
-  MagSid.Editor.App/      the WinForms tracker
+  MagSid.Editor.App/      the WinForms editor
 tests/
-SongData/                 the songs, as plain text plus their exported .sid
+SongData/                 the songs, as plain text
 Digi/                     a sample for the Digi-to-SID-osc feature
 ```
 
@@ -51,9 +86,11 @@ carries a 6502 interpreter and a PSID loader, so the editor plays a `.sid` by *e
 proves those bytes make the right music. Neither alone would.
 
 `SongImageTests` compares the **complete image** — player and song data — against what c6510
-produced, for every song and for BellaCiao at `$2000` and `$4400`. Two fixture songs come with it
-because the real songs reach only two of the four feature combinations: five are bare, BellaCiao has
-vibrato, and nothing in `SongData` uses SLIDE at all.
+produced, for seven songs and for BellaCiao at `$2000` and `$4400`. Two fixture songs come with it
+because those seven reach only two of the four feature combinations: six are bare and BellaCiao has
+vibrato. Songs written since — Clarity, Outlaws and Fairlighty, which use vibrato, slides and soft
+hard restart — are checked by running their image on the 6502 against `SongSequencer`, frame by
+frame.
 
 Comparing whole images and not just their lengths is the point. Reversing the note dictionary's build
 order — arpeggios before pattern rows — yields an image of exactly the right length with every note
@@ -72,7 +109,8 @@ dotnet build MagSid.sln
 dotnet test MagSid.sln
 ```
 
-To hand the editor to someone, one file is enough; they need the .NET 8 runtime and nothing more:
+To hand the editor to someone, one file is enough; they need the .NET 8 Desktop Runtime and nothing
+more:
 
 ```
 dotnet publish src/MagSid.Editor.App/MagSid.Editor.App.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
@@ -80,6 +118,9 @@ dotnet publish src/MagSid.Editor.App/MagSid.Editor.App.csproj -c Release -r win-
 
 ## Optional
 
-**The player sources**, if you want to assemble the C64 side or regenerate a golden. They are in the
-Censor SVN tree under `MAGSIDv7_LowMemory`, together with the c6510 assembler, its include library,
-and the Python tools that measure byte cost and trace a player's register writes.
+**The player sources**, if you want to assemble the C64 side or regenerate a golden. The c6510 source
+is in the Censor SVN tree under `MAGSIDv7_LowMemory` as it stood at commit `6221867`, together with
+the c6510 assembler, its include library, and the Python tools that measure byte cost and trace a
+player's register writes. Every change made to the player since — pattern slides, soft hard restart,
+and a note off that lets the release run on — is in `tests/MagSid.Assembler.Tests/Goldens/player.patch`,
+against that version.
