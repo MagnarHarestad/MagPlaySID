@@ -39,6 +39,7 @@ internal sealed class DawView : Panel
         Font = new Font("Consolas", 9f),
     };
     private readonly ToggleButton _autoScroll = new("AUTOSCROLL") { Checked = true, Accent = DawPalette.Oscillator };
+    private readonly ToggleButton _cycle = new("CYCLE") { Accent = DawPalette.Oscillator };
     private readonly DawInstrumentView _instrument = new();
     private readonly Panel _placeholder = new();
     private readonly FlowLayoutPanel _tabs = new();
@@ -165,6 +166,28 @@ internal sealed class DawView : Panel
     public (int Channel, int Index, int TicksInto)? PlayFrom => _arrange.PlayFrom;
 
     public void MarkPlayStart() => _arrange.MarkPlayStart();
+
+    /// <summary>Cycle switched, or the locators moved - playback has to take the new range.</summary>
+    public event Action? CycleChanged;
+
+    public bool CycleOn
+    {
+        get => _cycle.Checked;
+        set => _cycle.Checked = value;
+    }
+
+    /// <summary>The locators as places in the song - each a clip and the ticks into it, null for
+    /// the very start - or null when there are none, or the range runs past every lane.</summary>
+    public ((int Channel, int Index, int TicksInto)? Left, (int Channel, int Index, int TicksInto) Right)? LocatorRange
+    {
+        get
+        {
+            if (_arrange.Locators is not { } range || _arrange.LocationAt(range.Right) is not { } right)
+                return null;
+
+            return (_arrange.LocationAt(range.Left), right);
+        }
+    }
 
     public void ReturnToPlayStart() => _arrange.ReturnToPlayStart();
 
@@ -394,6 +417,18 @@ internal sealed class DawView : Panel
         _autoScroll.Margin = new Padding(24, 0, 0, 0);
         _autoScroll.CheckedChanged += on => _pianoRoll.AutoScroll = on;
         _tabs.Controls.Add(_autoScroll);
+
+        // Cycle loops the locators' range - set by dragging in the arrange ruler.
+        _cycle.Size = new Size(64, 26);
+        _cycle.BackColor = DawPalette.PanelHeader;
+        _cycle.Margin = new Padding(6, 0, 0, 0);
+        _cycle.CheckedChanged += on =>
+        {
+            _arrange.CycleOn = on;
+            CycleChanged?.Invoke();
+        };
+        _arrange.LocatorsChanged += () => CycleChanged?.Invoke();
+        _tabs.Controls.Add(_cycle);
 
         // The octave the typing keys play in, where it can be seen. A keyboard that plays two
         // octaves off and says nothing about it reads as a tuning fault.
@@ -676,6 +711,7 @@ internal sealed class DawView : Panel
 
         // Autoscroll steers the lanes and the roll, which only the arrangement shows.
         _autoScroll.Visible = tab == DawTab.Arrange;
+        _cycle.Visible = tab == DawTab.Arrange;
 
         foreach (var button in _tabButtons)
             button.Active = (DawTab)button.Tag! == tab;

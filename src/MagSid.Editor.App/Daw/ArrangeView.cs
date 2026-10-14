@@ -68,6 +68,32 @@ internal sealed class ArrangeView : Control
     /// <summary>Where the cursor was when playback last started - a second stop goes back there.</summary>
     private double _playStart;
 
+    /// <summary>The left and right locators, in ticks along the lanes - the range Cycle loops and
+    /// a recording punches into. Set by dragging in the ruler; null until then.</summary>
+    private (double Left, double Right)? _locators;
+
+    /// <summary>A press in the ruler, until it is known whether it is a click or a drag.</summary>
+    private int _rulerPressX = -1;
+    private bool _rulerDragging;
+
+    /// <summary>Cycle is on: the locators' range is shaded down the lanes too.</summary>
+    public bool CycleOn
+    {
+        get => _cycleOn;
+        set
+        {
+            _cycleOn = value;
+            Invalidate();
+        }
+    }
+
+    private bool _cycleOn;
+
+    public (double Left, double Right)? Locators => _locators;
+
+    /// <summary>The locators moved.</summary>
+    public event Action? LocatorsChanged;
+
     /// <summary>Each lane's playhead, in ticks along it - NaN while nothing plays. Per lane, since
     /// a channel with a shorter order has wrapped round its RST while the others play on.</summary>
     private readonly double[] _lanePlayhead = [double.NaN, double.NaN, double.NaN];
@@ -291,32 +317,33 @@ internal sealed class ArrangeView : Control
     /// there, otherwise the first that does. Null at the very start, or past every lane's end -
     /// either way, play from the top.
     /// </summary>
-    public (int Channel, int Index, int TicksInto)? PlayFrom
+    public (int Channel, int Index, int TicksInto)? PlayFrom => LocationAt(_cursor);
+
+    /// <summary>A place on the lanes, in ticks, as a clip and the ticks into it - see
+    /// <see cref="PlayFrom"/>. Null at the very start, or past every lane's end.</summary>
+    public (int Channel, int Index, int TicksInto)? LocationAt(double place)
     {
-        get
-        {
-            if (_song is not { } song)
-                return null;
-
-            int ticks = (int)Math.Floor(_cursor);
-            foreach (int channel in new[] { _selectedChannel, 0, 1, 2 })
-            {
-                var order = song.ChannelOrders[channel];
-                int start = 0;
-                for (int i = 0; i < order.Tokens.Count; i++)
-                {
-                    if (order.Tokens[i] is not PatternRefToken token)
-                        continue;
-
-                    int length = RowsOf(token.PatternNumber);
-                    if (ticks >= start && ticks < start + length)
-                        return i == 0 && ticks == 0 ? null : (channel, i, ticks - start);
-                    start += length;
-                }
-            }
-
+        if (_song is not { } song)
             return null;
+
+        int ticks = (int)Math.Floor(place);
+        foreach (int channel in new[] { _selectedChannel, 0, 1, 2 })
+        {
+            var order = song.ChannelOrders[channel];
+            int start = 0;
+            for (int i = 0; i < order.Tokens.Count; i++)
+            {
+                if (order.Tokens[i] is not PatternRefToken token)
+                    continue;
+
+                int length = RowsOf(token.PatternNumber);
+                if (ticks >= start && ticks < start + length)
+                    return i == 0 && ticks == 0 ? null : (channel, i, ticks - start);
+                start += length;
+            }
         }
+
+        return null;
     }
 
     /// <summary>The project cursor, in ticks along the lanes.</summary>
@@ -640,8 +667,24 @@ internal sealed class ArrangeView : Control
         Invalidate();
     }
 
+    private double TicksAtX(int x) => Math.Max(0, (x - GutterWidth + _scroll.Value) / PixelsPerRow);
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        if (_rulerPressX >= 0)
+        {
+            if (_rulerDragging || Math.Abs(e.X - _rulerPressX) > 3)
+            {
+                _rulerDragging = true;
+                double a = TicksAtX(_rulerPressX), b = TicksAtX(e.X);
+                _locators = (Math.Min(a, b), Math.Max(a, b) + 1);
+                Invalidate();
+            }
+
+            base.OnMouseMove(e);
+            return;
+        }
+
         if (_resizing is not null)
         {
             DragClipEnd(e.X);
@@ -684,15 +727,23 @@ internal sealed class ArrangeView : Control
             return;
         }
 
-        // The ruler: the project cursor goes where it is clicked, or back to the start on a
-        // right-click. Placed by hand, it is also where a second stop returns to.
+        // The ruler: a click puts the project cursor there - and makes it where a second stop
+        // returns to - a drag sets the locators, and a right-click sends the cursor to the start.
         if (e.Y < RulerHeight && e.X >= GutterWidth)
         {
-            _cursor = e.Button == MouseButtons.Right
-                ? 0
-                : Math.Max(0, (e.X - GutterWidth + _scroll.Value) / PixelsPerRow);
-            _playStart = _cursor;
-            Invalidate();
+            if (e.Button == MouseButtons.Right)
+            {
+                _cursor = 0;
+                _playStart = 0;
+                Invalidate();
+            }
+            else if (e.Button == MouseButtons.Left)
+            {
+                _rulerPressX = e.X;
+                _rulerDragging = false;
+                Capture = true;
+            }
+
             base.OnMouseDown(e);
             return;
         }
@@ -1059,6 +1110,26 @@ internal sealed class ArrangeView : Control
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        if (_rulerPressX >= 0)
+        {
+            if (_rulerDragging)
+            {
+                LocatorsChanged?.Invoke();
+            }
+            else
+            {
+                _cursor = TicksAtX(_rulerPressX);
+                _playStart = _cursor;
+            }
+
+            _rulerPressX = -1;
+            _rulerDragging = false;
+            Capture = false;
+            Invalidate();
+            base.OnMouseUp(e);
+            return;
+        }
+
         // One edit for the drag rather than one per pixel - the song is marked dirty and every
         // view rebuilt on each of them.
         if (_resizing is not null)
@@ -1132,9 +1203,41 @@ internal sealed class ArrangeView : Control
         for (int channel = 0; channel < Song.ChannelCount; channel++)
             DrawLane(g, song, channel);
 
+        DrawLocators(g);
         DrawPlayFrom(g);
         DrawLanePlayheads(g);
 
+    }
+
+    /// <summary>The locators: a band along the bottom of the ruler with L and R at its ends, and,
+    /// with Cycle on, the range shaded faintly down the lanes.</summary>
+    private void DrawLocators(Graphics g)
+    {
+        if (_locators is not { } range)
+            return;
+
+        int x0 = GutterWidth + (int)(range.Left * PixelsPerRow) - _scroll.Value;
+        int x1 = GutterWidth + (int)(range.Right * PixelsPerRow) - _scroll.Value;
+        int left = Math.Max(GutterWidth, x0), right = Math.Min(Width, x1);
+        if (right <= left)
+            return;
+
+        var accent = DawPalette.Oscillator;
+        if (_cycleOn)
+        {
+            using var shade = new SolidBrush(DawPalette.WithAlpha(accent, 16));
+            g.FillRectangle(shade, left, RulerHeight, right - left, Height - ScrollHeight - RulerHeight);
+        }
+
+        using (var band = new SolidBrush(DawPalette.WithAlpha(accent, _cycleOn ? 110 : 55)))
+            g.FillRectangle(band, left, RulerHeight - 6, right - left, 5);
+
+        using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+        using var ink = new SolidBrush(DawPalette.WithAlpha(accent, 220));
+        if (x0 >= GutterWidth)
+            g.DrawString("L", font, ink, x0 - 1, RulerHeight - 17);
+        if (x1 <= Width)
+            g.DrawString("R", font, ink, x1 - 8, RulerHeight - 17);
     }
 
     /// <summary>Each lane's playhead: the red of the piano roll's, across that lane only.</summary>

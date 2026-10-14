@@ -574,6 +574,7 @@ public sealed class MainForm : Form
         // own release is - see RollPreviewRelease.
         _dawView.NotePreviewRequested += (note, instrument) => PreviewNote(note, instrument, RollPreviewRelease);
         _dawView.NotePreviewReleased += ReleaseJamNote;
+        _dawView.CycleChanged += () => ApplyCycle(_playbackEngine);
         _dawView.RecordToggled += on =>
         {
             if (on)
@@ -1078,6 +1079,14 @@ public sealed class MainForm : Form
             return;
         }
 
+        // Numpad /, Cubase's Cycle key.
+        if (e.KeyCode == Keys.Divide)
+        {
+            _dawView.CycleOn = !_dawView.CycleOn;
+            e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
         if (e.KeyCode == PianoKeyMap.OctaveKey)
         {
             _dawView.StepOctave(e.Shift);
@@ -1194,6 +1203,35 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
+    /// Cycle, when it is on in the DAW and the locators are set: the engine goes on from L each
+    /// time the song reaches R. Both are found by the sequencer, so every channel is where the
+    /// song really has it at each end. Cleared otherwise.
+    /// </summary>
+    private void ApplyCycle(SongPlaybackEngine? engine)
+    {
+        if (engine is null)
+            return;
+
+        if (!_dawView.CycleOn || _dawView.LocatorRange is not { } range)
+        {
+            engine.ClearCycle();
+            return;
+        }
+
+        var start = range.Left is { } left
+            ? SongSequencer.FindPositionInEntry(_session.Song, left.Channel, left.Index, left.TicksInto)
+            : null;
+        var end = SongSequencer.FindPositionInEntry(_session.Song, range.Right.Channel, range.Right.Index, range.Right.TicksInto);
+        if (end is null)
+        {
+            engine.ClearCycle();
+            return;
+        }
+
+        engine.SetCycle(start, end.Frame);
+    }
+
+    /// <summary>
     /// The DAW's F2: plays from the project cursor - where the song last stopped, or wherever it
     /// was put in the arrange ruler - found by the sequencer like any start, so the other
     /// channels are where they really are. Playing already, it starts again from there.
@@ -1257,6 +1295,7 @@ public sealed class MainForm : Form
             _jamEngine = null;
 
             var engine = new SongPlaybackEngine(_session.Song, _chipModel, resume);
+            ApplyCycle(engine);
             StartLiveRaster(resume?.Frame ?? 0);
             ApplyChannelMutes(engine);
             // The device that stopped, not whichever is playing by the time the posted call runs:

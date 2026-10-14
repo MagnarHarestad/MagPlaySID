@@ -417,6 +417,10 @@ public sealed class SongSequencer
         }
     }
 
+    /// <summary>Frames played since the top of the song - a resumed sequencer counts on from the
+    /// position it was given.</summary>
+    public int FramesPlayed => _frame;
+
     public bool Frame()
     {
         _frame++;

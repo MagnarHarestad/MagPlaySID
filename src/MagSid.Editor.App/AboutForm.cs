@@ -226,6 +226,9 @@ public sealed class AboutForm : Form
              "project cursor rides along the longest lane.\n\n");
         Mono("  Click ROW ruler    Put the project cursor (the F2 flag) there; right-click\n" +
              "                     puts it back at the start\n" +
+             "  Drag in the ruler  Set the left and right locators (L ... R)\n" +
+             "  CYCLE / Numpad /   Loop the L ... R range while playing - every channel where\n" +
+             "                     the song really has it, with no gap at the jump\n" +
              "  F2                 Play from the project cursor, the other channels wherever\n" +
              "                     the song really has them - also while playing\n" +
              "  F4                 Stop: the cursor stays where the song stopped, so F2 carries\n" +

@@ -24,7 +24,25 @@ public sealed class SongPlaybackEngine : IWaveProvider
     public const int SampleRate = 44100;
 
     private readonly SidChip _sid = new();
-    private readonly SongSequencer _sequencer;
+    private SongSequencer _sequencer;
+    private readonly Song _song;
+
+    /// <summary>A Cycle range: when the song reaches <c>EndFrame</c> it goes on from <c>Start</c>
+    /// (null: the top) instead - a fresh sequencer at that position, the sound card untouched, so
+    /// the loop has no gap. Swapped whole, so the audio thread never sees half of one.</summary>
+    private sealed record CycleRange(SongSequencer.SequencerPosition? Start, int EndFrame);
+
+    private volatile CycleRange? _cycle;
+
+    /// <summary>
+    /// Loops playback between two places: on reaching <paramref name="endFrame"/> (frames from the
+    /// top), it carries on from <paramref name="start"/>. Null clears it. Safe while playing: the
+    /// audio thread picks it up at its next frame. Started past the end, it never comes round.
+    /// </summary>
+    public void SetCycle(SongSequencer.SequencerPosition? start, int endFrame) =>
+        _cycle = new CycleRange(start, endFrame);
+
+    public void ClearCycle() => _cycle = null;
     private readonly double _cyclesPerFrame = ClockFrequency / FrameRate;
 
     // SongSequencer.RowTriggered fires from Frame(), which this class's Read() calls on
@@ -267,9 +285,8 @@ public sealed class SongPlaybackEngine : IWaveProvider
     {
         _sid.SetChipModel(chipModel);
         _sid.SetSamplingParameters(ClockFrequency, SamplingMethod.Interpolate, SampleRate);
-        _sequencer = new SongSequencer(song, _sid.Write, resumeFrom);
-        _sequencer.RowTriggered += (channel, patternNumber, rowIndex, orderEntrySequence, row) =>
-            _rowEvents.Enqueue((channel, patternNumber, rowIndex, orderEntrySequence, row, _samplesProduced));
+        _song = song;
+        _sequencer = CreateSequencer(resumeFrom);
 
         // After the sequencer's constructor, since that is what writes the volume register the
         // transient comes from. It only advances the chip's own history - the frame counters
@@ -284,6 +301,14 @@ public sealed class SongPlaybackEngine : IWaveProvider
         // long-held one survives it without anyone noticing. Starting here at 0 makes Frame()
         // fire immediately, before Read() has produced a single sample.
         _nextFrameBoundaryCycles = 0;
+    }
+
+    private SongSequencer CreateSequencer(SongSequencer.SequencerPosition? from)
+    {
+        var sequencer = new SongSequencer(_song, _sid.Write, from);
+        sequencer.RowTriggered += (channel, patternNumber, rowIndex, orderEntrySequence, row) =>
+            _rowEvents.Enqueue((channel, patternNumber, rowIndex, orderEntrySequence, row, _samplesProduced));
+        return sequencer;
     }
 
     /// <summary>Mutes or unmutes one of the three SID voices in this engine's own output - an
@@ -374,6 +399,13 @@ public sealed class SongPlaybackEngine : IWaveProvider
             double cyclesToNextFrame = _nextFrameBoundaryCycles - _totalCyclesClocked;
             if (cyclesToNextFrame < 1.0)
             {
+                // The end of a Cycle range: on from its start, as if the song had been there.
+                if (_cycle is { } cycle && _sequencer.FramesPlayed == cycle.EndFrame
+                    && cycle.EndFrame > (cycle.Start?.Frame ?? 0))
+                {
+                    _sequencer = CreateSequencer(cycle.Start);
+                }
+
                 _sequencer.Frame();
                 RecordPlayhead();
                 _nextFrameBoundaryCycles += _cyclesPerFrame;
