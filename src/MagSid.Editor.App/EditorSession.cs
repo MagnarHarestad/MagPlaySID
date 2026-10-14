@@ -155,6 +155,19 @@ public sealed class EditorSession
         return copy;
     }
 
+    /// <summary>Adds an instrument read from a file at the next free number, or returns null when
+    /// the song already has all <see cref="SongValidator.MaxInstrumentNumber"/>.</summary>
+    public Instrument? ImportInstrument(Instrument loaded)
+    {
+        if (NextInstrumentNumber() is not { } next)
+            return null;
+
+        loaded.Number = next;
+        Song.Instruments.Add(loaded);
+        RaiseStructureChanged();
+        return loaded;
+    }
+
     /// <summary>The number a freshly added or copied instrument gets, or null when the song
     /// already holds all <see cref="SongValidator.MaxInstrumentNumber"/> a pattern can select.
     /// Shared by <see cref="AddInstrument"/> and <see cref="CopyInstrument"/> so the two can

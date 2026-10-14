@@ -91,57 +91,67 @@ public static class SongValidator
     private static void ValidateInstrumentPrograms(Song song, List<ValidationIssue> issues)
     {
         foreach (var instrument in song.Instruments)
+            ValidateProgram(instrument, $"Instrument {instrument.Number:D2}", issues);
+    }
+
+    /// <summary>The same program checks a song gets, for one instrument on its own - an instrument
+    /// file is checked with these before it is let into a song.</summary>
+    public static IReadOnlyList<ValidationIssue> ValidateInstrument(Instrument instrument, string who)
+    {
+        var issues = new List<ValidationIssue>();
+        ValidateProgram(instrument, who, issues);
+        return issues;
+    }
+
+    private static void ValidateProgram(Instrument instrument, string who, List<ValidationIssue> issues)
+    {
+        if (instrument.Wavetable.Contains((byte)0))
         {
-            string who = $"Instrument {instrument.Number:D2}";
+            issues.Add(new ValidationIssue(
+                $"{who}: a WAVE step of $00 ends a program, so it cannot also be a step."));
+        }
 
-            if (instrument.Wavetable.Contains((byte)0))
+        if (instrument.ArpeggioLoopPoint < 0 ||
+            instrument.ArpeggioLoopPoint >= Math.Max(1, instrument.Arpeggio.Count))
+        {
+            issues.Add(new ValidationIssue(
+                $"{who}: ARP LOOP must have at least one note after it."));
+        }
+
+        if (instrument.ArpeggioEnding == ArpeggioEnding.Hold && instrument.Arpeggio.Count == 0)
+        {
+            issues.Add(new ValidationIssue(
+                $"{who}: ARP HOLD stays on the last step, so it needs at least one."));
+        }
+
+        foreach (var step in instrument.Filter)
+        {
+            if (step.SweepRate is < -128 or > 127)
             {
                 issues.Add(new ValidationIssue(
-                    $"{who}: a WAVE step of $00 ends a program, so it cannot also be a step."));
+                    $"{who}: FLT sweep rate must fit a signed byte, -128..127, got {step.SweepRate}."));
+                break;
             }
 
-            if (instrument.ArpeggioLoopPoint < 0 ||
-                instrument.ArpeggioLoopPoint >= Math.Max(1, instrument.Arpeggio.Count))
+            if (step.Cutoff is < FilterStep.MinCutoff or > FilterStep.MaxCutoff)
             {
                 issues.Add(new ValidationIssue(
-                    $"{who}: ARP LOOP must have at least one note after it."));
+                    $"{who}: FLT cutoff must be ${FilterStep.MinCutoff:x2}..${FilterStep.MaxCutoff:x2} " +
+                    $"($00 ends a program and $ff marks a setup step), got ${step.Cutoff:x2}."));
+                break;
             }
+        }
 
-            if (instrument.ArpeggioEnding == ArpeggioEnding.Hold && instrument.Arpeggio.Count == 0)
-            {
-                issues.Add(new ValidationIssue(
-                    $"{who}: ARP HOLD stays on the last step, so it needs at least one."));
-            }
+        if (instrument.PulseWidth is < 0 or > 15)
+        {
+            issues.Add(new ValidationIssue(
+                $"{who}: PW width is in 1/16ths, so 0..15, got {instrument.PulseWidth}."));
+        }
 
-            foreach (var step in instrument.Filter)
-            {
-                if (step.SweepRate is < -128 or > 127)
-                {
-                    issues.Add(new ValidationIssue(
-                        $"{who}: FLT sweep rate must fit a signed byte, -128..127, got {step.SweepRate}."));
-                    break;
-                }
-
-                if (step.Cutoff is < FilterStep.MinCutoff or > FilterStep.MaxCutoff)
-                {
-                    issues.Add(new ValidationIssue(
-                        $"{who}: FLT cutoff must be ${FilterStep.MinCutoff:x2}..${FilterStep.MaxCutoff:x2} " +
-                        $"($00 ends a program and $ff marks a setup step), got ${step.Cutoff:x2}."));
-                    break;
-                }
-            }
-
-            if (instrument.PulseWidth is < 0 or > 15)
-            {
-                issues.Add(new ValidationIssue(
-                    $"{who}: PW width is in 1/16ths, so 0..15, got {instrument.PulseWidth}."));
-            }
-
-            if (instrument.PulseSweep is < -128 or > 127)
-            {
-                issues.Add(new ValidationIssue(
-                    $"{who}: PW delta must fit a signed byte, -128..127, got {instrument.PulseSweep}."));
-            }
+        if (instrument.PulseSweep is < -128 or > 127)
+        {
+            issues.Add(new ValidationIssue(
+                $"{who}: PW delta must fit a signed byte, -128..127, got {instrument.PulseSweep}."));
         }
     }
 

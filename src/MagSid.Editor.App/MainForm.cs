@@ -245,6 +245,8 @@ public sealed class MainForm : Form
         var openItem = new ToolStripMenuItem("&Open...", null, (_, _) => DoOpen());
         var saveItem = new ToolStripMenuItem("&Save", null, (_, _) => DoSave());
         var saveAsItem = new ToolStripMenuItem("Save &As...", null, (_, _) => DoSaveAs());
+        var loadInstrumentItem = new ToolStripMenuItem("Load &Instrument...", null, (_, _) => DoLoadInstrument());
+        var saveInstrumentItem = new ToolStripMenuItem("Save Ins&trument...", null, (_, _) => DoSaveInstrument());
         var exportSidItem = new ToolStripMenuItem("&Export to .sid...", null, (_, _) => DoExportSid());
         var loadAndPlaySidItem = new ToolStripMenuItem("&Load and Play .sid...", null, (_, _) => DoLoadAndPlaySid());
 
@@ -299,7 +301,7 @@ public sealed class MainForm : Form
         exportSidItem.ShortcutKeys = Keys.F9;
 
         file.DropDownItems.AddRange([aboutItem, new ToolStripSeparator(), _undoItem, _redoItem,
-            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
+            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), loadInstrumentItem, saveInstrumentItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
         menu.Items.Add(file);
 
         var signalPathItem = new ToolStripMenuItem("&Signal Path", null, (_, _) => DoSignalPath());
@@ -2126,6 +2128,107 @@ public sealed class MainForm : Form
         catch (SidPlaybackException ex)
         {
             MessageBox.Show(this, ex.Message, "Cannot play this .sid", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private const string InstrumentFilter = "MagSID instruments (*.json)|*.json|All files (*.*)|*.*";
+
+    /// <summary>The instrument selected in whichever view is on screen.</summary>
+    private Instrument? CurrentInstrument()
+    {
+        int? number = _dawShowing
+            ? _dawView.SelectedInstrumentNumber ?? _instrumentList.SelectedInstrument?.Number
+            : _instrumentList.SelectedInstrument?.Number;
+        return _session.Song.Instruments.FirstOrDefault(i => i.Number == number);
+    }
+
+    private void DoSaveInstrument()
+    {
+        if (CurrentInstrument() is not { } instrument)
+        {
+            MessageBox.Show(this, "Select an instrument to save first.", "Save instrument",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        string name = instrument.Name.Length > 0 ? instrument.Name : $"Instrument {instrument.Number:D2}";
+        using var dialog = new SaveFileDialog
+        {
+            Filter = InstrumentFilter,
+            Title = "Save instrument",
+            FileName = string.Concat(name.Split(Path.GetInvalidFileNameChars())) + ".json",
+        };
+        if (EditorSettings.InstrumentDirectory is { Length: > 0 } remembered)
+            dialog.InitialDirectory = remembered;
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, InstrumentFile.Write(instrument));
+            EditorSettings.InstrumentDirectory = Path.GetDirectoryName(dialog.FileName) ?? "";
+            ShowNotice($"Saved {name} to {Path.GetFileName(dialog.FileName)}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, ex.Message, "Cannot save instrument", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>Adds each chosen file as a new instrument after the song's own. Several can be
+    /// picked at once; one that cannot be read is reported and the rest still load.</summary>
+    private void DoLoadInstrument()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Filter = InstrumentFilter,
+            Title = "Load instrument",
+            Multiselect = true,
+        };
+        if (EditorSettings.InstrumentDirectory is { Length: > 0 } remembered)
+            dialog.InitialDirectory = remembered;
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        EditorSettings.InstrumentDirectory = Path.GetDirectoryName(dialog.FileNames[0]) ?? "";
+
+        var problems = new List<string>();
+        Instrument? last = null;
+        foreach (string path in dialog.FileNames)
+        {
+            string file = Path.GetFileName(path);
+            Instrument loaded;
+            try
+            {
+                loaded = InstrumentFile.Read(File.ReadAllText(path));
+            }
+            catch (Exception ex) when (ex is InstrumentFileException or IOException or UnauthorizedAccessException)
+            {
+                problems.Add($"{file}: {ex.Message}");
+                continue;
+            }
+
+            if (_session.ImportInstrument(loaded) is null)
+            {
+                problems.Add($"{file}: the song already has all {SongValidator.MaxInstrumentNumber} instruments.");
+                break;
+            }
+            last = loaded;
+        }
+
+        if (last is not null)
+        {
+            _instrumentList.SelectInstrumentNumber(last.Number);
+            if (_dawShowing)
+                _dawView.SelectInstrument(last.Number);
+        }
+
+        if (problems.Count > 0)
+        {
+            MessageBox.Show(this, string.Join(Environment.NewLine + Environment.NewLine, problems),
+                "Some instruments were not loaded", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 

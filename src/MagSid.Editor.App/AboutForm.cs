@@ -127,9 +127,9 @@ public sealed class AboutForm : Form
              "the first figure is live: the dearest of the frames just heard.\n\n");
 
         Heading("The menu bar");
-        Mono("  Menu              About, New, Open, Save, Save As, Export to .sid,\n" +
-             "                    Load and Play .sid, Show High Hex-Values,\n" +
-             "                    Swap Spacebar Behavior, Exit\n" +
+        Mono("  Menu              About, New, Open, Save, Save As, Load Instrument,\n" +
+             "                    Save Instrument, Export to .sid, Load and Play .sid,\n" +
+             "                    Show High Hex-Values, Swap Spacebar Behavior, Exit\n" +
              "  Signal Path       Frame-by-frame trace of one instrument\n" +
              "  Digi to SID-osc   Turn a .wav into ring-modulated instruments\n" +
              "  Optimize          Shrink the song without changing how it sounds\n" +
@@ -187,7 +187,9 @@ public sealed class AboutForm : Form
 
         Heading("Retro instruments");
         Body("The list shows all 16 slots. Right-click for Add, Copy or Delete; edit the Name column to " +
-             "rename. The editor below edits the selected instrument directly.\n\n");
+             "rename. The editor below edits the selected instrument directly.\n\n" +
+             "Menu → Save Instrument writes the selected instrument to a .json file, and Load " +
+             "Instrument adds one or more such files as new instruments - in either view.\n\n");
         Mono("  A/D, S/R           Envelope, one hex byte each\n" +
              "  Pulse, Sweep       Pulse width and its change per frame\n" +
              "  Cont.              Keep the pulse sweep running across notes\n" +

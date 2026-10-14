@@ -24,6 +24,7 @@ public static class EditorSettings
     private static int _sidLoadAddress = MagSid.Core.SidLoadAddress.Default;
     private static string _sidOpenDirectory = string.Empty;
     private static string _audioExportDirectory = string.Empty;
+    private static string _instrumentDirectory = string.Empty;
     private static string _midiDevice = string.Empty;
     private static string _midiKnobBindings = string.Empty;
     private static bool _loaded;
@@ -149,6 +150,13 @@ public static class EditorSettings
         set => SetDirectory(ref _audioExportDirectory, value);
     }
 
+    /// <summary>Where an instrument file was last loaded or saved.</summary>
+    public static string InstrumentDirectory
+    {
+        get => ExistingDirectory(ref _instrumentDirectory);
+        set => SetDirectory(ref _instrumentDirectory, value);
+    }
+
     /// <summary>The MIDI input last used, by name rather than index - a device's number moves when
     /// another is plugged in, and reopening by number would quietly attach to the wrong one.</summary>
     public static string MidiDevice
@@ -219,6 +227,7 @@ public static class EditorSettings
 
                 _sidOpenDirectory = stored.SidOpenDirectory ?? string.Empty;
                 _audioExportDirectory = stored.AudioExportDirectory ?? string.Empty;
+                _instrumentDirectory = stored.InstrumentDirectory ?? string.Empty;
                 _midiDevice = stored.MidiDevice ?? string.Empty;
                 _midiKnobBindings = stored.MidiKnobBindings ?? string.Empty;
             }
@@ -243,6 +252,7 @@ public static class EditorSettings
                 SidLoadAddress = _sidLoadAddress,
                 SidOpenDirectory = _sidOpenDirectory,
                 AudioExportDirectory = _audioExportDirectory,
+                InstrumentDirectory = _instrumentDirectory,
                 MidiDevice = _midiDevice,
                 MidiKnobBindings = _midiKnobBindings,
             }));
@@ -262,6 +272,7 @@ public static class EditorSettings
         public int? SidLoadAddress { get; set; }
         public string? SidOpenDirectory { get; set; }
         public string? AudioExportDirectory { get; set; }
+        public string? InstrumentDirectory { get; set; }
         public string? MidiDevice { get; set; }
         public string? MidiKnobBindings { get; set; }
     }
