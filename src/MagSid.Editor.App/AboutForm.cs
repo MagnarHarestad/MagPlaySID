@@ -397,8 +397,12 @@ public sealed class AboutForm : Form
              "  Export audio   Save as WAV, MP3 or FLAC; the length field sets how long\n\n");
 
         Heading("Credits");
-        Body("The MAGSIDv7 player was written by Magnar Harestad, with help from " +
-             "Robert Lundquist (Krikkit) and Fredrik Ternell (Swallow) of Censor Design.\n");
+        Body("MagSID and its MAGSIDv7 player were written by Magnar Harestad. Thanks to " +
+             "Robert Lundquist (Krikkit) and Fredrik Ternell (Swallow) of Censor Design for " +
+             "technical advice and tools.\n\n" +
+             "SID emulation: reSID by Dag Lem, translated to C#.\n" +
+             "Audio and MIDI: NAudio by Mark Heath.\n\n" +
+             "Exported .sid files, and the player inside them, may be used freely.\n");
 
         _text.SelectionStart = 0;
         _text.ScrollToCaret();

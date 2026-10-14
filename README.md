@@ -2,7 +2,8 @@
 
 A Windows tracker for writing Commodore 64 music, and the SID player that plays it on real hardware.
 
-By Magnar Harestad, with Robert Lundquist (Krikkit) and Fredrik Ternell (Swallow) of Censor Design.
+By Magnar Harestad. Thanks to Robert Lundquist (Krikkit) and Fredrik Ternell (Swallow) of Censor Design
+for technical advice and tools.
 
 ## What this is
 
@@ -126,6 +127,9 @@ and a note off that lets the release run on — is in `tests/MagSid.Assembler.Te
 against that version.
 
 ## License
+
+Exported `.sid` files - the player code and the song data in them - may be used freely, in any
+release, commercial or not.
 
 MagSID Editor is free software: you can redistribute it and/or modify it under the terms of the GNU
 General Public License as published by the Free Software Foundation, either version 2 of the License,
