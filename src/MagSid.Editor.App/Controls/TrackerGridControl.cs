@@ -495,6 +495,21 @@ public sealed class TrackerGridControl : Control
         return history.Count > 0 ? history[0] : null;
     }
 
+    /// <summary>How many of an anchor's rows have been heard - its note and the holds after it,
+    /// at one row a tick - and how far into the next, from the audio clock.</summary>
+    private double RowsInto(PlaybackAnchor anchor, long currentSamples)
+    {
+        double tickSeconds = _song is null ? 0.12 : Math.Max(0.02, (_song.Speed + 1) / 50.0);
+        int ticks = Math.Max(1, anchor.Ticks);
+        double rowSamples = tickSeconds * ticks * SongPlaybackEngine.SampleRate;
+        double fraction = rowSamples > 0 ? (currentSamples - anchor.SampleIndex) / rowSamples : 1.0;
+        return Math.Clamp(fraction, 0.0, 1.0) * ticks;
+    }
+
+    /// <summary>The anchor's row being heard, counted from the row it triggered on.</summary>
+    private int HeardRowsInto(PlaybackAnchor anchor, long currentSamples) =>
+        Math.Min((int)RowsInto(anchor, currentSamples), Math.Max(1, anchor.Ticks) - 1);
+
     /// <summary>Called by MainForm as playback stops, before the engine is torn down: parks the
     /// edit cursor exactly where channel 1 was at that moment, so stop-then-play resumes from there
     /// instead of restarting the song - the same channel the playback-follow row-number gutter already
@@ -509,12 +524,20 @@ public sealed class TrackerGridControl : Control
         }
 
         long currentSamples = AudioClockSamples?.Invoke() ?? 0;
-        if (GetCurrentAnchor(0, currentSamples) is not { } anchor)
+
+        // The channel with the longest order is the song's timeline: the static view shows every
+        // channel from one song position, and a shorter channel loops round to wherever it really
+        // is from there. Channel 1 used to decide, and a channel 1 of one short looping pattern
+        // put the cursor back at position 0 whatever the others were playing.
+        int reference = Enumerable.Range(0, 3).OrderByDescending(SinglePassRowCount).First();
+        if (GetCurrentAnchor(reference, currentSamples) is not { } anchor)
         {
-            return; // nothing ever triggered on channel 1 - nowhere sensible to jump to
+            return; // nothing ever triggered there - nowhere sensible to jump to
         }
 
-        if (ResolveDisplayRow(0, anchor.CenterRow) is not { } resolved)
+        // The row being heard, not the one its note started on: a held note's rows have been
+        // passing all along, the same as the scrolling view draws them.
+        if (ResolveDisplayRow(reference, anchor.CenterRow + HeardRowsInto(anchor, currentSamples)) is not { } resolved)
         {
             return;
         }
@@ -2289,7 +2312,6 @@ public sealed class TrackerGridControl : Control
 
         int centerIndex = visibleRows / 2;
         int centerY = HeaderHeight + centerIndex * RowHeight;
-        double tickSeconds = _song is null ? 0.12 : Math.Max(0.02, (_song.Speed + 1) / 50.0);
         long currentSamples = AudioClockSamples?.Invoke() ?? 0;
 
         for (int ch = 0; ch < 3; ch++)
@@ -2319,11 +2341,7 @@ public sealed class TrackerGridControl : Control
             // it grow past one RowHeight on any row longer than a single tick, which scrolled
             // this column's content up past the header's own row entirely and drew pattern data
             // on top of "Playing" and the CH/PAT column headings.
-            int ticks = Math.Max(1, anchor.Ticks);
-            double rowSeconds = tickSeconds * ticks;
-            double rowSamples = rowSeconds * SongPlaybackEngine.SampleRate;
-            double fraction = rowSamples > 0 ? (currentSamples - anchor.SampleIndex) / rowSamples : 1.0;
-            double totalOffsetRows = Math.Clamp(fraction, 0.0, 1.0) * ticks;
+            double totalOffsetRows = RowsInto(anchor, currentSamples);
             int wholeRows = (int)totalOffsetRows;
             int subPixelOffset = (int)Math.Round((totalOffsetRows - wholeRows) * RowHeight);
 
