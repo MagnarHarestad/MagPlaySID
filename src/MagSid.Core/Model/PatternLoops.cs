@@ -99,6 +99,27 @@ public static class PatternLoops
         return Number(played);
     }
 
+    /// <summary>How far a loop that never ends is unrolled: to where the longest channel reaches
+    /// its RST - the point where the song as a whole starts again - counting such loops once.
+    /// The same in every view, so the views keep one timeline.</summary>
+    public static int EndlessCap(Song song)
+    {
+        int longest = 0;
+        foreach (var order in song.ChannelOrders)
+        {
+            int total = 0;
+            foreach (var token in order.Tokens)
+            {
+                if (token is PatternRefToken(var number) && song.Patterns.FirstOrDefault(p => p.Number == number) is { } pattern)
+                    total += Unroll(pattern, 0).Count;
+            }
+
+            longest = Math.Max(longest, total);
+        }
+
+        return Math.Max(longest, 64);
+    }
+
     /// <summary>The rows played once each, markers left out - how the view drew a pattern before
     /// loops were unrolled, and still does when they are not.</summary>
     public static IReadOnlyList<UnrolledRow> Compact(Pattern pattern)

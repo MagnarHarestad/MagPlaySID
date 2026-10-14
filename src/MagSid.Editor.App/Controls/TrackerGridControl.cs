@@ -1467,26 +1467,7 @@ public sealed class TrackerGridControl : Control
 
     /// <summary>How far a loop that never ends is unrolled: to where the longest channel reaches
     /// its RST - the point where the song as a whole starts again - counting such loops once.</summary>
-    private int EndlessLoopCap()
-    {
-        if (_song is null)
-            return 0;
-
-        int longest = 0;
-        foreach (var order in _song.ChannelOrders)
-        {
-            int total = 0;
-            foreach (var token in order.Tokens)
-            {
-                if (token is PatternRefToken(var number) && _song.Patterns.FirstOrDefault(p => p.Number == number) is { } pattern)
-                    total += PatternLoops.Unroll(pattern, 0).Count;
-            }
-
-            longest = Math.Max(longest, total);
-        }
-
-        return Math.Max(longest, 64);
-    }
+    private int EndlessLoopCap() => _song is null ? 0 : PatternLoops.EndlessCap(_song);
 
     private PatternLoops.UnrolledRow? DisplayRowAt(Pattern pattern, int nth)
     {

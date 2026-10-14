@@ -264,15 +264,18 @@ public sealed class MainForm : Form
         // the editor behaves rather than actions, and this one is the kind a musician sets once
         // depending on which tracker taught them what Space means.
         // On by default: a loop drawn as it plays is what keeps the channels in line.
-        var unrollLoopsItem = new ToolStripMenuItem("&Unroll Loops in Retro") { CheckOnClick = true };
+        var unrollLoopsItem = new ToolStripMenuItem("&Unroll Loops") { CheckOnClick = true };
         unrollLoopsItem.Checked = !EditorSettings.CompactLoops;
         _trackerGrid.UnrollLoops = unrollLoopsItem.Checked;
         unrollLoopsItem.CheckedChanged += (_, _) =>
         {
             EditorSettings.CompactLoops = !unrollLoopsItem.Checked;
             _trackerGrid.UnrollLoops = unrollLoopsItem.Checked;
+            _dawView.UnrollLoops = unrollLoopsItem.Checked;
         };
+        _dawView.UnrollLoops = unrollLoopsItem.Checked;
         _trackerGrid.Notice += ShowNotice;
+        _dawView.Notice += ShowNotice;
 
         var swapSpacebarItem = new ToolStripMenuItem("Swap &Spacebar Behavior") { CheckOnClick = true };
         swapSpacebarItem.Checked = EditorSettings.SwapSpacebar;
@@ -1589,12 +1592,13 @@ public sealed class MainForm : Form
             double subFrame = (heard - capturedAt) / SongPlaybackEngine.SamplesPerFrame;
             int speed = _session.Song.Speed;
 
-            var at = new (int Pattern, int Row, double Fraction)[3];
+            var at = new (int Pattern, int Row, double Fraction, double Ticks)[3];
             for (int ch = 0; ch < 3; ch++)
             {
                 var channel = position.Channels[ch];
                 var (row, fraction) = PlayheadPosition.Of(channel, position.SpeedCounter, speed, subFrame);
-                at[ch] = (channel.CurrentPatternNumber, row, fraction);
+                at[ch] = (channel.CurrentPatternNumber, row, fraction,
+                          PlayheadPosition.TicksIntoEntry(channel, position.SpeedCounter, speed, subFrame));
             }
 
             _dawView.SetPlayRow(at[0], at[1], at[2]);

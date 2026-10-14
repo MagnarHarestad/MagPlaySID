@@ -169,6 +169,21 @@ internal sealed class DawView : Panel
 
     public bool IsRecording => _pianoRoll.IsRecording;
 
+    /// <summary>Loops drawn as they play in the piano roll and the arrange clips, later passes
+    /// linked to the first - the same switch as Retro's.</summary>
+    public bool UnrollLoops
+    {
+        get => _pianoRoll.UnrollLoops;
+        set
+        {
+            _pianoRoll.UnrollLoops = value;
+            _arrange.UnrollLoops = value;
+        }
+    }
+
+    /// <summary>A short message for the status bar.</summary>
+    public event Action<string>? Notice;
+
     /// <summary>The project cursor, as a clip and the ticks into it - null to play from the top.</summary>
     public (int Channel, int Index, int TicksInto)? PlayFrom => _arrange.PlayFrom;
 
@@ -281,9 +296,9 @@ internal sealed class DawView : Panel
     /// The roll follows whichever channel is playing the pattern it shows - the selected clip's
     /// channel first, since that is the one being looked at.</summary>
     public void SetPlayRow(
-        (int Pattern, int Row, double Fraction) channel1,
-        (int Pattern, int Row, double Fraction) channel2,
-        (int Pattern, int Row, double Fraction) channel3)
+        (int Pattern, int Row, double Fraction, double Ticks) channel1,
+        (int Pattern, int Row, double Fraction, double Ticks) channel2,
+        (int Pattern, int Row, double Fraction, double Ticks) channel3)
     {
         int showing = _pianoRoll.Pattern?.Number ?? -1;
         var channels = new[] { channel1, channel2, channel3 };
@@ -294,7 +309,7 @@ internal sealed class DawView : Panel
         {
             var at = channels[take.Channel];
             if (_recordWindowOpen && at.Pattern == _pianoRoll.RecordPatternNumber)
-                _pianoRoll.SetRecordRow(at.Row, at.Fraction);
+                _pianoRoll.SetRecordRow(at.Row, at.Fraction, at.Ticks);
             else
                 _pianoRoll.SetRecordRow(-1, 0);
         }
@@ -304,7 +319,7 @@ internal sealed class DawView : Panel
         {
             if (channels[ch].Pattern == showing)
             {
-                _pianoRoll.SetPlayRow(channels[ch].Row, channels[ch].Fraction);
+                _pianoRoll.SetPlayRow(channels[ch].Row, channels[ch].Fraction, channels[ch].Ticks);
                 return;
             }
         }
@@ -573,6 +588,7 @@ internal sealed class DawView : Panel
         _pianoRoll.Dock = DockStyle.Fill;
         _pianoRoll.Edited += () => PatternEdited?.Invoke();
         _pianoRoll.RecordToggled += on => RecordToggled?.Invoke(on);
+        _pianoRoll.Notice += message => Notice?.Invoke(message);
         _pianoRoll.NotePreviewRequested += (note, instrument) => NotePreviewRequested?.Invoke(note, instrument);
         _pianoRoll.NotePreviewReleased += note => NotePreviewReleased?.Invoke(note);
 

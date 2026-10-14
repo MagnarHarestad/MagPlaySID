@@ -59,13 +59,43 @@ internal sealed class PianoRollView : Control
     private Pattern? _pattern;
     private int _channel = -1;
 
+    // Loops drawn unrolled: a column per tick, a loop's later passes as linked copies of the
+    // first - the timeline Retro and Arrange draw too. _columnInfo says which row and pass each
+    // column is; _playTicks / _recordTicks are where the channel is in ticks, which is the column.
+    private bool _unrollLoops = true;
+    private PatternLoops.UnrolledRow[] _columnInfo = [];
+    private double _playTicks = -1;
+    private double _recordTicks = -1;
+
+    /// <summary>The pass of the column last clicked - a later pass is the first again, so what
+    /// changes the rows themselves is refused there.</summary>
+    private int _selectedPass = 1;
+
+    /// <summary>A short message for the status bar - something refused, and why.</summary>
+    public event Action<string>? Notice;
+
+    public bool UnrollLoops
+    {
+        get => _unrollLoops;
+        set
+        {
+            if (_unrollLoops == value)
+                return;
+
+            _unrollLoops = value;
+            Reread();
+            UpdateScrollRange();
+            Invalidate();
+        }
+    }
+
     // Recording: the pattern the take goes into, the row the recording channel is at (fed only
     // while that channel plays it), the key being held and where it went down, and whether the
     // take has written anything - committed as one edit, one undo step, when recording stops.
     private Pattern? _recordPattern;
     private int _recordRow = -1;
     private double _recordFraction;
-    private (NoteName Note, int Row)? _recordHeld;
+    private (NoteName Note, int Row, int Column)? _recordHeld;
     private bool _takeWritten;
     private int _defaultInstrument = 1;
     private RollGrid _grid = RollGrid.Beats;
@@ -916,17 +946,22 @@ internal sealed class PianoRollView : Control
 
     /// <summary>The row the recording channel is playing in the take's pattern, and how far
     /// through it - or -1 while that channel is somewhere else.</summary>
-    public void SetRecordRow(int row, double fraction)
+    public void SetRecordRow(int row, double fraction, double ticksIntoEntry = -1)
     {
         _recordRow = row;
         _recordFraction = fraction;
+        _recordTicks = row >= 0 && _unrollLoops ? ticksIntoEntry : -1;
     }
+
+    /// <summary>The column a key lands on when the ticks are known: the nearest, not past the end.</summary>
+    private int RecordColumn() => Math.Clamp((int)Math.Floor(_recordTicks + 0.5), 0, Math.Max(0, ColumnCount - 1));
 
     /// <summary>The row a key lands on: the one playing, or the next if more than half of it has
     /// gone - the nearest row, which is what a tracker's realtime record quantises to. Not past
     /// the pattern's end, which belongs to whatever the song plays next.</summary>
     private int RecordQuantised(Pattern pattern) =>
-        _recordFraction >= 0.5 && _recordRow + 1 < pattern.Rows.Count ? _recordRow + 1 : _recordRow;
+        _recordTicks >= 0 && ColumnCount > 0 ? RowOf(RecordColumn())
+        : _recordFraction >= 0.5 && _recordRow + 1 < pattern.Rows.Count ? _recordRow + 1 : _recordRow;
 
     /// <summary>A key went down during a take. Writes the note where playback is; its length is
     /// settled when the key comes up. One channel plays one note, so a new key ends the last.</summary>
@@ -942,7 +977,7 @@ internal sealed class PianoRollView : Control
             return false;
 
         PatternNotes.SetNote(pattern, row, note, instrumentNumber);
-        _recordHeld = (note, row);
+        _recordHeld = (note, row, _recordTicks >= 0 ? RecordColumn() : -1);
         _takeWritten = true;
         if (ReferenceEquals(pattern, _pattern))
         {
@@ -965,6 +1000,16 @@ internal sealed class PianoRollView : Control
         _recordHeld = null;
         int end = _recordRow < 0 ? pattern.Rows.Count : _recordRow + (_recordFraction >= 0.5 ? 1 : 0);
         int length = end > held.Row ? end - held.Row : end == held.Row ? 1 : pattern.Rows.Count - held.Row;
+
+        // By columns when the ticks are known: as far as the key was held, but only over the
+        // rows that follow the note on its own pass - a loop's jump back ends it there.
+        if (held.Column >= 0 && _recordTicks >= 0)
+        {
+            int endColumn = (int)Math.Floor(_recordTicks + 0.5);
+            length = 1;
+            for (int c = held.Column + 1; c < Math.Min(endColumn, ColumnCount) && RowOf(c) == held.Row + (c - held.Column); c++)
+                length++;
+        }
 
         PatternNotes.SetLength(pattern, held.Row, length);
         if (ReferenceEquals(pattern, _pattern))
@@ -1060,7 +1105,7 @@ internal sealed class PianoRollView : Control
     /// the sequencer's tick countdown and the audio clock (see PlayheadPosition), so nothing here
     /// has to guess how long a row is.
     /// </summary>
-    public void SetPlayRow(int row, double fraction)
+    public void SetPlayRow(int row, double fraction, double ticksIntoEntry = -1)
     {
         // Where the line is now, before either value changes - the region to repaint has to cover
         // where it was as well as where it goes.
@@ -1069,6 +1114,9 @@ internal sealed class PianoRollView : Control
 
         _playRow = row;
         _playFraction = row < 0 ? 0 : Math.Clamp(fraction, 0.0, 1.0);
+
+        // Unrolled, the ticks into the clip are the column - on whichever pass of a loop.
+        _playTicks = row >= 0 && _unrollLoops ? ticksIntoEntry : -1;
 
         bool scrolled = AutoScroll && row >= 0 && (FollowPlayRow() | CenterOnNotes());
 
@@ -1093,7 +1141,10 @@ internal sealed class PianoRollView : Control
 
     private int PlayheadX(int row, double fraction) => row < 0
         ? int.MinValue
-        : KeyboardWidth + (int)((ColumnOf(row) + fraction) * RowWidth) - _scrollX.Value;
+        : KeyboardWidth + (int)(PlayColumn(row, fraction) * RowWidth) - _scrollX.Value;
+
+    private double PlayColumn(int row, double fraction) =>
+        _playTicks >= 0 && row == _playRow ? _playTicks : ColumnOf(row) + fraction;
 
     /// <summary>
     /// Autoscroll's vertical half: keeps the notes on screen in the middle of the roll. The target
@@ -1148,7 +1199,7 @@ internal sealed class PianoRollView : Control
         if (!_scrollX.Enabled)
             return false;
 
-        int x = ColumnOf(_playRow) * RowWidth;
+        int x = (int)(PlayColumn(_playRow, _playFraction) * RowWidth);
         int visible = Math.Max(1, Width - KeyboardWidth - _scrollY.Width);
         int max = Math.Max(0, _scrollX.Maximum - _scrollX.LargeChange + 1);
 
@@ -1202,15 +1253,24 @@ internal sealed class PianoRollView : Control
         var columns = new List<int>(rows.Count);
         _columnOfRow = new int[rows.Count];
 
+        // Unrolled, a column is a tick: a loop's section once per pass, a row on its first pass.
+        // A row the song never reaches - after an endless loop - borrows the column before it.
+        var played = _unrollLoops && _song is { } song && _pattern is { } shown
+            ? PatternLoops.Unroll(shown, shown.Rows.Any(r => r is LoopEndRow { RepeatCount: null }) ? PatternLoops.EndlessCap(song) : 0)
+            : PatternLoops.Compact(_pattern!);
+        _columnInfo = [.. played];
+        Array.Fill(_columnOfRow, -1);
+        foreach (var info in played)
+        {
+            if (_columnOfRow[info.Row] < 0)
+                _columnOfRow[info.Row] = columns.Count;
+            columns.Add(info.Row);
+        }
+
         for (int row = 0; row < rows.Count; row++)
         {
-            if (rows[row] is LoopStartRow or LoopEndRow)
-            {
-                continue;
-            }
-
-            _columnOfRow[row] = columns.Count;
-            columns.Add(row);
+            if (_columnOfRow[row] < 0 && rows[row] is not (LoopStartRow or LoopEndRow))
+                _columnOfRow[row] = row > 0 ? Math.Max(0, _columnOfRow[row - 1]) : 0;
         }
 
         // A marker borrows the column of the row it brackets, so clicking its label lands on the
@@ -1570,6 +1630,13 @@ internal sealed class PianoRollView : Control
     {
         Focus();
 
+        // Which pass a click in the grid, the beat bar or the slide lane lands on.
+        if (e.X >= KeyboardWidth && e.Y >= BeatBarTop && _pattern is not null)
+        {
+            int column = ColumnAtX(e.X);
+            _selectedPass = column >= 0 && column < _columnInfo.Length ? _columnInfo[column].Pass : 1;
+        }
+
         // The header's grid toggle.
         if (e.Y < RulerHeight + HeaderHeight && e.Y >= RulerHeight && GridToggleBounds.Contains(e.Location))
         {
@@ -1834,6 +1901,16 @@ internal sealed class PianoRollView : Control
     /// </summary>
     private bool HandleRowKey(KeyEventArgs e, Pattern pattern)
     {
+        bool takesRow = e.KeyCode is Keys.Insert
+                        || (e.KeyCode == Keys.End && e.Shift)
+                        || (e.KeyCode == Keys.Delete && (e.Shift || _selectedRow >= pattern.Rows.Count
+                                                         || pattern.Rows[_selectedRow] is not (NoteRow or NoteOffRow)));
+        if (takesRow && RefuseOnLinkedPass())
+        {
+            e.Handled = true;
+            return true;
+        }
+
         switch (e.KeyCode)
         {
             case Keys.Insert when _selectedRow >= 0:
@@ -1899,8 +1976,26 @@ internal sealed class PianoRollView : Control
         _pattern is { } pattern && _selectedRow >= 0 && _selectedRow < pattern.Rows.Count
         && pattern.Rows[_selectedRow] is LoopEndRow;
 
+    /// <summary>A later pass of an unrolled loop is the first pass again, so what changes the rows
+    /// themselves - their number, the loop markers - is made there. Says so and returns true when
+    /// the last click was on a later pass.</summary>
+    private bool RefuseOnLinkedPass()
+    {
+        if (!_unrollLoops || _selectedPass <= 1)
+            return false;
+
+        Notice?.Invoke($"This is pass {_selectedPass} of a loop - insert, delete and loop changes go in pass 1");
+        return true;
+    }
+
     private bool HandleMarkerKey(KeyEventArgs e, Pattern pattern)
     {
+        if (e.Control && e.KeyCode is Keys.L or Keys.E && RefuseOnLinkedPass())
+        {
+            e.Handled = true;
+            return true;
+        }
+
         var marker = PatternNotes.Markers(pattern).FirstOrDefault(m => m.Row == _selectedRow);
 
         switch (e.KeyCode)
@@ -2043,9 +2138,11 @@ internal sealed class PianoRollView : Control
         g.SetClip(new Rectangle(0, 0, Width, Math.Max(0, GridBottom)));
         DrawLanes(g);
         DrawColumns(g);
+        DrawLinkedPasses(g);
         DrawBlocks(g);
         DrawToolOverlays(g);
         DrawBeatBar(g);
+        DrawPassTags(g);
         DrawKeyboard(g);
         g.Restore(state);
 
@@ -2307,8 +2404,98 @@ internal sealed class PianoRollView : Control
         }
     }
 
+    /// <summary>A loop's later passes: a violet wash over their columns and "↻2/4" in the beat bar
+    /// where each starts - the same rows again, linked to the first pass.</summary>
+    private void DrawLinkedPasses(Graphics g)
+    {
+        if (!_unrollLoops)
+            return;
+
+        var linked = Color.FromArgb(0x7F, 0x77, 0xDD);
+        using var wash = new SolidBrush(Color.FromArgb(26, linked));
+        using var rail = new SolidBrush(Color.FromArgb(150, linked));
+        using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+        using var ink = new SolidBrush(Color.FromArgb(220, 0xC8, 0xC2, 0xF4));
+
+        for (int column = 0; column < _columnInfo.Length; column++)
+        {
+            var info = _columnInfo[column];
+            if (!info.Linked)
+                continue;
+
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
+            if (x + RowWidth < KeyboardWidth || x > Width - _scrollY.Width)
+                continue;
+
+            g.FillRectangle(wash, x, GridTop, RowWidth, GridBottom - GridTop);
+            if (info.PassStart)
+                g.FillRectangle(rail, x, GridTop, 2, GridBottom - GridTop);
+        }
+    }
+
+    /// <summary>"\u21BB2/4" in the beat bar where each later pass starts - over the bar's own cells.</summary>
+    private void DrawPassTags(Graphics g)
+    {
+        if (!_unrollLoops)
+            return;
+
+        var linked = Color.FromArgb(0x7F, 0x77, 0xDD);
+        using var rail = new SolidBrush(Color.FromArgb(200, linked));
+        using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+        using var ink = new SolidBrush(Color.FromArgb(0xC8, 0xC2, 0xF4));
+
+        for (int column = 0; column < _columnInfo.Length; column++)
+        {
+            var info = _columnInfo[column];
+            if (!info.PassStart)
+                continue;
+
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
+            if (x + RowWidth < KeyboardWidth || x > Width - _scrollY.Width)
+                continue;
+
+            g.FillRectangle(rail, x, BeatBarTop, 2, GridTop - BeatBarTop);
+            string tag = info.Passes is > 0 and < 10 ? $"\u21BB{info.Pass}/{info.Passes}" : $"\u21BB{info.Pass}";
+            g.DrawString(tag, font, ink, x + 3, BeatBarTop + 1);
+        }
+    }
+
+    /// <summary>A note's copies on a loop's later passes: lighter, dashed - the same note, which an
+    /// edit on any of them changes.</summary>
+    private void DrawLinkedNotes(Graphics g)
+    {
+        if (!_unrollLoops)
+            return;
+
+        var byRow = _notes.ToDictionary(n => n.Row);
+        for (int column = 0; column < _columnInfo.Length; column++)
+        {
+            var info = _columnInfo[column];
+            if (!info.Linked || !byRow.TryGetValue(info.Row, out var note) || KeyForNote(note.Note) is not (var key and >= 0))
+                continue;
+
+            int length = 1;
+            while (column + length < _columnInfo.Length && length < note.Length && _columnInfo[column + length].Row == note.Row + length)
+                length++;
+
+            int x = KeyboardWidth + (column * RowWidth) - _scrollX.Value;
+            int y = GridTop + (key * KeyHeight) - _scrollY.Value;
+            var bounds = new Rectangle(x + 1, y + 1, Math.Max(3, (length * RowWidth) - 2), KeyHeight - 2);
+            if (bounds.Right < KeyboardWidth || bounds.X > Width - _scrollY.Width || bounds.Bottom < GridTop || bounds.Y > GridBottom)
+                continue;
+
+            var colour = DawPalette.ForInstrument(note.InstrumentNumber);
+            using (var fill = new SolidBrush(Color.FromArgb(120, colour)))
+                g.FillRectangle(fill, bounds);
+            using (var border = new Pen(Color.FromArgb(200, colour)) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash })
+                g.DrawRectangle(border, bounds);
+        }
+    }
+
     private void DrawBlocks(Graphics g)
     {
+        DrawLinkedNotes(g);
+
         int top = GridTop;
 
         foreach (var release in _releases)

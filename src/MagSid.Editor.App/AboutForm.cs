@@ -163,7 +163,7 @@ public sealed class AboutForm : Form
              "go into the pattern itself, so every pass changes (a dashed box marks the same row " +
              "in the other passes); inserting, deleting and loop changes are made in pass 1. A " +
              "loop with no count is unrolled to where the longest channel restarts. Menu → " +
-             "Unroll Loops in Retro switches back to drawing a loop's rows once.\n\n");
+             "Unroll Loops switches back to drawing a loop's rows once, here and in the DAW.\n\n");
         Mono("  Arrows             Move between rows and fields\n" +
              "  Tab / Shift+Tab    Next / previous channel\n" +
              "  Home / End         First / last row\n" +
@@ -224,6 +224,11 @@ public sealed class AboutForm : Form
              "the lanes line up the way the song sounds. While the song plays, each lane has its " +
              "own red playhead (a shorter lane has looped round its RST by itself), and the " +
              "project cursor rides along the longest lane.\n\n");
+        Body("Loops are unrolled here as in Retro: a clip shows its loop's later passes (\"↻2/4\"), " +
+             "and the piano roll draws one column per tick, the later passes as linked copies - a " +
+             "violet wash, lighter dashed notes. Notes, slides and recording in a linked pass go " +
+             "into the pattern itself; inserting, deleting and loop markers are made in pass 1. " +
+             "The roll's playhead and a take follow the pass actually playing.\n\n");
         Mono("  Click ROW ruler    Put the project cursor (the F2 flag) there; right-click\n" +
              "                     puts it back at the start\n" +
              "  Drag in the ruler  Set the left and right locators (L ... R)\n" +

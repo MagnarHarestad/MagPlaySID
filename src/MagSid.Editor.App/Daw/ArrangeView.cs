@@ -272,26 +272,59 @@ internal sealed class ArrangeView : Control
         if (_song?.Patterns.FirstOrDefault(p => p.Number == patternNumber) is not { } pattern)
             return 0;
 
-        bool endless = pattern.Rows.Any(r => r is LoopEndRow { RepeatCount: null });
-        return PatternLoops.Unroll(pattern, endless ? EndlessLoopCap() : 0).Count;
+        return Played(pattern).Count;
     }
 
-    private int EndlessLoopCap()
+    /// <summary>A pattern as it plays - the clip's width and, inside it, where a loop's later
+    /// passes start.</summary>
+    private IReadOnlyList<PatternLoops.UnrolledRow> Played(Pattern pattern)
     {
-        int longest = 0;
-        foreach (var order in _song!.ChannelOrders)
+        bool endless = pattern.Rows.Any(r => r is LoopEndRow { RepeatCount: null });
+        return PatternLoops.Unroll(pattern, endless ? PatternLoops.EndlessCap(_song!) : 0);
+    }
+
+    /// <summary>Draw a loop's passes inside its clip - on by default, the same switch as Retro's.
+    /// The clip is as wide as it plays either way.</summary>
+    public bool UnrollLoops
+    {
+        get => _unrollLoops;
+        set
         {
-            int total = 0;
-            foreach (var token in order.Tokens)
-            {
-                if (token is PatternRefToken(var number) && _song.Patterns.FirstOrDefault(p => p.Number == number) is { } pattern)
-                    total += PatternLoops.Unroll(pattern, 0).Count;
-            }
-
-            longest = Math.Max(longest, total);
+            _unrollLoops = value;
+            Invalidate();
         }
+    }
 
-        return Math.Max(longest, 64);
+    private bool _unrollLoops = true;
+
+    /// <summary>A loop's later passes inside a clip: a violet wash from where each starts, and
+    /// "↻2/4" at its top - the same rows again, linked to the first pass.</summary>
+    private void DrawClipPasses(Graphics g, int patternNumber, Rectangle box)
+    {
+        if (!_unrollLoops || _song?.Patterns.FirstOrDefault(p => p.Number == patternNumber) is not { } pattern)
+            return;
+
+        var played = Played(pattern);
+        var linked = Color.FromArgb(0x7F, 0x77, 0xDD);
+        using var wash = new SolidBrush(Color.FromArgb(30, linked));
+        using var edge = new Pen(Color.FromArgb(150, linked));
+        using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+        using var ink = new SolidBrush(Color.FromArgb(220, 0xC8, 0xC2, 0xF4));
+
+        for (int n = 0; n < played.Count; n++)
+        {
+            if (!played[n].Linked)
+                continue;
+
+            int x = box.X + (n * PixelsPerRow);
+            g.FillRectangle(wash, x, box.Y + 1, PixelsPerRow, box.Height - 1);
+            if (played[n].PassStart)
+            {
+                g.DrawLine(edge, x, box.Y + 1, x, box.Bottom - 1);
+                string tag = played[n].Passes is > 0 and < 10 ? $"\u21BB{played[n].Pass}/{played[n].Passes}" : $"\u21BB{played[n].Pass}";
+                g.DrawString(tag, font, ink, x + 2, box.Bottom - 13);
+            }
+        }
     }
 
     /// <summary>Where a lane's entry starts, in pixels from the lane's own beginning. Cumulative
@@ -1373,6 +1406,7 @@ internal sealed class ArrangeView : Control
                 // selected - rather than always: a mark on the first clip read as happening there.
                 restart: order.RestartPosition - 1 == i
                          && (_hoveredRestart == channel || (_onRestart && _selectedChannel == channel)));
+            DrawClipPasses(g, token.PatternNumber, new Rectangle(start, top + 6, width - 2, LaneHeight - 14));
         }
 
         DrawRestart(g, song, order, channel);
