@@ -1266,21 +1266,55 @@ public sealed class MainForm : Form
             return;
         }
 
-        var from = clip.Index == 0
-            ? null
-            : SongSequencer.FindPosition(_session.Song, clip.Channel, clip.Index, 0);
-        if (clip.Index > 0 && from is null)
+        // The punch-in: the left locator with PUNCH on, otherwise the start of the clip; and with
+        // PUNCH the right locator is the punch-out.
+        var song = _session.Song;
+        SongSequencer.SequencerPosition? punchIn;
+        int punchOut = int.MaxValue;
+        if (_dawView.PunchOn && _dawView.LocatorRange is { } range)
+        {
+            punchIn = range.Left is { } left ? SongSequencer.FindPositionInEntry(song, left.Channel, left.Index, left.TicksInto) : null;
+            punchOut = SongSequencer.FindPositionInEntry(song, range.Right.Channel, range.Right.Index, range.Right.TicksInto)?.Frame ?? int.MaxValue;
+        }
+        else
+        {
+            punchIn = clip.Index == 0 ? null : SongSequencer.FindPositionInEntry(song, clip.Channel, clip.Index, 0);
+            if (clip.Index > 0 && punchIn is null)
+            {
+                _dawView.EndRecording();
+                return;
+            }
+        }
+
+        // A bar is 16 rows, as the piano roll counts; a beat is 4.
+        int framesPerBeat = 4 * (song.Speed + 1);
+        int punchInFrame = punchIn?.Frame ?? 0;
+        var start = _dawView.PreRollOn && punchInFrame > 0
+            ? SongSequencer.PositionAtFrame(song, Math.Max(0, punchInFrame - (4 * framesPerBeat)))
+            : punchIn;
+
+        _recordWindow = (punchInFrame, punchOut);
+        _dawView.SetRecordWindow(false);
+        _resumeFrom = null;
+        _resumeCursor = null;
+        StartPlaybackFrom(start);
+        if (_waveOut is null || _playbackEngine is null)
         {
             _dawView.EndRecording();
             return;
         }
 
-        _resumeFrom = null;
-        _resumeCursor = null;
-        StartPlaybackFrom(from);
-        if (_waveOut is null)
-            _dawView.EndRecording();
+        if (_dawView.ClickOn && _dawView.PreRollOn && start is not null)
+            _playbackEngine.SetClick(start.Frame, punchInFrame, framesPerBeat);
+        else if (_dawView.ClickOn)
+            _playbackEngine.SetCountIn(4 * framesPerBeat, framesPerBeat);
     }
+
+    /// <summary>The take's punch-in and punch-out, in song frames: notes are written between them.</summary>
+    private (int In, int Out) _recordWindow = (0, int.MaxValue);
+
+    /// <summary>The song frame heard at the last poll - a step back means Cycle jumped.</summary>
+    private int _lastHeardFrame;
 
     private void StartPlaybackFrom(SongSequencer.SequencerPosition? resume)
     {
@@ -1575,6 +1609,18 @@ public sealed class MainForm : Form
             }
 
             _dawView.SetSongPositions(lanes);
+
+            if (_dawView.IsRecording)
+            {
+                // Cycle took the song back from R to L: the lap ends there, a punch-out and a
+                // punch-in at once, so a key held over the jump is let go at R.
+                if (position.Frame < _lastHeardFrame)
+                    _dawView.SetRecordWindow(false);
+
+                _dawView.SetRecordWindow(position.Frame >= _recordWindow.In && position.Frame < _recordWindow.Out);
+            }
+
+            _lastHeardFrame = position.Frame;
         }
 
         // The engine accumulates this itself, frame by frame, so polling at whatever rate this

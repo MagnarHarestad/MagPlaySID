@@ -296,6 +296,15 @@ public sealed class AboutForm : Form
              "where a \"---\" stops it; one channel plays one note, so a new key ends the last. " +
              "Notes are added on top of what is there, every time the song plays the clip's " +
              "pattern on that channel. REC again, or Stop, ends the take - one undo step.\n\n");
+        Body("How a take starts, from the toggles above the arrange lanes:\n\n");
+        Mono("  PRE-ROLL   On by default: the song starts a bar (16 rows) before the punch-in,\n" +
+             "             so the music leads in. Nothing played then is written\n" +
+             "  CLICK      Counts that bar in with a metronome beep on each beat, the first of\n" +
+             "             the bar higher - mixed in after the SID, so no voice is taken. With\n" +
+             "             PRE-ROLL off, a bar of clicks alone comes before the song\n" +
+             "  PUNCH      With the locators set: notes are written only between L and R; a\n" +
+             "             key held at R is let go there. With CYCLE too, every lap of L ... R\n" +
+             "             records on top of the last\n\n");
 
         Heading("Slide lane");
         Body("With the Draw tool:\n\n");

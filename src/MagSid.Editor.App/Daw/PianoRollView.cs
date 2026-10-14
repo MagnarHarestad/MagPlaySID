@@ -904,6 +904,16 @@ internal sealed class PianoRollView : Control
             Invalidate();
     }
 
+    /// <summary>The punch-out: a key still held is let go at the row reached, and nothing more is
+    /// written until the punch-in comes round again.</summary>
+    public void PunchOut()
+    {
+        if (_recordHeld is { } held)
+            RecordRelease(held.Note);
+
+        _recordRow = -1;
+    }
+
     /// <summary>The row the recording channel is playing in the take's pattern, and how far
     /// through it - or -1 while that channel is somewhere else.</summary>
     public void SetRecordRow(int row, double fraction)

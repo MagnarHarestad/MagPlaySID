@@ -43,6 +43,56 @@ public sealed class SongPlaybackEngine : IWaveProvider
         _cycle = new CycleRange(start, endFrame);
 
     public void ClearCycle() => _cycle = null;
+
+    // The metronome, for a count-in: a short beep mixed in after the SID, so it takes no voice
+    // from the song. Clicks fall on song frames [_clickFrom, _clickTo), one a beat, the first of
+    // each bar higher. _countInLeft frames of clicks alone come before the song starts at all.
+    private int _clickFrom = -1;
+    private int _clickTo = -1;
+    private int _clickFramesPerBeat = 1;
+    private int _countInLeft;
+    private int _countInDone;
+    private int _clickSamplesLeft;
+    private double _clickPhase;
+    private double _clickStep;
+
+    private const int ClickSamples = SampleRate / 40;   // 25ms
+
+    /// <summary>Clicks over the song's own frames <paramref name="fromFrame"/> up to
+    /// <paramref name="toFrame"/> - a pre-roll counted in.</summary>
+    public void SetClick(int fromFrame, int toFrame, int framesPerBeat)
+    {
+        _clickFrom = fromFrame;
+        _clickTo = toFrame;
+        _clickFramesPerBeat = Math.Max(1, framesPerBeat);
+    }
+
+    /// <summary>A count-in before the song starts: <paramref name="frames"/> frames of clicks
+    /// alone, then the song from where it was given.</summary>
+    public void SetCountIn(int frames, int framesPerBeat)
+    {
+        _countInLeft = Math.Max(0, frames);
+        _countInDone = 0;
+        _clickFramesPerBeat = Math.Max(1, framesPerBeat);
+    }
+
+    private void StartClick(bool accent)
+    {
+        _clickSamplesLeft = ClickSamples;
+        _clickPhase = 0;
+        _clickStep = 2 * Math.PI * (accent ? 1760.0 : 1320.0) / SampleRate;
+    }
+
+    private void MixClick(short[] samples, int from, int count)
+    {
+        for (int i = from; i < from + count && _clickSamplesLeft > 0; i++, _clickSamplesLeft--)
+        {
+            double envelope = _clickSamplesLeft / (double)ClickSamples;
+            int value = samples[i] + (int)(Math.Sin(_clickPhase) * 9000 * envelope);
+            samples[i] = (short)Math.Clamp(value, short.MinValue, short.MaxValue);
+            _clickPhase += _clickStep;
+        }
+    }
     private readonly double _cyclesPerFrame = ClockFrequency / FrameRate;
 
     // SongSequencer.RowTriggered fires from Frame(), which this class's Read() calls on
@@ -399,12 +449,27 @@ public sealed class SongPlaybackEngine : IWaveProvider
             double cyclesToNextFrame = _nextFrameBoundaryCycles - _totalCyclesClocked;
             if (cyclesToNextFrame < 1.0)
             {
+                // A count-in: clicks alone, the song held until it is over.
+                if (_countInLeft > 0)
+                {
+                    if (_countInDone % _clickFramesPerBeat == 0)
+                        StartClick(_countInDone % (_clickFramesPerBeat * 4) == 0);
+                    _countInDone++;
+                    _countInLeft--;
+                    _nextFrameBoundaryCycles += _cyclesPerFrame;
+                    continue;
+                }
+
                 // The end of a Cycle range: on from its start, as if the song had been there.
                 if (_cycle is { } cycle && _sequencer.FramesPlayed == cycle.EndFrame
                     && cycle.EndFrame > (cycle.Start?.Frame ?? 0))
                 {
                     _sequencer = CreateSequencer(cycle.Start);
                 }
+
+                int songFrame = _sequencer.FramesPlayed;
+                if (songFrame >= _clickFrom && songFrame < _clickTo && (songFrame - _clickFrom) % _clickFramesPerBeat == 0)
+                    StartClick((songFrame - _clickFrom) % (_clickFramesPerBeat * 4) == 0);
 
                 _sequencer.Frame();
                 RecordPlayhead();
@@ -425,6 +490,8 @@ public sealed class SongPlaybackEngine : IWaveProvider
             int produced = _sid.ClockAndSample(ref deltaTRemaining, samples, samplesWritten, samplesRequested - samplesWritten);
 
             _totalCyclesClocked += deltaT - deltaTRemaining;
+            if (_clickSamplesLeft > 0)
+                MixClick(samples, samplesWritten, produced);
             samplesWritten += produced;
             Interlocked.Add(ref _samplesProduced, produced);
         }

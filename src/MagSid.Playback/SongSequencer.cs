@@ -220,6 +220,16 @@ public sealed class SongSequencer
         return start;
     }
 
+    /// <summary>The song's state after <paramref name="frames"/> frames from the top - where a
+    /// pre-roll a bar before a punch-in starts.</summary>
+    public static SequencerPosition PositionAtFrame(Song song, int frames)
+    {
+        var probe = new SongSequencer(song, (_, _) => { });
+        for (int frame = 0; frame < frames; frame++)
+            probe.Frame();
+        return probe.Capture();
+    }
+
     /// <summary>
     /// How many ticks each channel has played of the order entry it is in at
     /// <paramref name="position"/> - found by playing the song silently up to it. A loop plays
