@@ -53,6 +53,15 @@ public sealed class MainForm : Form
     };
     private readonly ToolStripStatusLabel _pathLabel = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly ToolStripStatusLabel _dirtyLabel = new();
+    private readonly ToolStripStatusLabel _noticeLabel = new() { ForeColor = Color.FromArgb(0xC8, 0xC2, 0xF4) };
+    private readonly System.Windows.Forms.Timer _noticeTimer = new() { Interval = 5000 };
+
+    private void ShowNotice(string text)
+    {
+        _noticeLabel.Text = text;
+        _noticeTimer.Stop();
+        _noticeTimer.Start();
+    }
     private readonly ToolStripButton _playStopButton = new("▶ Play");
     /// <summary>Move the edit cursor a page at a time. Not a song-order position: the three
     /// channels' order lists are independent, so there is no single index that means the same
@@ -254,6 +263,17 @@ public sealed class MainForm : Form
         // Under the hex switch and checked the same way: both are one-line preferences about how
         // the editor behaves rather than actions, and this one is the kind a musician sets once
         // depending on which tracker taught them what Space means.
+        // On by default: a loop drawn as it plays is what keeps the channels in line.
+        var unrollLoopsItem = new ToolStripMenuItem("&Unroll Loops in Retro") { CheckOnClick = true };
+        unrollLoopsItem.Checked = !EditorSettings.CompactLoops;
+        _trackerGrid.UnrollLoops = unrollLoopsItem.Checked;
+        unrollLoopsItem.CheckedChanged += (_, _) =>
+        {
+            EditorSettings.CompactLoops = !unrollLoopsItem.Checked;
+            _trackerGrid.UnrollLoops = unrollLoopsItem.Checked;
+        };
+        _trackerGrid.Notice += ShowNotice;
+
         var swapSpacebarItem = new ToolStripMenuItem("Swap &Spacebar Behavior") { CheckOnClick = true };
         swapSpacebarItem.Checked = EditorSettings.SwapSpacebar;
         swapSpacebarItem.CheckedChanged += (_, _) =>
@@ -276,7 +296,7 @@ public sealed class MainForm : Form
         exportSidItem.ShortcutKeys = Keys.F9;
 
         file.DropDownItems.AddRange([aboutItem, new ToolStripSeparator(), _undoItem, _redoItem,
-            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, playInVsidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, new ToolStripSeparator(), exitItem]);
+            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), exportSidItem, playInVsidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
         menu.Items.Add(file);
 
         var signalPathItem = new ToolStripMenuItem("&Signal Path", null, (_, _) => DoSignalPath());
@@ -467,7 +487,15 @@ public sealed class MainForm : Form
     {
         var status = new StatusStrip();
         status.Items.Add(_pathLabel);
+        status.Items.Add(_noticeLabel);
         status.Items.Add(_dirtyLabel);
+
+        // A notice is read once and then gets out of the way.
+        _noticeTimer.Tick += (_, _) =>
+        {
+            _noticeTimer.Stop();
+            _noticeLabel.Text = string.Empty;
+        };
         return status;
     }
 
@@ -1224,7 +1252,9 @@ public sealed class MainForm : Form
             _waveOut.Play();
             _playbackEngine = engine;
             _trackerGrid.SetPlaybackActive(true);
-            _trackerGrid.SetPlaybackStartEntries(resume is null ? null : [.. resume.Channels.Select(c => c.PlayingEntry)]);
+            _trackerGrid.SetPlaybackStartEntries(
+                resume is null ? null : [.. resume.Channels.Select(c => c.PlayingEntry)],
+                resume is null ? null : SongSequencer.TicksIntoEntries(_session.Song, resume));
             _playbackPollTimer.Start();
             _playStopButton.Text = "■ Stop";
         }
@@ -1404,8 +1434,10 @@ public sealed class MainForm : Form
             return null; // the top of the song needs no winding forward
         }
 
-        return SongSequencer.FindPosition(
-            _session.Song, target.Channel, target.OrderIndex, target.RowIndex);
+        // With loops unrolled the cursor row is a tick, which also says which pass of a loop.
+        return target.TicksInto >= 0
+            ? SongSequencer.FindPositionInEntry(_session.Song, target.Channel, target.OrderIndex, target.TicksInto)
+            : SongSequencer.FindPosition(_session.Song, target.Channel, target.OrderIndex, target.RowIndex);
     }
 
     private void StopPlayback()

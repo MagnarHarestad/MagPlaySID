@@ -115,6 +115,14 @@ public sealed class TrackerGridControl : Control
     // A slide row ("1xx" up, "2xx" down) in the note column - an effect, not a note, so it gets
     // a colour of its own rather than the note's.
     private static readonly Brush BrushSlide = new SolidBrush(EditorPalette.Warning);
+
+    // A later pass of an unrolled loop: a violet wash light enough to keep the current-row band
+    // showing through, a rail down its left edge, and a dashed box on the cursor's row in the
+    // other passes - the cells an edit at the cursor changes too.
+    private static readonly Color ColorLinked = Color.FromArgb(0x7F, 0x77, 0xDD);
+    private static readonly Brush BrushLinkedPass = new SolidBrush(Color.FromArgb(34, ColorLinked));
+    private static readonly Brush BrushLinkedRail = new SolidBrush(Color.FromArgb(170, ColorLinked));
+    private static readonly Pen PenLinkedEcho = new(Color.FromArgb(200, ColorLinked)) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
     private static readonly Brush BrushLoopMarker = new SolidBrush(ColorLoopMarker);
     private static readonly Brush BrushOrderTrack = new SolidBrush(ColorOrderTrack);
     private static readonly Brush BrushHeaderBackground = new SolidBrush(ColorHeaderBackground);
@@ -195,6 +203,10 @@ public sealed class TrackerGridControl : Control
     private readonly int?[] _lastOrderEntrySequence = new int?[3];
     private readonly int[] _occurrenceBaseRow = new int[3];
     private readonly int[] _nextAvailableRow = new int[3];
+
+    /// <summary>The display row each channel's occurrence showed last - so a row a loop plays
+    /// again lands on its next pass, not its first.</summary>
+    private readonly int[] _lastNth = [-1, -1, -1];
     private bool _isPlaybackActive;
 
     /// <summary>One RowTriggered event, timestamped in audio samples rather than wall-clock -
@@ -400,6 +412,7 @@ public sealed class TrackerGridControl : Control
             Array.Clear(_lastOrderEntrySequence);
             Array.Clear(_occurrenceBaseRow);
             Array.Clear(_nextAvailableRow);
+            Array.Fill(_lastNth, -1);
             foreach (var history in _playbackHistory)
             {
                 history.Clear();
@@ -443,7 +456,8 @@ public sealed class TrackerGridControl : Control
         // walking its order from the song position. Started from the top of the song that is row
         // 0, but a song resumed part-way has each channel in a pattern of its own - with orders of
         // different lengths, not the one at the song position.
-        if (_lastOrderEntrySequence[channel] is null)
+        bool firstSinceStart = _lastOrderEntrySequence[channel] is null;
+        if (firstSinceStart)
         {
             _nextAvailableRow[channel] = FirstRowOfPattern(channel, pattern, _startEntry[channel]);
         }
@@ -457,21 +471,30 @@ public sealed class TrackerGridControl : Control
             _occurrenceBaseRow[channel] = _nextAvailableRow[channel];
             _nextAvailableRow[channel] += RealRowCount(pattern);
             _lastOrderEntrySequence[channel] = orderEntrySequence;
+
+            // A resumed channel is already that many ticks into this entry: its first row is the
+            // one heard last or the one after, on whichever pass of a loop that falls.
+            _lastNth[channel] = firstSinceStart && _startTicks[channel] > 0 ? _startTicks[channel] - 2 : -1;
         }
 
         // Clamped rather than trusted: an anchor can only be stale if playback outlives the
         // song it came from, which MainForm now prevents - but a crash is too high a price for
         // relying on that, and a row number past the end of this pattern simply means "all of
         // them".
-        int realRowsBefore = 0;
-        for (int i = 0; i < Math.Min(rowIndex, pattern.Rows.Count); i++)
+        // Which display row: the next one for this pattern row after the last row this
+        // occurrence showed - a loop's later pass when it has come round again.
+        var displayRows = DisplayRows(pattern);
+        int realRowsBefore = -1;
+        for (int n = Math.Max(0, _lastNth[channel] + 1); n < displayRows.Count && realRowsBefore < 0; n++)
         {
-            if (pattern.Rows[i] is not LoopStartRow and not LoopEndRow)
-            {
-                realRowsBefore++;
-            }
+            if (displayRows[n].Row == rowIndex)
+                realRowsBefore = n;
         }
 
+        if (realRowsBefore < 0)
+            realRowsBefore = RealRowsBefore(pattern, rowIndex);
+
+        _lastNth[channel] = realRowsBefore;
         int centerRow = _occurrenceBaseRow[channel] + realRowsBefore;
         var history = _playbackHistory[channel];
         history.Add(new PlaybackAnchor(sampleIndex, pattern, centerRow, ticks));
@@ -551,31 +574,24 @@ public sealed class TrackerGridControl : Control
             return;
         }
 
-        int realRowsAt = 0;
-        for (int i = 0; i < resolved.LocalRow; i++)
-        {
-            if (resolved.Pattern.Rows[i] is not LoopStartRow and not LoopEndRow)
-            {
-                realRowsAt++;
-            }
-        }
-
         SetSongPosition(resolved.OrderIndex);
-        _cursorRow = realRowsAt;
+        _cursorRow = resolved.Nth;
         Invalidate();
     }
 
     /// <summary>Which song-order entry and pattern row the edit cursor is sitting on, and the
     /// channel it is in - what "play from here" has to aim at. Null when the cursor is not over
     /// anything resolvable, e.g. past the end of a channel's chain.</summary>
-    public (int Channel, int OrderIndex, int RowIndex)? CursorSongLocation()
+    public (int Channel, int OrderIndex, int RowIndex, int TicksInto)? CursorSongLocation()
     {
         if (_song is null || ResolveDisplayRow(_cursorChannel, _cursorRow) is not { } resolved)
         {
             return null;
         }
 
-        return (_cursorChannel, resolved.OrderIndex, resolved.LocalRow);
+        // With loops unrolled a display row is a tick, so the row counts the ticks into its
+        // entry - which pass of a loop, as well as which row.
+        return (_cursorChannel, resolved.OrderIndex, resolved.LocalRow, _unrollLoops ? resolved.Nth : -1);
     }
 
     /// <summary>Which pattern is currently on screen for each channel, at the cursor's row - null
@@ -1168,7 +1184,7 @@ public sealed class TrackerGridControl : Control
     /// column in OnPaint/DrawPlaybackFollowView), where it names the exact order-list entry.
     /// null means there's genuinely nothing there (empty order, or every reachable pattern is
     /// itself empty).</summary>
-    private (Pattern Pattern, int LocalRow, int OrderIndex)? ResolveDisplayRow(int ch, int globalRow)
+    private (Pattern Pattern, int LocalRow, int OrderIndex, int Nth)? ResolveDisplayRow(int ch, int globalRow)
     {
         if (_song is null || globalRow < 0)
         {
@@ -1214,7 +1230,7 @@ public sealed class TrackerGridControl : Control
             int realCount = RealRowCount(pattern);
             if (remaining < realCount)
             {
-                return (pattern, RealRowOriginalIndex(pattern, remaining), tokenIndex);
+                return (pattern, RealRowOriginalIndex(pattern, remaining), tokenIndex, remaining);
             }
 
             remaining -= realCount;
@@ -1288,7 +1304,7 @@ public sealed class TrackerGridControl : Control
 
     /// <summary>True on the last real row of the last pattern in a channel's order-list - the row
     /// after which RestartPosition takes over, on whichever pass through the loop it is.</summary>
-    private bool IsOrderEndRow(int ch, (Pattern Pattern, int LocalRow, int OrderIndex)? resolved)
+    private bool IsOrderEndRow(int ch, (Pattern Pattern, int LocalRow, int OrderIndex, int Nth)? resolved)
     {
         if (_song is null || resolved is not { } r)
         {
@@ -1306,8 +1322,7 @@ public sealed class TrackerGridControl : Control
         }
 
         int realCount = RealRowCount(r.Pattern);
-        return r.OrderIndex == lastPatternToken && realCount > 0 &&
-               r.LocalRow == RealRowOriginalIndex(r.Pattern, realCount - 1);
+        return r.OrderIndex == lastPatternToken && realCount > 0 && r.Nth == realCount - 1;
     }
 
     /// <summary>Total row count across one non-looping pass through a channel's order-list
@@ -1350,11 +1365,18 @@ public sealed class TrackerGridControl : Control
 
     /// <summary>Which order entry each channel is in as a resumed song starts. A pattern can come
     /// twice in a row in an order, so its number alone does not say which of them is playing.</summary>
-    public void SetPlaybackStartEntries(IReadOnlyList<int>? entries)
+    public void SetPlaybackStartEntries(IReadOnlyList<int>? entries, IReadOnlyList<int>? ticksInto = null)
     {
         for (int ch = 0; ch < 3; ch++)
+        {
             _startEntry[ch] = entries is not null && ch < entries.Count ? entries[ch] : -1;
+            _startTicks[ch] = ticksInto is not null && ch < ticksInto.Count ? ticksInto[ch] : -1;
+        }
     }
+
+    /// <summary>How many ticks of its entry each channel had played as a resumed song starts -
+    /// which, with loops unrolled, is the display row it is on, later passes included.</summary>
+    private readonly int[] _startTicks = [-1, -1, -1];
 
     /// <summary>The display row where <paramref name="pattern"/> starts in a channel, walking its
     /// order from the song position and round its restart - from <paramref name="startEntry"/>
@@ -1376,57 +1398,166 @@ public sealed class TrackerGridControl : Control
             if (rows == 0)
                 return 0;
 
-            row += rows - RealRowsBefore(resolved.Pattern, resolved.LocalRow);
+            row += rows - resolved.Nth;
         }
 
         return 0;
     }
 
-    /// <summary>How many display rows - markers left out - come before a pattern row.</summary>
-    private static int RealRowsBefore(Pattern pattern, int localRow)
-    {
-        int count = 0;
-        for (int i = 0; i < Math.Min(localRow, pattern.Rows.Count); i++)
-        {
-            if (pattern.Rows[i] is not LoopStartRow and not LoopEndRow)
-                count++;
-        }
+    private bool _unrollLoops = true;
 
-        return count;
+    /// <summary>
+    /// Draw LS/LE loops as they play: a loop's section once per pass, later passes as linked
+    /// copies of the first. A row is then a tick on every channel, so a looping channel lines up
+    /// with the others - stopped, resumed or scrolled. Off, a loop's rows show once, as before.
+    /// </summary>
+    public bool UnrollLoops
+    {
+        get => _unrollLoops;
+        set
+        {
+            if (_unrollLoops == value)
+                return;
+
+            _unrollLoops = value;
+            _displayRows.Clear();
+            Invalidate();
+        }
     }
 
-    private static int RealRowCount(Pattern pattern)
+    private readonly Dictionary<Pattern, (string Shape, int Cap, IReadOnlyList<PatternLoops.UnrolledRow> Rows)> _displayRows = [];
+
+    /// <summary>
+    /// A pattern's display rows: one per tick as it plays when loops are unrolled, one per
+    /// non-marker row when they are not. Kept per pattern and worked out again only when its
+    /// shape - row count, markers and counts - changes, since the rows themselves do not matter.
+    /// </summary>
+    private IReadOnlyList<PatternLoops.UnrolledRow> DisplayRows(Pattern pattern)
     {
-        int count = 0;
-        foreach (var row in pattern.Rows)
-        {
-            if (row is not LoopStartRow and not LoopEndRow)
-            {
-                count++;
-            }
-        }
-        return count;
+        string shape = ShapeOf(pattern, out bool endless);
+        int cap = _unrollLoops && endless ? EndlessLoopCap() : 0;
+        if (_displayRows.TryGetValue(pattern, out var cached) && cached.Shape == shape && cached.Cap == cap)
+            return cached.Rows;
+
+        var rows = _unrollLoops ? PatternLoops.Unroll(pattern, cap) : PatternLoops.Compact(pattern);
+        _displayRows[pattern] = (shape, cap, rows);
+        return rows;
     }
 
-    /// <summary>The original Pattern.Rows index of the nth (0-based) real row - the inverse of
-    /// counting real rows while skipping markers.</summary>
-    private static int RealRowOriginalIndex(Pattern pattern, int nthReal)
+    private static string ShapeOf(Pattern pattern, out bool endless)
     {
-        int seen = 0;
+        endless = false;
+        var shape = new System.Text.StringBuilder().Append(pattern.Rows.Count);
         for (int i = 0; i < pattern.Rows.Count; i++)
         {
-            if (pattern.Rows[i] is LoopStartRow or LoopEndRow)
+            switch (pattern.Rows[i])
             {
-                continue;
+                case LoopStartRow:
+                    shape.Append(',').Append(i).Append('S');
+                    break;
+                case LoopEndRow(var count):
+                    shape.Append(',').Append(i).Append('E').Append(count ?? -1);
+                    endless |= count is null;
+                    break;
             }
-            if (seen == nthReal)
-            {
-                return i;
-            }
-            seen++;
         }
-        return pattern.Rows.Count + (nthReal - seen); // past the end - shouldn't normally be hit
+
+        return shape.ToString();
     }
+
+    /// <summary>How far a loop that never ends is unrolled: to where the longest channel reaches
+    /// its RST - the point where the song as a whole starts again - counting such loops once.</summary>
+    private int EndlessLoopCap()
+    {
+        if (_song is null)
+            return 0;
+
+        int longest = 0;
+        foreach (var order in _song.ChannelOrders)
+        {
+            int total = 0;
+            foreach (var token in order.Tokens)
+            {
+                if (token is PatternRefToken(var number) && _song.Patterns.FirstOrDefault(p => p.Number == number) is { } pattern)
+                    total += PatternLoops.Unroll(pattern, 0).Count;
+            }
+
+            longest = Math.Max(longest, total);
+        }
+
+        return Math.Max(longest, 64);
+    }
+
+    private PatternLoops.UnrolledRow? DisplayRowAt(Pattern pattern, int nth)
+    {
+        var rows = DisplayRows(pattern);
+        return nth >= 0 && nth < rows.Count ? rows[nth] : null;
+    }
+
+    /// <summary>The first display row at or after a pattern row - its first pass.</summary>
+    private int RealRowsBefore(Pattern pattern, int localRow)
+    {
+        var rows = DisplayRows(pattern);
+        for (int n = 0; n < rows.Count; n++)
+        {
+            if (rows[n].Row >= localRow)
+                return n;
+        }
+
+        return rows.Count;
+    }
+
+    private int RealRowCount(Pattern pattern) => DisplayRows(pattern).Count;
+
+    /// <summary>The Pattern.Rows index of the nth display row; past the end, where new rows would
+    /// go when typing grows the pattern.</summary>
+    private int RealRowOriginalIndex(Pattern pattern, int nthReal)
+    {
+        var rows = DisplayRows(pattern);
+        return nthReal < rows.Count ? rows[nthReal].Row : pattern.Rows.Count + (nthReal - rows.Count);
+    }
+
+    /// <summary>The marker text for a display row: LS / LE on the first pass, as before, and on a
+    /// later pass's first row which pass it is - "↻2/4", or "↻3" for a long or endless loop.</summary>
+    private string? MarkerTextFor((Pattern Pattern, int LocalRow, int OrderIndex, int Nth) r)
+    {
+        if (DisplayRowAt(r.Pattern, r.Nth) is { Linked: true } d)
+        {
+            if (!d.PassStart)
+                return null;
+
+            return d.Passes is > 0 and < 10 ? $"↻{d.Pass}/{d.Passes}" : $"↻{d.Pass}";
+        }
+
+        return PrefixForRow(r.Pattern, r.LocalRow);
+    }
+
+    /// <summary>The cursor's row in another pass of the same loop: the same pattern row, which
+    /// an edit at the cursor changes too.</summary>
+    private bool IsEchoOfCursor(int channel, int row, Pattern pattern, int localRow)
+    {
+        if (!_unrollLoops || _isPlaybackActive || channel != _cursorChannel || row == _cursorRow)
+            return false;
+
+        return ResolveDisplayRow(_cursorChannel, _cursorRow) is { } cursor
+               && ReferenceEquals(cursor.Pattern, pattern) && cursor.LocalRow == localRow
+               && (DisplayRowAt(pattern, cursor.Nth)?.Passes ?? 1) != 1;
+    }
+
+    /// <summary>A later pass of an unrolled loop is the first pass again, so what changes the
+    /// rows themselves - their number, the loop markers - is made there. Says so and returns true
+    /// when the cursor is on a later pass.</summary>
+    private bool RefuseOnLinkedPass()
+    {
+        if (ResolveDisplayRow(_cursorChannel, _cursorRow) is not { } r || DisplayRowAt(r.Pattern, r.Nth) is not { Linked: true } d)
+            return false;
+
+        Notice?.Invoke($"This is pass {d.Pass} of a loop - insert, delete and loop changes go in pass 1");
+        return true;
+    }
+
+    /// <summary>A short message for the status bar - something refused, and why.</summary>
+    public event Action<string>? Notice;
 
     /// <summary>The inline marker text (if any) that belongs on this real row: "LS" when the
     /// row immediately before it (in Rows) is a LoopStartRow, "LE"/"LE04" when the row
@@ -1448,7 +1579,7 @@ public sealed class TrackerGridControl : Control
     /// pattern-start prefix shows correctly even on the very first row rendered in a repaint
     /// pass (where there's no earlier row in *this* pass to compare against and detect a
     /// transition from).</summary>
-    private static bool IsPatternStartRow(Pattern pattern, int localRow) =>
+    private bool IsPatternStartRow(Pattern pattern, int localRow) =>
         RealRowCount(pattern) > 0 && RealRowOriginalIndex(pattern, 0) == localRow;
 
     private static void EnsureRowCount(Pattern pattern, int count)
@@ -1592,6 +1723,9 @@ public sealed class TrackerGridControl : Control
 
     private void DeleteRowAtCursor()
     {
+        if (RefuseOnLinkedPass())
+            return;
+
         var target = ResolveEditTarget(_cursorChannel, _cursorRow, allowExtend: false);
         if (target is null)
         {
@@ -1609,6 +1743,9 @@ public sealed class TrackerGridControl : Control
     /// dropped. A no-op when the cursor is already at or past that pattern's last row.</summary>
     private void TruncatePatternAtCursor()
     {
+        if (RefuseOnLinkedPass())
+            return;
+
         var target = ResolveEditTarget(_cursorChannel, _cursorRow, allowExtend: false);
         if (target is null)
         {
@@ -1627,6 +1764,9 @@ public sealed class TrackerGridControl : Control
 
     private void InsertHoldAtCursor()
     {
+        if (RefuseOnLinkedPass())
+            return;
+
         var target = ResolveEditTarget(_cursorChannel, _cursorRow, allowExtend: true);
         if (target is null)
         {
@@ -1680,6 +1820,9 @@ public sealed class TrackerGridControl : Control
     /// overwrite of it. Pressing it again on the same spot removes the anchor.</summary>
     private void ToggleLoopStartAtCursor()
     {
+        if (RefuseOnLinkedPass())
+            return;
+
         var target = ResolveEditTarget(_cursorChannel, _cursorRow, allowExtend: false);
         if (target is null)
         {
@@ -1719,6 +1862,9 @@ public sealed class TrackerGridControl : Control
 
     private void ToggleLoopEndAtCursor()
     {
+        if (RefuseOnLinkedPass())
+            return;
+
         var target = ResolveEditTarget(_cursorChannel, _cursorRow, allowExtend: false);
         if (target is null)
         {
@@ -1769,6 +1915,9 @@ public sealed class TrackerGridControl : Control
         // erases whichever one it is actually sitting in. It used to do both at once, which meant
         // clearing a note silently took the loop out of the pattern with it.
         bool onMarker = _cursorField == CursorField.Marker;
+        if (onMarker && RefuseOnLinkedPass())
+            return;
+
 
         if (!onMarker && pattern.Rows[localRow] is not HoldRow)
         {
@@ -1816,6 +1965,9 @@ public sealed class TrackerGridControl : Control
     /// showing.</summary>
     private void EnterMarkerDigit(int digit)
     {
+        if (RefuseOnLinkedPass())
+            return;
+
         if (IsPatternBoundaryAtCursor())
         {
             EnterPatternNumberDigit(digit);
@@ -1874,7 +2026,7 @@ public sealed class TrackerGridControl : Control
     /// draws "PNN" in the Marker column and "NN→PNN" in the order track, and so the row where
     /// typing a pattern number means something.</summary>
     private bool IsPatternBoundaryAtCursor() =>
-        ResolveDisplayRow(_cursorChannel, _cursorRow) is { } r && IsPatternStartRow(r.Pattern, r.LocalRow);
+        ResolveDisplayRow(_cursorChannel, _cursorRow) is { } r && r.Nth == 0;
 
     /// <summary>Retypes which pattern the cursor row's song-order entry points at, two-digit
     /// combo within 800ms like instrument entry. Shared by the Order and Marker fields, since
@@ -1892,7 +2044,7 @@ public sealed class TrackerGridControl : Control
     {
         if (_song is null || _song.Patterns.Count == 0 ||
             ResolveDisplayRow(_cursorChannel, _cursorRow) is not { } r ||
-            !IsPatternStartRow(r.Pattern, r.LocalRow))
+            r.Nth != 0)
         {
             return;
         }
@@ -1921,7 +2073,7 @@ public sealed class TrackerGridControl : Control
 
         int total = SinglePassRowCount(_cursorChannel);
         bool isLoopRow = total > 0 && _cursorRow == total - 1;
-        return isLoopRow || IsPatternStartRow(r.Pattern, r.LocalRow) ? r.OrderIndex : null;
+        return isLoopRow || r.Nth == 0 ? r.OrderIndex : null;
     }
 
     /// <summary>The global grid row where an order entry's first row lands, over the same
@@ -2104,8 +2256,8 @@ public sealed class TrackerGridControl : Control
         // but LocalRow dropped back to/below where it was (RestartPosition looped it back to
         // its own start).
         var lastPatternPerChannel = new Pattern?[3];
-        var lastLocalRowPerChannel = new int[3] { -1, -1, -1 };
-        var resolvedByChannel = new (Pattern Pattern, int LocalRow, int OrderIndex)?[3];
+        var lastNthPerChannel = new int[3] { -1, -1, -1 };
+        var resolvedByChannel = new (Pattern Pattern, int LocalRow, int OrderIndex, int Nth)?[3];
         var isBoundaryRow = new bool[3];
         var markerTextByChannel = new string?[3];
 
@@ -2147,20 +2299,20 @@ public sealed class TrackerGridControl : Control
                 var pattern = resolved?.Pattern;
 
                 bool isBoundary = pattern is not null && (
-                    IsPatternStartRow(pattern, resolved!.Value.LocalRow) ||
+                    resolved!.Value.Nth == 0 ||
                     (lastPatternPerChannel[ch] is not null &&
                      (!ReferenceEquals(pattern, lastPatternPerChannel[ch]) ||
-                      resolved.Value.LocalRow <= lastLocalRowPerChannel[ch])));
+                      resolved.Value.Nth <= lastNthPerChannel[ch])));
                 isBoundaryRow[ch] = isBoundary;
 
                 if (pattern is not null)
                 {
                     lastPatternPerChannel[ch] = pattern;
-                    lastLocalRowPerChannel[ch] = resolved!.Value.LocalRow;
+                    lastNthPerChannel[ch] = resolved!.Value.Nth;
                 }
 
                 markerTextByChannel[ch] = resolved is { } r
-                    ? isBoundary ? $"P{r.Pattern.Number:D2}" : PrefixForRow(r.Pattern, r.LocalRow)
+                    ? isBoundary ? $"P{r.Pattern.Number:D2}" : MarkerTextFor(r)
                     : null;
                 resolvedByChannel[ch] = resolved;
             }
@@ -2207,7 +2359,7 @@ public sealed class TrackerGridControl : Control
     /// rows with nothing currently attached.</summary>
     private void DrawOrderTrackCell(
         Graphics g, int channel, int row, int x, int y, bool isBoundary, bool isLoopRow,
-        (Pattern Pattern, int LocalRow, int OrderIndex)? resolved)
+        (Pattern Pattern, int LocalRow, int OrderIndex, int Nth)? resolved)
     {
         // "RST" rather than "Loop": it matches ChannelOrder.RestartPosition and the "restart"
         // keyword the Patterns.s grammar uses, and is a character narrower. Shown exactly as
@@ -2236,7 +2388,7 @@ public sealed class TrackerGridControl : Control
 
     private void DrawCell(
         Graphics g, int channel, int row, int x, int y,
-        (Pattern Pattern, int LocalRow, int OrderIndex)? resolved, string? markerText)
+        (Pattern Pattern, int LocalRow, int OrderIndex, int Nth)? resolved, string? markerText)
     {
         if (markerText is not null)
         {
@@ -2251,8 +2403,20 @@ public sealed class TrackerGridControl : Control
             return;
         }
 
-        var (pattern, localRow, _) = resolved.Value;
+        var (pattern, localRow, _, nth) = resolved.Value;
         var prow = pattern.Rows[localRow];
+
+        // A later pass of an unrolled loop: the same rows again, tinted, with a rail down the
+        // left - edits here write to the pattern itself, so every pass changes with them.
+        if (DisplayRowAt(pattern, nth) is { Linked: true })
+        {
+            g.FillRectangle(BrushLinkedPass, x, y, MarkerColWidth + NoteColWidth + InstColWidth, RowHeight);
+            g.FillRectangle(BrushLinkedRail, x, y, 2, RowHeight);
+        }
+        else if (IsEchoOfCursor(channel, row, pattern, localRow))
+        {
+            g.DrawRectangle(PenLinkedEcho, x + MarkerColWidth + 1, y + 1, NoteColWidth - 3, RowHeight - 3);
+        }
         string noteText;
         string? instText = null;
         Brush noteBrush;
@@ -2407,7 +2571,7 @@ public sealed class TrackerGridControl : Control
 
             int channelTopRow = anchor.CenterRow + wholeRows - centerIndex;
             Pattern? lastPattern = null;
-            int lastLocalRow = -1;
+            int lastNth = -1;
 
             for (int i = 0; i < visibleRows; i++)
             {
@@ -2417,13 +2581,13 @@ public sealed class TrackerGridControl : Control
                 var pattern = resolved?.Pattern;
 
                 bool isBoundary = pattern is not null && (
-                    IsPatternStartRow(pattern, resolved!.Value.LocalRow) ||
+                    resolved!.Value.Nth == 0 ||
                     (lastPattern is not null &&
-                     (!ReferenceEquals(pattern, lastPattern) || resolved.Value.LocalRow <= lastLocalRow)));
+                     (!ReferenceEquals(pattern, lastPattern) || resolved.Value.Nth <= lastNth)));
                 if (pattern is not null)
                 {
                     lastPattern = pattern;
-                    lastLocalRow = resolved!.Value.LocalRow;
+                    lastNth = resolved!.Value.Nth;
                 }
 
                 g.DrawLine(isBoundary ? PenPatternBoundary : PenGridLine, colX, y, colX + ChannelColWidth, y);
@@ -2434,7 +2598,7 @@ public sealed class TrackerGridControl : Control
                 }
 
                 string? markerText = resolved is { } r
-                    ? isBoundary ? $"P{r.Pattern.Number:D2}" : PrefixForRow(r.Pattern, r.LocalRow)
+                    ? isBoundary ? $"P{r.Pattern.Number:D2}" : MarkerTextFor(r)
                     : null;
                 // The follow view scrolls on through the loop, so the RST row comes round once
                 // per pass - it is whichever row ends the order-list, not one fixed row number.

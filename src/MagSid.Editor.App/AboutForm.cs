@@ -156,6 +156,14 @@ public sealed class AboutForm : Form
              "  INS   Instrument number (hex, two quick keys make two digits)\n\n");
         Body("A note off (\"---\") releases the gate and stops the wavetable; pulse sweep, note " +
              "program, vibrato and slide run on through the release.\n\n");
+        Body("LS / LE loops are drawn unrolled, as they play: the first pass as written, each " +
+             "later pass below it as a linked copy - violet, with a rail and \"↻2/4\" where it " +
+             "starts. A row is then a tick on every channel, so the channels line up wherever " +
+             "the song is stopped or started. Notes, instruments and slides typed in a linked pass " +
+             "go into the pattern itself, so every pass changes (a dashed box marks the same row " +
+             "in the other passes); inserting, deleting and loop changes are made in pass 1. A " +
+             "loop with no count is unrolled to where the longest channel restarts. Menu → " +
+             "Unroll Loops in Retro switches back to drawing a loop's rows once.\n\n");
         Mono("  Arrows             Move between rows and fields\n" +
              "  Tab / Shift+Tab    Next / previous channel\n" +
              "  Home / End         First / last row\n" +

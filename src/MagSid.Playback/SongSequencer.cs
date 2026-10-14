@@ -186,6 +186,74 @@ public sealed class SongSequencer
         return trigger;
     }
 
+    /// <summary>
+    /// The song's state <paramref name="ticksInto"/> ticks after the channel starts the given
+    /// order entry - a row of a loop's later pass is a moment of its own, which a pattern row
+    /// cannot name. What the retro view's play-from-cursor needs once loops are drawn unrolled.
+    /// </summary>
+    public static SequencerPosition? FindPositionInEntry(Song song, int channel, int orderIndex, int ticksInto)
+    {
+        if (orderIndex < 0 || orderIndex >= song.ChannelOrders[channel].Tokens.Count
+            || song.ChannelOrders[channel].Tokens[orderIndex] is not PatternRefToken token
+            || song.Patterns.FirstOrDefault(p => p.Number == token.PatternNumber) is not { } pattern
+            || PatternLoops.Compact(pattern) is not [var first, ..])
+        {
+            return null;
+        }
+
+        var start = FindTrigger(song, channel, orderIndex, first.Row, out _);
+        if (start is null || ticksInto <= 0)
+            return start;
+
+        var probe = new SongSequencer(song, (_, _) => { }, start);
+        for (int ticks = 0, frame = 0; frame < 1_000_000; frame++)
+        {
+            var before = probe.Capture();
+            if (probe.Frame())
+            {
+                if (ticks == ticksInto)
+                    return before;
+                ticks++;
+            }
+        }
+
+        return start;
+    }
+
+    /// <summary>
+    /// How many ticks each channel has played of the order entry it is in at
+    /// <paramref name="position"/> - found by playing the song silently up to it. A loop plays
+    /// its rows more than once, so a pattern row alone does not say which pass a resumed channel
+    /// is on; the ticks do.
+    /// </summary>
+    public static int[] TicksIntoEntries(Song song, SequencerPosition position)
+    {
+        var ticks = new int[3];
+        var sequence = new int?[3];
+        var started = new bool[3];
+        var probe = new SongSequencer(song, (_, _) => { });
+        probe.RowTriggered += (ch, _, _, occurrence, _) =>
+        {
+            if (sequence[ch] != occurrence)
+            {
+                sequence[ch] = occurrence;
+                started[ch] = true;
+            }
+        };
+
+        for (int frame = 0; frame < position.Frame; frame++)
+        {
+            Array.Clear(started);
+            if (!probe.Frame())
+                continue;
+
+            for (int ch = 0; ch < 3; ch++)
+                ticks[ch] = started[ch] ? 1 : ticks[ch] + 1;
+        }
+
+        return ticks;
+    }
+
     private static SequencerPosition? FindTrigger(Song song, int channel, int orderIndex, int rowIndex, out int bestRow)
     {
         bestRow = -1;

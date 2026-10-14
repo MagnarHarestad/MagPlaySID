@@ -19,6 +19,7 @@ public static class EditorSettings
 
     private static bool _showHighHex;
     private static bool _swapSpacebar;
+    private static bool _compactLoops;
     private static string _sidAuthor = string.Empty;
     private static int _sidLoadAddress = MagSid.Core.SidLoadAddress.Default;
     private static string _sidOpenDirectory = string.Empty;
@@ -63,6 +64,26 @@ public static class EditorSettings
                 return;
 
             _swapSpacebar = value;
+            Save();
+        }
+    }
+
+    /// <summary>False - the default - draws the retro view's LS/LE loops unrolled, once per
+    /// pass. True draws a loop's rows once, as the view always used to.</summary>
+    public static bool CompactLoops
+    {
+        get
+        {
+            EnsureLoaded();
+            return _compactLoops;
+        }
+        set
+        {
+            EnsureLoaded();
+            if (_compactLoops == value)
+                return;
+
+            _compactLoops = value;
             Save();
         }
     }
@@ -189,6 +210,7 @@ public static class EditorSettings
             {
                 _showHighHex = stored.ShowHighHex;
                 _swapSpacebar = stored.SwapSpacebar;
+                _compactLoops = stored.CompactLoops;
                 _sidAuthor = stored.SidAuthor ?? string.Empty;
                 // Absent in settings written before the address was settable, and 0 there means
                 // "never chosen" rather than "load at $0000".
@@ -216,6 +238,7 @@ public static class EditorSettings
             {
                 ShowHighHex = _showHighHex,
                 SwapSpacebar = _swapSpacebar,
+                CompactLoops = _compactLoops,
                 SidAuthor = _sidAuthor,
                 SidLoadAddress = _sidLoadAddress,
                 SidOpenDirectory = _sidOpenDirectory,
@@ -234,6 +257,7 @@ public static class EditorSettings
     {
         public bool ShowHighHex { get; set; }
         public bool SwapSpacebar { get; set; }
+        public bool CompactLoops { get; set; }
         public string? SidAuthor { get; set; }
         public int? SidLoadAddress { get; set; }
         public string? SidOpenDirectory { get; set; }
