@@ -5,6 +5,8 @@ A Windows tracker for writing Commodore 64 music, and the SID player that plays 
 By Magnar Harestad. Thanks to Robert Lundquist (Krikkit) and Fredrik Ternell (Swallow) of Censor Design
 for technical advice and tools.
 
+**Website and download: [magnarharestad.github.io/MagSID](https://magnarharestad.github.io/MagSID/)**
+
 ## What this is
 
 A tracker that edits songs as plain text and exports them as `.sid` files, reproducing the C64 player
