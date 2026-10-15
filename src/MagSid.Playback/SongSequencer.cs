@@ -201,7 +201,7 @@ public sealed class SongSequencer
             return null;
         }
 
-        var start = FindTrigger(song, channel, orderIndex, first.Row, out _);
+        var start = FindEntryStart(song, channel, orderIndex);
         if (start is null || ticksInto <= 0)
             return start;
 
@@ -262,6 +262,31 @@ public sealed class SongSequencer
         }
 
         return ticks;
+    }
+
+    /// <summary>
+    /// The frame boundary before the channel first enters <paramref name="orderIndex"/>. Not the
+    /// pattern's first row by <see cref="FindTrigger"/>: that keeps the latest trigger of a row,
+    /// and a pattern opening with a loop plays its first row once a pass - Magnificent's PAT03
+    /// starts with a two-row LE32, and F2 into it began 31 passes, 62 ticks, late.
+    /// </summary>
+    private static SequencerPosition? FindEntryStart(Song song, int channel, int orderIndex)
+    {
+        const int MaxFrames = 2_000_000;
+        var probe = new SongSequencer(song, (_, _) => { });
+        bool triggered = false;
+        probe.RowTriggered += (ch, _, _, _, _) => triggered |= ch == channel;
+
+        for (int frame = 0; frame < MaxFrames; frame++)
+        {
+            var before = probe.Capture();
+            triggered = false;
+            probe.Frame();
+            if (triggered && probe.Capture().Channels[channel].PlayingEntry == orderIndex)
+                return before;
+        }
+
+        return null;
     }
 
     private static SequencerPosition? FindTrigger(Song song, int channel, int orderIndex, int rowIndex, out int bestRow)
