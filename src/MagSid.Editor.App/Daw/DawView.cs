@@ -408,6 +408,17 @@ internal sealed class DawView : Panel
     /// <summary>Opens the selected instrument's name for typing - what follows adding one.</summary>
     public void RenameSelectedInstrument() => BeginRename();
 
+    /// <summary>"+ New instrument" and Add on the right-click menu: a new instrument is one to
+    /// shape, so it opens on the instrument page - the tab first, since the strip moves with it
+    /// and the name is opened for typing there. Posted: adding rebuilds the list, which is not
+    /// done from inside its own click.</summary>
+    private void AddOnInstrumentPage() => BeginInvoke(() =>
+    {
+        if (_current != DawTab.Instrument)
+            Show(DawTab.Instrument);
+        InstrumentAddRequested?.Invoke();
+    });
+
     /// <summary>One row of the instrument list: the text exactly where the plain list put it, and
     /// the instrument's colour in the gap after the number.</summary>
     private void DrawInstrumentItem(object? sender, DrawItemEventArgs e)
@@ -571,7 +582,7 @@ internal sealed class DawView : Panel
             if (SelectedInstrument is { } instrument)
                 InstrumentDeleteRequested?.Invoke(instrument);
         });
-        menu.Items.Add(new ToolStripMenuItem("&Add", null, (_, _) => InstrumentAddRequested?.Invoke()));
+        menu.Items.Add(new ToolStripMenuItem("&Add", null, (_, _) => AddOnInstrumentPage()));
         menu.Items.Add(copyItem);
         menu.Items.Add(deleteItem);
         menu.Opening += (_, _) => copyItem.Enabled = deleteItem.Enabled = SelectedInstrument is not null;
@@ -583,17 +594,9 @@ internal sealed class DawView : Panel
         // the list is refreshed, and neither should touch the pattern.
         _instrumentList.MouseClick += (_, e) =>
         {
-            // Posted: adding rebuilds the list, which is not done from inside its own click. A new
-            // instrument is one to shape, so from ARRANGE it opens on the instrument page - the
-            // tab first, since the list moves with it and its name is opened for typing there.
             if (IsNewInstrumentRow(_instrumentList.IndexFromPoint(e.Location)))
             {
-                BeginInvoke(() =>
-                {
-                    if (_current != DawTab.Instrument)
-                        Show(DawTab.Instrument);
-                    InstrumentAddRequested?.Invoke();
-                });
+                AddOnInstrumentPage();
                 return;
             }
 

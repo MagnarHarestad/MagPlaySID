@@ -27,7 +27,6 @@ internal sealed class DawInstrumentView : Panel
         BackColor = DawPalette.Inset,
         Font = new Font("Segoe UI", 13f),
     };
-    private readonly Label _subtitle = new();
 
     private readonly WaveformSelector _waveform = new();
     private readonly EnvelopeView _envelope = new();
@@ -180,7 +179,6 @@ internal sealed class DawInstrumentView : Panel
             if (instrument is null)
             {
                 _title.Text = "No instrument";
-                _subtitle.Text = string.Empty;
                 _wavetable.SetSteps([]);
                 _noteProgram.SetSteps([]);
                 _filter.SetSteps([]);
@@ -192,7 +190,6 @@ internal sealed class DawInstrumentView : Panel
             var accent = DawPalette.ForInstrument(instrument.Number);
             _title.Text = TitleOf(instrument);
             _title.ForeColor = accent;
-            _subtitle.Text = Describe(instrument);
 
             _waveform.Accent = accent;
 
@@ -236,21 +233,6 @@ internal sealed class DawInstrumentView : Panel
         _filter.PlayingStep = filterStep;
     }
 
-    private static string Describe(Instrument instrument)
-    {
-        var parts = new List<string>
-        {
-            $"WAVE ${instrument.Waveform:X2}",
-            $"A/D ${instrument.AttackDecay:X2}",
-            $"S/R ${instrument.SustainRelease:X2}",
-        };
-
-        if (instrument.HasVibrato)
-            parts.Add($"VIB ${instrument.VibratoDelaySpeed:X2} ${instrument.VibratoDepth:X2}");
-
-        return string.Join("   ·   ", parts);
-    }
-
     private void Commit(Action<Instrument> edit)
     {
         if (_loading || _instrument is not { } instrument)
@@ -258,7 +240,6 @@ internal sealed class DawInstrumentView : Panel
 
         edit(instrument);
         RefreshDerived(instrument);
-        _subtitle.Text = Describe(instrument);
 
         // Not while the editor itself is the one committing, or showing the step would reload the
         // controls out from under the knob being turned.
@@ -649,14 +630,10 @@ internal sealed class DawInstrumentView : Panel
         };
         _nameEditor.LostFocus += (_, _) => EndRename(keep: true);
 
-        _subtitle.Font = new Font("Consolas", 8f);
-        _subtitle.ForeColor = DawPalette.TextDim;
-        _subtitle.AutoSize = true;
-        _subtitle.Location = new Point(18, 38);
-
-        var header = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = DawPalette.Background };
+        // The name alone: the wave, A/D and S/R bytes a line under it read the same as the
+        // controls right below.
+        var header = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = DawPalette.Background };
         header.Controls.Add(_title);
-        header.Controls.Add(_subtitle);
         header.Controls.Add(_nameEditor);
 
         // --- oscillator -------------------------------------------------------------------
