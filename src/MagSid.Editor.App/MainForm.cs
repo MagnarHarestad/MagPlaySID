@@ -67,7 +67,7 @@ public sealed class MainForm : Form
     /// <summary>Move the edit cursor a page at a time. Not a song-order position: the three
     /// channels' order lists are independent, so there is no single index that means the same
     /// moment on all of them - a fixed row count does.</summary>
-    private const int RowsPerPage = 16;
+    private const int RowsPerPage = TrackerGridControl.PageRows;
 
     private readonly ToolStripButton _prevPosition = new("◀");
 

@@ -168,6 +168,7 @@ public sealed class AboutForm : Form
         Mono("  Arrows             Move between rows and fields\n" +
              "  Tab / Shift+Tab    Next / previous channel\n" +
              "  Home / End         First / last row\n" +
+             "  PgUp / PgDn        16 rows up / down\n" +
              "  +  /  -            Select next / previous instrument\n" +
              "  Insert             Insert a hold row\n" +
              "  Delete             Delete the row\n" +

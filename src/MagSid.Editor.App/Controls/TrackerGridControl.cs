@@ -629,6 +629,8 @@ public sealed class TrackerGridControl : Control
             case Keys.Return:
             case Keys.Home:
             case Keys.End:
+            case Keys.PageUp:
+            case Keys.PageDown:
                 return true;
         }
         return base.IsInputKey(keyData);
@@ -906,6 +908,15 @@ public sealed class TrackerGridControl : Control
                 SetCursorRow(0);
                 e.Handled = true;
                 return;
+            // A bar of 16ths at a time - the toolbar's arrows use the same step.
+            case Keys.PageUp:
+                MoveCursorRowPage(-PageRows);
+                e.Handled = true;
+                return;
+            case Keys.PageDown:
+                MoveCursorRowPage(PageRows);
+                e.Handled = true;
+                return;
             case Keys.End when e.Shift && _editMode:
                 TruncatePatternAtCursor();
                 e.Handled = true;
@@ -1098,6 +1109,8 @@ public sealed class TrackerGridControl : Control
     /// toolbar's arrows use this; a page is a plain row count, not a song-order position, because
     /// the three channels' order lists are independent - entry 4 on one channel is not the same
     /// moment as entry 4 on another, so a shared order index cannot mean anything here.</summary>
+    public const int PageRows = 16;
+
     public void MoveCursorRowPage(int rows)
     {
         int last = LastRowForCursorChannel();
