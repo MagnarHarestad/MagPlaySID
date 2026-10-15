@@ -18,9 +18,9 @@ internal sealed class DawInstrumentView : Panel
 {
     private readonly Label _title = new();
 
-    /// <summary>The name and the oscillator and vibrato row: where the DAW puts the instrument
-    /// strip on this page, so the program lanes and the filter editor below run the full width
-    /// under it - as the piano roll does under the strip on ARRANGE.</summary>
+    /// <summary>The name and the envelope and vibrato row: where the DAW puts the instrument strip
+    /// on this page, so the oscillator, the program lanes and the filter editor below run the full
+    /// width under it - as the piano roll does under the strip on ARRANGE.</summary>
     private readonly Panel _upper = new() { Dock = DockStyle.Top, BackColor = DawPalette.Background };
 
     /// <summary>See <see cref="_upper"/>.</summary>
@@ -646,14 +646,23 @@ internal sealed class DawInstrumentView : Panel
 
         // --- oscillator -------------------------------------------------------------------
         // The envelope and pulse knobs come first, under the name - they are what is reached for
-        // most - and the oscillator's waveform below them, right over the wavetable it starts.
+        // most. The oscillator's waveform is a row of its own below, the full width under the
+        // instrument strip like the lanes, right over the wavetable it starts.
         var sound = Section("ENVELOPE & PULSE", DawPalette.Envelope);
-        sound.Dock = DockStyle.Fill;
+        sound.Width = 620;
+        sound.Dock = DockStyle.Left;
 
         var oscillator = Section("OSCILLATOR", DawPalette.Oscillator);
-        oscillator.Dock = DockStyle.Bottom;
-        oscillator.Height = SectionPanel.HeaderHeight + 76 + 1;
+        oscillator.Dock = DockStyle.Fill;
         _waveform.Dock = DockStyle.Fill;
+        var oscillatorRow = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 8 + SectionPanel.HeaderHeight + 76 + 1,
+            Padding = new Padding(0, 8, 0, 0),
+            BackColor = DawPalette.Background,
+        };
+        oscillatorRow.Controls.Add(oscillator);
 
         // The curve gave back the height the oscillator's own header now takes, so the program
         // lanes below keep theirs.
@@ -702,11 +711,6 @@ internal sealed class DawInstrumentView : Panel
         sound.Body.Controls.Add(_envelope);
         oscillator.Body.Controls.Add(_waveform);
 
-        var left = new Panel { Dock = DockStyle.Left, Width = 620, BackColor = DawPalette.Background };
-        left.Controls.Add(sound);
-        left.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 8, BackColor = DawPalette.Background });
-        left.Controls.Add(oscillator);
-
         // --- effects ----------------------------------------------------------------------
         var effects = Section("VIBRATO", DawPalette.Effect);
         effects.Dock = DockStyle.Fill;
@@ -738,9 +742,9 @@ internal sealed class DawInstrumentView : Panel
         effects.Body.Controls.Add(effectKnobs);
         effects.Body.Controls.Add(effectNote);
 
-        var top = new Panel { Dock = DockStyle.Top, Height = 309, BackColor = DawPalette.Background };
+        var top = new Panel { Dock = DockStyle.Top, Height = 196, BackColor = DawPalette.Background };
         top.Controls.Add(effects);
-        top.Controls.Add(left);
+        top.Controls.Add(sound);
 
         // --- the three programs -----------------------------------------------------------
         _wavetable.Title = "WAVETABLE";
@@ -812,6 +816,7 @@ internal sealed class DawInstrumentView : Panel
 
         Controls.Add(programs);
         Controls.Add(_filterStep);
+        Controls.Add(oscillatorRow);
         Controls.Add(_upper);
     }
 
