@@ -14,6 +14,10 @@ namespace MagSid.Editor.App.Daw;
 /// Left-click picks one waveform on its own, right-click adds or removes one. Choosing a waveform
 /// is the common intent and combining the rare one, so the plain click is the plain meaning.
 ///
+/// Noise plays alone. Combined with another waveform the SID writes zeros back into the noise
+/// shift register and goes silent - and stays silent on plain noise too until the test bit resets
+/// it - so right-click will not put noise together with anything.
+///
 /// Sync and ring sit beside them as their own group. They are bits 1 and 2 of the same register
 /// rather than waveforms, so either button just flips them: there is nothing to be exclusive
 /// about. Both modulate against the voice before this one - voice 1's partner is voice 3 - and
@@ -212,8 +216,8 @@ internal sealed class WaveformSelector : Control
                 : (byte)(low | bit);
 
             // Clearing the last waveform bit would leave an instrument that cannot make a sound, so
-            // the last one standing refuses to go out.
-            if (((next | 0x01) & 0xF0) != 0)
+            // the last one standing refuses to go out - and noise with another waveform is silence.
+            if (((next | 0x01) & 0xF0) != 0 && !IsNoiseCombination(next))
             {
                 Apply(next);
             }
@@ -221,6 +225,9 @@ internal sealed class WaveformSelector : Control
 
         base.OnMouseClick(e);
     }
+
+    private static bool IsNoiseCombination(byte waveform) =>
+        (waveform & 0x80) != 0 && (waveform & 0x70) != 0;
 
     private void Apply(byte next)
     {
@@ -278,7 +285,8 @@ internal sealed class WaveformSelector : Control
             new RectangleF(0, preview.Y + 2, preview.Width - 5, 12), far);
 
         // A gesture nobody can see is a gesture nobody finds.
-        g.DrawString("RIGHT-CLICK TO COMBINE", hexFont, hexInk, preview.X + 5, preview.Y + 2);
+        g.DrawString((_waveform & 0x80) != 0 ? "NOISE PLAYS ALONE" : "RIGHT-CLICK TO COMBINE",
+            hexFont, hexInk, preview.X + 5, preview.Y + 2);
     }
 
     private static void DrawTab(Graphics g, RectangleF box, string label, bool on, bool hovered, Color accent)
