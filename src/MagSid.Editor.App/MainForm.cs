@@ -595,6 +595,9 @@ public sealed class MainForm : Form
         // Through the session, the same as the retro list - so an instrument added here is added
         // the same way, with the same undo behaviour and the same numbering rules.
         _dawView.InstrumentAddRequested += AddNewInstrument;
+        _dawView.InstrumentFromBankRequested += AddFromBank;
+        _dawView.InstrumentLoadRequested += DoLoadInstrument;
+        _dawView.SoundAuditionRequested += AuditionSound;
         _dawView.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
         _dawView.InstrumentDeleteRequested += instrument => _session.DeleteInstrument(instrument);
 
@@ -2205,6 +2208,32 @@ public sealed class MainForm : Form
 
         SelectAddedInstrument(added.Number);
         ShowNotice($"Added {added.Name} from the sound bank ({sound.Origin})");
+    }
+
+    /// <summary>Plays a sound that is not in the song yet - the sound bank's cards - for half a
+    /// second, on the note audition's own device.</summary>
+    private void AuditionSound(Instrument instrument, NoteName note)
+    {
+        try
+        {
+            _jamEngine ??= new JamEngine(_chipModel);
+            _jamEngine.Start();
+            _jamEngine.NoteOn(note, instrument);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NAudio.MmException)
+        {
+            _jamEngine?.Dispose();
+            _jamEngine = null;
+            return;
+        }
+
+        var release = new System.Windows.Forms.Timer { Interval = 500 };
+        release.Tick += (_, _) =>
+        {
+            release.Dispose();
+            _jamEngine?.NoteOff(note);
+        };
+        release.Start();
     }
 
     private void SelectAddedInstrument(int number)

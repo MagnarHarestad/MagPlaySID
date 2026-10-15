@@ -118,13 +118,20 @@ public sealed class InstrumentListHeader : Panel
     private void FillBankMenu()
     {
         _bankMenu.DropDownItems.Clear();
+        AddBankItems(_bankMenu.DropDownItems, sound => AddFromBankRequested?.Invoke(sound));
+        DarkTheme.Apply(_bankMenu.DropDown);
+    }
+
+    /// <summary>One item per sound of the bank as it stands now - the built-in sounds with the
+    /// user's own files over them - for this header's menu and the DAW's SOUNDBANK button alike.</summary>
+    public static void AddBankItems(ToolStripItemCollection items, Action<GmBank.Sound> picked)
+    {
         foreach (var sound in GmBank.Load(EditorSettings.BankDirectory).All)
         {
             var item = new ToolStripMenuItem($"{Pretty(sound.Key)}  -  {sound.Instrument.Name} ({sound.Origin})");
-            item.Click += (_, _) => AddFromBankRequested?.Invoke(sound);
-            _bankMenu.DropDownItems.Add(item);
+            item.Click += (_, _) => picked(sound);
+            items.Add(item);
         }
-        DarkTheme.Apply(_bankMenu.DropDown);
     }
 
     private static string Pretty(string key) => key switch
@@ -138,7 +145,7 @@ public sealed class InstrumentListHeader : Panel
 
     /// <summary>Where files of the user's own replace the bank's sounds - made on first use, so
     /// there is somewhere to save them.</summary>
-    private static void OpenBankFolder()
+    public static void OpenBankFolder()
     {
         Directory.CreateDirectory(EditorSettings.BankDirectory);
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo

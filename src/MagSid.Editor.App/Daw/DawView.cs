@@ -52,6 +52,10 @@ internal sealed class DawView : Panel
     private readonly FlowLayoutPanel _tabs = new();
     private readonly ListBox _instrumentList = new();
 
+    /// <summary>On the instrument page: a new instrument from the sound bank, or from a file - the
+    /// same choice the Retro list's arrow offers, as a sheet of cards (see SoundBankPicker).</summary>
+    private readonly TabButton _soundBank = new("SOUNDBANK");
+
     /// <summary>The last row of the strip when there is room for another instrument: clicking it
     /// adds one. Never selected - choosing it by the keyboard puts the selection back.</summary>
     private const string NewInstrumentText = "+ New instrument";
@@ -107,6 +111,11 @@ internal sealed class DawView : Panel
     /// its undo history - the DAW never touches the instrument collection itself, so both views
     /// always add instruments the same way.</summary>
     public event Action? InstrumentAddRequested;
+    public event Action<MagSid.Core.Midi.GmBank.Sound>? InstrumentFromBankRequested;
+    public event Action? InstrumentLoadRequested;
+
+    /// <summary>A sound of the bank to be heard before it is taken, on the note given.</summary>
+    public event Action<MagSid.Core.Model.Instrument, MagSid.Core.Model.NoteName>? SoundAuditionRequested;
 
     public event Action<Instrument>? InstrumentCopyRequested;
 
@@ -405,6 +414,37 @@ internal sealed class DawView : Panel
     private bool IsNewInstrumentRow(int index) =>
         _song is { } song && index == song.Instruments.Count && index < _instrumentList.Items.Count;
 
+    /// <summary>Drops the sound bank's cards under the SOUNDBANK button. Read each time it opens,
+    /// so a file just saved into the bank folder is there.</summary>
+    private void ShowSoundBank()
+    {
+        var picker = new SoundBankPicker(MagSid.Core.Midi.GmBank.Load(EditorSettings.BankDirectory).All.ToList());
+        var host = new ToolStripControlHost(picker) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = picker.Size };
+        var drop = new ToolStripDropDown { Padding = Padding.Empty, BackColor = DawPalette.Panel };
+        drop.Items.Add(host);
+        drop.Closed += (_, _) => BeginInvoke(drop.Dispose);
+
+        picker.Auditioned += sound => SoundAuditionRequested?.Invoke(sound.Instrument,
+            MagSid.Core.Model.NoteName.Parse(sound.Key is "Bass" or "SynthBass" ? "C-2" : "C-4"));
+        picker.Picked += sound =>
+        {
+            drop.Close();
+            BeginInvoke(() => InstrumentFromBankRequested?.Invoke(sound));
+        };
+        picker.LoadRequested += () =>
+        {
+            drop.Close();
+            BeginInvoke(() => InstrumentLoadRequested?.Invoke());
+        };
+        picker.FolderRequested += () =>
+        {
+            drop.Close();
+            MagSid.Editor.App.Controls.InstrumentListHeader.OpenBankFolder();
+        };
+
+        drop.Show(_soundBank, new Point(0, _soundBank.Height + 2));
+    }
+
     /// <summary>Opens the selected instrument's name for typing - what follows adding one.</summary>
     public void RenameSelectedInstrument() => BeginRename();
 
@@ -474,6 +514,10 @@ internal sealed class DawView : Panel
             _tabButtons.Add(button);
             _tabs.Controls.Add(button);
         }
+
+        _soundBank.Margin = new Padding(24, 0, 0, 0);
+        _soundBank.Click += (_, _) => ShowSoundBank();
+        _tabs.Controls.Add(_soundBank);
 
         _autoScroll.Size = new Size(96, 26);
         _autoScroll.BackColor = DawPalette.PanelHeader;
@@ -812,6 +856,7 @@ internal sealed class DawView : Panel
 
         // Autoscroll steers the lanes and the roll, which only the arrangement shows.
         _autoScroll.Visible = tab == DawTab.Arrange;
+        _soundBank.Visible = tab == DawTab.Instrument;
         _cycle.Visible = tab == DawTab.Arrange;
         _preRoll.Visible = _click.Visible = _punch.Visible = tab == DawTab.Arrange;
 
