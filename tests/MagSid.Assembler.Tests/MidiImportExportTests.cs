@@ -95,6 +95,34 @@ public class MidiImportExportTests
         PlaysAsTheEditorDoes(result);
     }
 
+    /// <summary>midifiles sits at the repository root, five levels up from
+    /// tests\X\bin\Debug\net8.0.</summary>
+    private static string MidiDirectory => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "midifiles"));
+
+    public static TheoryData<string> MidiFiles()
+    {
+        var data = new TheoryData<string>();
+        foreach (string path in Directory.GetFiles(MidiDirectory, "*.mid").Order())
+            data.Add(Path.GetFileName(path));
+        return data;
+    }
+
+    /// <summary>The proof-of-concept set: each file, with the dialog's own suggested parts and
+    /// speed, becomes a song that exports and plays on the 6502 as it does in the editor.</summary>
+    [Theory]
+    [MemberData(nameof(MidiFiles))]
+    public void Every_file_in_midifiles_imports_exports_and_plays(string file)
+    {
+        var midi = MidiFileReader.Read(File.ReadAllBytes(Path.Combine(MidiDirectory, file)));
+        var (speed, _) = MidiImporter.SuggestSpeed(midi.Bpm, 4);
+
+        var result = MidiImporter.Import(midi, new MidiImportOptions(MidiImporter.SuggestVoices(midi), 4, speed));
+
+        Assert.True(result.Report.NotesPlaced > 0);
+        PlaysAsTheEditorDoes(result);
+    }
+
     private static void PlaysAsTheEditorDoes(MidiImportResult result)
     {
         var song = result.Song;

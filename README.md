@@ -66,6 +66,7 @@ src/
 tests/
 SongData/                 the songs, as plain text
 Digi/                     a sample for the Digi-to-SID-osc feature
+midifiles/                25 public-domain and Creative Commons tunes for Import MIDI
 ```
 
 ## The three ports, and what keeps them honest
@@ -142,3 +143,6 @@ PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
 The editor's SID emulation is a C# translation of reSID by Dag Lem, which is licensed under the GPL,
 version 2 or later - so the editor is too. It also includes NAudio, under the MIT license. Both are
 credited in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+The MIDI files in `midifiles/` are not part of the program and keep their own licences - public
+domain or Creative Commons - listed with credits in [midifiles/README.md](midifiles/README.md).

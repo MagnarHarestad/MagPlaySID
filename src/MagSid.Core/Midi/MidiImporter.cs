@@ -114,6 +114,28 @@ public static class MidiImporter
         return (int)((last + rowsPerBar - 1) / rowsPerBar);
     }
 
+    /// <summary>
+    /// A starting choice of parts. With a drum part, the demo songs' layout: drums and the lowest
+    /// part as bass on voice 1, the highest part on voice 2, the next on voice 3. Without one: the
+    /// highest on voice 1, the next on voice 2, the lowest as bass on voice 3. A part with under a
+    /// fifth of the busiest one's notes is an intro or an effect, not a line to build on.
+    /// </summary>
+    public static IReadOnlyList<VoiceImport> SuggestVoices(MidiSong midi)
+    {
+        var sources = midi.Sources();
+        var parts = sources.Where(s => !s.LooksLikeDrums).ToList();
+        int busiest = parts.Select(s => s.NoteCount).DefaultIfEmpty(0).Max();
+        var melodic = parts.Where(s => s.NoteCount * 5 >= busiest).OrderByDescending(s => s.AverageKey).ToList();
+        var drums = sources.Where(s => s.LooksLikeDrums).OrderByDescending(s => s.NoteCount).FirstOrDefault();
+        var highest = melodic.ElementAtOrDefault(0);
+        var next = melodic.Count > 2 ? melodic[1] : null;
+        var lowest = melodic.Count > 1 ? melodic[^1] : null;
+
+        return drums is not null
+            ? [new(lowest, VoiceRole.DrumsAndBass, Drums: drums), new(highest, VoiceRole.Melody), new(next, VoiceRole.Melody)]
+            : [new(highest, VoiceRole.Melody), new(next, VoiceRole.Melody), new(lowest, VoiceRole.Bass)];
+    }
+
     /// <summary>Every part a voice reads, for <see cref="BarsIn"/>.</summary>
     public static IEnumerable<MidiSource?> PartsOf(VoiceImport voice) =>
         voice.Role == VoiceRole.DrumsAndBass ? [voice.Source, voice.Drums] : [voice.Source];

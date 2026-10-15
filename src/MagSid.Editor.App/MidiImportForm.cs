@@ -204,38 +204,18 @@ public sealed class MidiImportForm : Form
         return panel;
     }
 
-    /// <summary>
-    /// With a drum part, the demo songs' layout: drums and the lowest part as bass on voice 1, the
-    /// highest part on voice 2, the next on voice 3. Without one: the highest on voice 1, the next
-    /// on voice 2, the lowest as bass on voice 3. A part with under a fifth of the busiest one's
-    /// notes is an intro or an effect, not a line to build on.
-    /// </summary>
+    /// <summary>The importer's own suggestion (see MidiImporter.SuggestVoices), shown in the
+    /// boxes.</summary>
     private void ChooseDefaults()
     {
-        var parts = _sources.Where(s => !s.LooksLikeDrums).ToList();
-        int busiest = parts.Select(s => s.NoteCount).DefaultIfEmpty(0).Max();
-        var melodic = parts.Where(s => s.NoteCount * 5 >= busiest).OrderByDescending(s => s.AverageKey).ToList();
-        var drums = _sources.Where(s => s.LooksLikeDrums).OrderByDescending(s => s.NoteCount).FirstOrDefault();
         int Index(MidiSource? s) => s is null ? 0 : _sources.ToList().IndexOf(s) + 1;
 
-        if (drums is not null)
+        var suggested = MidiImporter.SuggestVoices(_midi);
+        for (int v = 0; v < Song.ChannelCount; v++)
         {
-            _source[0].SelectedIndex = Index(melodic.Count > 1 ? melodic[^1] : null);
-            _drums[0].SelectedIndex = Index(drums);
-            _source[1].SelectedIndex = Index(melodic.ElementAtOrDefault(0));
-            _source[2].SelectedIndex = Index(melodic.Count > 2 ? melodic[1] : null);
-            _role[0].SelectedIndex = 2;
-            _role[1].SelectedIndex = 0;
-            _role[2].SelectedIndex = 0;
-        }
-        else
-        {
-            _source[0].SelectedIndex = Index(melodic.ElementAtOrDefault(0));
-            _source[1].SelectedIndex = Index(melodic.Count > 2 ? melodic[1] : null);
-            _source[2].SelectedIndex = Index(melodic.Count > 1 ? melodic[^1] : null);
-            _role[0].SelectedIndex = 0;
-            _role[1].SelectedIndex = 0;
-            _role[2].SelectedIndex = 1;
+            _source[v].SelectedIndex = Index(suggested[v].Source);
+            _drums[v].SelectedIndex = Index(suggested[v].Drums);
+            _role[v].SelectedIndex = (int)suggested[v].Role;
         }
     }
 
