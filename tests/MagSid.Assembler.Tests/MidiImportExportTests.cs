@@ -46,6 +46,22 @@ public class MidiImportExportTests
         ]);
     }
 
+    /// <summary>Kick on 1 and 3, snare on 2 and 4 with a flam, a hi-hat on every 8th, a tom.</summary>
+    private static MidiTrack Drums(int bars)
+    {
+        var hits = new List<MidiNote>();
+        for (int bar = 0; bar < bars; bar++)
+        {
+            long at = bar * 4L * Tpq;
+            foreach (int beat in new[] { 0, 2 }) hits.Add(new MidiNote(9, at + beat * Tpq, at + beat * Tpq + 30, 36, 100));
+            foreach (int beat in new[] { 1, 3 }) hits.Add(new MidiNote(9, at + beat * Tpq, at + beat * Tpq + 30, 38, 100));
+            hits.Add(new MidiNote(9, at + 3 * Tpq - 30, at + 3 * Tpq, 38, 60));
+            for (int eighth = 0; eighth < 8; eighth++) hits.Add(new MidiNote(9, at + eighth * Tpq / 2, at + eighth * Tpq / 2 + 20, 42, 80));
+            if (bar % 4 == 3) hits.Add(new MidiNote(9, at + 3 * Tpq + Tpq / 2, at + 4 * Tpq, 45, 100));
+        }
+        return new MidiTrack(2, "Drums", hits.OrderBy(n => n.Start).ToList(), new Dictionary<int, int>());
+    }
+
     [Fact]
     public void An_imported_song_exports_and_the_6502_plays_it_as_the_editor_does()
     {
@@ -55,10 +71,33 @@ public class MidiImportExportTests
         var result = MidiImporter.Import(midi, new MidiImportOptions(
             [new VoiceImport(sources[0], VoiceRole.Melody), new VoiceImport(sources[0], VoiceRole.Bass),
              new VoiceImport(sources[1], VoiceRole.Bass, Transpose: 12)], 4, speed));
-        var song = result.Song;
 
         Assert.True(result.Report.Patterns < 3 * 12, "repeated bars should share patterns");
+        PlaysAsTheEditorDoes(result);
+    }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Drums_and_bass_on_one_voice_export_and_play_as_the_editor_does(bool hiHat)
+    {
+        var twelve = TwelveBars();
+        var midi = twelve with { Tracks = [.. twelve.Tracks, Drums(12)] };
+        var sources = midi.Sources();
+        var (speed, _) = MidiImporter.SuggestSpeed(midi.Bpm, 4);
+        var result = MidiImporter.Import(midi, new MidiImportOptions(
+            [new VoiceImport(sources[1], VoiceRole.DrumsAndBass, Drums: sources[2], HiHat: hiHat),
+             new VoiceImport(sources[0], VoiceRole.Melody), new VoiceImport(null, VoiceRole.Melody)], 4, speed));
+
+        Assert.Contains(result.Song.Instruments, i => i.Name == "KickBass");
+        Assert.Contains(result.Song.Instruments, i => i.Name == "Snare");
+        Assert.Equal(hiHat, result.Song.Instruments.Any(i => i.Name == "Hihat"));
+        PlaysAsTheEditorDoes(result);
+    }
+
+    private static void PlaysAsTheEditorDoes(MidiImportResult result)
+    {
+        var song = result.Song;
         var image = SongImageBuilder.Build(song);
         Assert.Equal(result.Report.TotalBytes, image.Length);
 

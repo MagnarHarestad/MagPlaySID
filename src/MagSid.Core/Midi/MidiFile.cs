@@ -48,6 +48,11 @@ public sealed record MidiSource(
     /// <summary>General MIDI puts percussion on channel 10.</summary>
     public bool IsDrums => Channel == 9;
 
+    /// <summary>Channel 10, or a track named for its drums - plenty of files, transcriptions
+    /// especially, keep them on another channel.</summary>
+    public bool LooksLikeDrums => IsDrums
+        || new[] { "drum", "perc", "kit" }.Any(word => Name.Contains(word, StringComparison.OrdinalIgnoreCase));
+
     internal static MidiSource From(MidiTrack track, int channel, IReadOnlyList<MidiNote> notes)
     {
         // The most notes sounding together: +1 at each start, -1 at each end, ends first on a tie.

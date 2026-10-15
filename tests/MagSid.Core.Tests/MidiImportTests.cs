@@ -297,6 +297,92 @@ public class MidiImportTests
         Assert.Throws<MidiImportException>(() => Import(midi));
     }
 
+    // ---------------------------------------------------------------------------- drums and bass
+
+    private static string Named(Song song, int channel) =>
+        string.Join(" ", song.ChannelOrders[channel].Tokens.OfType<PatternRefToken>()
+            .SelectMany(t => song.Patterns[t.PatternNumber - 1].Rows)
+            .Select(r => r switch
+            {
+                NoteRow n => $"{n.Note}:{song.Instruments.Single(i => i.Number == n.InstrumentNumber).Name}",
+                NoteOffRow => "---",
+                _ => ".",
+            }));
+
+    /// <summary>Bar 2 of the Drax transcription: kick on 1 and 3, the snare on 2 and 4 as flams,
+    /// a hi-hat on most rows, and a 16th bass line jumping octaves.</summary>
+    private static MidiSong DraxBar()
+    {
+        var smf = new Smf().Track("drums");
+        foreach (int row in new[] { 0, 8 }) smf.Note(row * Row, Row, 36);
+        foreach (int row in new[] { 3, 4, 11, 12 }) smf.Note(row * Row, Row, 38);
+        foreach (int row in new[] { 0, 1, 2, 6, 7, 8, 9, 10, 12, 14 }) smf.Note(row * Row, Row / 2, 42);
+        smf.Track("bass");
+        foreach (var (row, key) in new[] { (1, 41), (2, 39), (3, 29), (5, 39), (6, 41), (7, 29), (9, 29),
+                                           (10, 27), (12, 32), (13, 34), (14, 36), (15, 39) })
+            smf.Note(row * Row, Row, key);
+        return Read(smf);
+    }
+
+    [Fact]
+    public void Kick_snare_and_bass_share_one_voice_the_way_the_demo_songs_do()
+    {
+        var midi = DraxBar();
+        var (drums, bass) = (midi.Sources()[0], midi.Sources()[1]);
+
+        var result = Import(midi, new VoiceImport(bass, VoiceRole.DrumsAndBass, Drums: drums));
+
+        // The kick takes the bass note and the bass is not struck again under it (rows 1, 9); the
+        // flams land on the beat (4, 12); the snare carries the bass note; no hi-hat.
+        Assert.Equal(
+            "F-2:KickBass . D#2:Bass F-1:Bass F-1:Snare D#2:Bass F-2:Bass F-1:Bass " +
+            "F-1:KickBass . D#1:Bass --- G#1:Snare A#1:Bass C-2:Bass D#2:Bass",
+            Named(result.Song, 0));
+        Assert.Equal(["KickBass", "Bass", "Snare"], result.Song.Instruments.Select(i => i.Name));
+        Assert.Equal(4, result.Report.DrumHits);
+        Assert.Equal(10 + 2, result.Report.DrumsLeftOut);    // every hi-hat, and the flams' first hits
+        Assert.Equal(1, result.Report.NotesDropped);         // G#1, under the snare
+        Assert.Empty(SongValidator.Validate(result.Song));
+    }
+
+    [Fact]
+    public void With_the_hi_hat_on_it_takes_only_rows_the_bass_has_left()
+    {
+        var smf = new Smf().Track("drums").Note(0, Row, 36);
+        for (int row = 0; row < 6; row++) smf.Note(row * Row, Row / 2, 42);
+        smf.Track("bass").Note(0, 2 * Row, 36);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[1], VoiceRole.DrumsAndBass,
+                                                  Drums: midi.Sources()[0], HiHat: true));
+
+        Assert.StartsWith("C-2:KickBass . C-2:Hihat C-2:Hihat C-2:Hihat C-2:Hihat .", Named(result.Song, 0));
+    }
+
+    [Fact]
+    public void Without_a_bass_part_the_drums_still_play_and_toms_are_left_out()
+    {
+        var midi = Read(new Smf().Track("Percussion").Note(0, Row, 36).Note(4 * Row, Row, 40).Note(8 * Row, Row, 45));
+        var drums = midi.Sources().Single();
+        Assert.True(drums.LooksLikeDrums);
+
+        var result = Import(midi, new VoiceImport(null, VoiceRole.DrumsAndBass, Drums: drums));
+
+        Assert.StartsWith("C-2:KickBass . . . C-2:Snare . . . .", Named(result.Song, 0));
+        Assert.Equal((2, 1), (result.Report.DrumHits, result.Report.DrumsLeftOut));
+    }
+
+    [Theory]
+    [InlineData(0, 0x01)]
+    [InlineData(1, 0x02)]
+    [InlineData(2, 0x04)]
+    public void The_kits_filter_is_routed_to_the_channel_it_plays_on(int channel, int voiceBit)
+    {
+        var kick = MidiImporter.Kit("KickBass", channel);
+
+        Assert.All(kick.Filter.Where(f => f.IsSetup), f => Assert.Equal((byte)(0xF0 | voiceBit), f.ResonanceRouting!.Value));
+    }
+
     [Theory]
     [InlineData(120, 4, 5, 125.0)]
     [InlineData(100, 4, 7, 93.75)]

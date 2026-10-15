@@ -386,7 +386,9 @@ public sealed class AboutForm : Form
              "Digi to SID-osc turns a .wav into ring-modulated instruments, the classic C64 " +
              "speech trick. Load a clip, adjust the settings, Audition, then Add to Song.\n\n" +
              "Import MIDI makes a new song from a .mid file. Choose a track for each of the three " +
-             "voices: Melody keeps the highest note of a chord, Bass the lowest. Notes snap to a " +
+             "voices: Melody keeps the highest note of a chord, Bass the lowest, and Drums + bass " +
+             "puts kick, snare and the bass line on one voice the way the demo songs' channel 1 " +
+             "does - the KickBass settles on the bass note, hi-hats only if ticked. Notes snap to a " +
              "16th or 32nd grid at one speed, and repeated bars are stored once; the dialog shows " +
              "the size and what had to give before anything is replaced. Run Optimize afterwards.\n\n");
         Mono("  Voiced threshold %   How sure pitch detection must be\n" +

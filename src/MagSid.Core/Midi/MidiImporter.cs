@@ -3,7 +3,7 @@ using MagSid.Core.Validation;
 
 namespace MagSid.Core.Midi;
 
-/// <summary>Which note of a chord a voice keeps.</summary>
+/// <summary>What a voice is built from.</summary>
 public enum VoiceRole
 {
     /// <summary>The highest note sounding - a tune sits on top.</summary>
@@ -11,12 +11,31 @@ public enum VoiceRole
 
     /// <summary>The lowest note sounding - a bass line sits underneath.</summary>
     Bass,
+
+    /// <summary>
+    /// The C64 way of spending one voice on the whole rhythm section: kick and snare from a drum
+    /// part, the bass line from a bass part in the rows between. The kick is a KickBass - a thump
+    /// that settles on the bass note - so a kick and a bass note share a row instead of fighting
+    /// for it. This is how channel 1 is built in the demo songs.
+    /// </summary>
+    DrumsAndBass,
 }
 
-/// <summary>What one SID voice is fed from. A null <see cref="Source"/> leaves the voice silent;
-/// a null <see cref="Instrument"/> gets the role's default sound.</summary>
-public sealed record VoiceImport(MidiSource? Source, VoiceRole Role, int Transpose = 0,
-                                 Instrument? Instrument = null);
+/// <summary>
+/// What one SID voice is fed from. <see cref="Source"/> is the melodic part - for
+/// <see cref="VoiceRole.DrumsAndBass"/> the bass line - and <see cref="Drums"/> the drum part,
+/// read only by that role. A null <see cref="Instrument"/> gets the role's default sound.
+/// </summary>
+public sealed record VoiceImport(
+    MidiSource? Source,
+    VoiceRole Role,
+    int Transpose = 0,
+    Instrument? Instrument = null,
+    MidiSource? Drums = null,
+    bool HiHat = false)
+{
+    public bool Plays => Source is not null || (Role == VoiceRole.DrumsAndBass && Drums is not null);
+}
 
 public sealed record MidiImportOptions(
     IReadOnlyList<VoiceImport> Voices,
@@ -39,7 +58,9 @@ public sealed record MidiImportReport(
     int NotesShifted,
     double SourceBpm,
     double SongBpm,
-    int TempoChanges);
+    int TempoChanges,
+    int DrumHits = 0,
+    int DrumsLeftOut = 0);
 
 public sealed record MidiImportResult(Song Song, MidiImportReport Report);
 
@@ -47,7 +68,7 @@ public sealed record MidiImportResult(Song Song, MidiImportReport Report);
 /// Turns a MIDI file into a MagSID song: three voices, one note each at a time, on a row grid at
 /// one speed.
 ///
-/// Each voice reads one track's channel and keeps its highest or lowest sounding note, a new
+/// A melodic voice reads one track's channel and keeps its highest or lowest sounding note, a new
 /// note taking over the moment it becomes that note. The rows are cut into patterns of whole
 /// bars, and a pattern that repeats is stored once and named again in the order - which is where
 /// the size goes, since tunes repeat. The pattern length is whichever of 1, 2, 4 or 8 bars makes
@@ -61,6 +82,8 @@ public static class MidiImporter
     private const int LowestKey = 12;            // MIDI C0 is the player's C-0
     private const int PitchCount = 96;
 
+    private static readonly NoteName FallbackDrumNote = NoteName.Parse("C-2");
+
     /// <summary>The speed closest to the file's tempo, and the tempo that speed actually plays.
     /// A row lasts a whole number of 50Hz frames, so most tempos land a few percent off.</summary>
     public static (int Speed, double Bpm) SuggestSpeed(double bpm, int rowsPerBeat)
@@ -73,15 +96,15 @@ public static class MidiImporter
     public static double SongBpm(int speed, int rowsPerBeat) =>
         PalFramesPerMinute / (double)(rowsPerBeat * (speed + 1));
 
-    /// <summary>Rows in one bar of the file's time signature, or null when a bar does not land on
-    /// a whole row at this grid.</summary>
+    /// <summary>Rows in one bar of the file's time signature - or of 4/4, when a bar of it does
+    /// not land on a whole row at this grid.</summary>
     public static int RowsPerBar(MidiSong midi, int rowsPerBeat)
     {
         int rows = midi.BeatsPerBar * 4 * rowsPerBeat / midi.BeatUnit;
         return rows > 0 && midi.BeatsPerBar * 4 * rowsPerBeat % midi.BeatUnit == 0 ? rows : 4 * rowsPerBeat;
     }
 
-    /// <summary>How many whole bars the chosen voices cover.</summary>
+    /// <summary>How many whole bars the chosen parts cover.</summary>
     public static int BarsIn(MidiSong midi, IEnumerable<MidiSource?> sources, int rowsPerBeat)
     {
         double ticksPerRow = midi.TicksPerQuarter / (double)rowsPerBeat;
@@ -91,26 +114,49 @@ public static class MidiImporter
         return (int)((last + rowsPerBar - 1) / rowsPerBar);
     }
 
+    /// <summary>Every part a voice reads, for <see cref="BarsIn"/>.</summary>
+    public static IEnumerable<MidiSource?> PartsOf(VoiceImport voice) =>
+        voice.Role == VoiceRole.DrumsAndBass ? [voice.Source, voice.Drums] : [voice.Source];
+
     public static MidiImportResult Import(MidiSong midi, MidiImportOptions options)
     {
         if (options.Voices.Count != Song.ChannelCount)
             throw new ArgumentException($"Expected {Song.ChannelCount} voices.", nameof(options));
-        if (options.Voices.All(v => v.Source is null))
+        if (!options.Voices.Any(v => v.Plays))
             throw new MidiImportException("Choose a MIDI track for at least one voice.");
 
         int rowsPerBar = RowsPerBar(midi, options.RowsPerBeat);
-        int totalBars = BarsIn(midi, options.Voices.Select(v => v.Source), options.RowsPerBeat);
+        int totalBars = BarsIn(midi, options.Voices.SelectMany(PartsOf), options.RowsPerBeat);
         int firstBar = Math.Clamp(options.FirstBar, 0, Math.Max(0, totalBars - 1));
         int bars = Math.Clamp(options.BarCount ?? totalBars - firstBar, 1, Math.Max(1, totalBars - firstBar));
+        var range = new Range(midi.TicksPerQuarter / (double)options.RowsPerBeat, firstBar * rowsPerBar,
+                              bars * rowsPerBar, options.RowsPerBeat);
 
-        // Instruments are numbered only for the voices that play.
+        // Instruments are numbered as they are first used, so a sound nothing plays - a snare in
+        // a part without one - never reaches the song.
         var stats = new Stats();
-        int playing = 0;
-        var lines = options.Voices
-            .Select(voice => voice.Source is null
-                ? null
-                : Line(midi, voice, ++playing, options.RowsPerBeat, firstBar * rowsPerBar, bars * rowsPerBar, stats))
-            .ToList();
+        var instruments = new List<Instrument>();
+        var lines = new List<PatternRow[]?>();
+        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        {
+            var voice = options.Voices[channel];
+            var allocated = new Dictionary<string, int>();
+            int Number(string kind, Func<Instrument> make)
+            {
+                if (!allocated.TryGetValue(kind, out int number))
+                {
+                    var instrument = make();
+                    instrument.Number = number = instruments.Count + 1;
+                    instruments.Add(instrument);
+                    allocated[kind] = number;
+                }
+                return number;
+            }
+
+            lines.Add(!voice.Plays ? null
+                : voice.Role == VoiceRole.DrumsAndBass ? DrumsAndBass(voice, channel, range, stats, Number)
+                : Melodic(voice, range, stats, Number));
+        }
 
         MidiImportResult? best = null;
         string? lastProblem = null;
@@ -119,7 +165,7 @@ public static class MidiImporter
             if (rowsPerBar * barsPerPattern > MaxRowsPerPattern)
                 break;
 
-            var song = Build(lines, options, rowsPerBar * barsPerPattern);
+            var song = Build(lines, instruments, options.Speed, rowsPerBar * barsPerPattern);
             if (Problem(song) is { } problem)
             {
                 lastProblem = problem;
@@ -132,7 +178,8 @@ public static class MidiImporter
                 best = new MidiImportResult(song, new MidiImportReport(
                     bars, rowsPerBar, barsPerPattern, song.Patterns.Count, size,
                     stats.Placed, stats.Dropped, stats.Moved, stats.Shifted,
-                    midi.Bpm, SongBpm(options.Speed, options.RowsPerBeat), midi.TempoChanges));
+                    midi.Bpm, SongBpm(options.Speed, options.RowsPerBeat), midi.TempoChanges,
+                    stats.DrumHits, stats.DrumsLeftOut));
             }
         }
 
@@ -142,28 +189,52 @@ public static class MidiImporter
 
     private sealed class Stats
     {
-        public int Placed, Dropped, Moved, Shifted;
+        public int Placed, Dropped, Moved, Shifted, DrumHits, DrumsLeftOut;
     }
 
-    /// <summary>One voice's rows across the imported range.</summary>
-    private static PatternRow[] Line(MidiSong midi, VoiceImport voice, int instrument, int rowsPerBeat,
-                                     int firstRow, int rowCount, Stats stats)
+    /// <summary>The imported stretch of the file, in rows.</summary>
+    private sealed record Range(double TicksPerRow, int FirstRow, int RowCount, int RowsPerBeat)
     {
-        double ticksPerRow = midi.TicksPerQuarter / (double)rowsPerBeat;
-
-        // Snapped to the grid. A note too short to reach the next row still gets one.
-        var notes = new List<(int Start, int End, int Key, int Id)>();
-        foreach (var (note, id) in voice.Source!.Notes.Select((n, i) => (n, i)))
+        /// <summary>A note's start and end rows within the range, or null when it lies outside.
+        /// A note too short to reach the next row still gets one; one already sounding when the
+        /// range begins starts before row 0.</summary>
+        public (int Start, int End)? Rows(MidiNote note, Stats stats)
         {
-            double exact = note.Start / ticksPerRow;
-            int start = (int)Math.Round(exact) - firstRow;
-            int end = Math.Max(start + 1, (int)Math.Round(note.End / ticksPerRow) - firstRow);
-            if (end <= 0 || start >= rowCount)
-                continue;
+            double exact = note.Start / TicksPerRow;
+            int start = (int)Math.Round(exact) - FirstRow;
+            int end = Math.Max(start + 1, (int)Math.Round(note.End / TicksPerRow) - FirstRow);
+            if (end <= 0 || start >= RowCount)
+                return null;
 
             if (Math.Abs(exact - Math.Round(exact)) > 0.05)
                 stats.Moved++;
-            notes.Add((start, Math.Min(end, rowCount), note.Key, id));
+            return (start, Math.Min(end, RowCount));
+        }
+    }
+
+    private static PatternRow[] Melodic(VoiceImport voice, Range range, Stats stats,
+                                        Func<string, Func<Instrument>, int> number)
+    {
+        var rows = MonoLine(voice.Source!, voice.Role, voice.Transpose, range, stats);
+        if (!rows.Any(r => r is NoteRow))
+            return rows;
+
+        int instrument = number("voice", () => voice.Instrument is { } template ? Clone(template) : Default(voice.Role));
+        for (int i = 0; i < rows.Length; i++)
+            if (rows[i] is NoteRow note)
+                rows[i] = note with { InstrumentNumber = instrument };
+        return rows;
+    }
+
+    /// <summary>One part's rows, one note at a time, with instrument 0 standing in for the voice's
+    /// own until the caller numbers it.</summary>
+    private static PatternRow[] MonoLine(MidiSource source, VoiceRole role, int transpose, Range range, Stats stats)
+    {
+        var notes = new List<(int Start, int End, int Key, int Id)>();
+        foreach (var (note, id) in source.Notes.Select((n, i) => (n, i)))
+        {
+            if (range.Rows(note, stats) is { } at)
+                notes.Add((at.Start, at.End, note.Key, id));
         }
 
         // The highest (or lowest) note sounding at each row; a note becomes the voice's the moment
@@ -172,9 +243,9 @@ public static class MidiImporter
         var sounding = new List<(int Start, int End, int Key, int Id)>();
         int next = 0;
         var heard = new HashSet<int>();
-        var rows = new PatternRow[rowCount];
+        var rows = new PatternRow[range.RowCount];
         int? current = null;
-        for (int row = 0; row < rowCount; row++)
+        for (int row = 0; row < range.RowCount; row++)
         {
             sounding.RemoveAll(n => n.End <= row);
             while (next < notes.Count && notes[next].Start <= row)
@@ -185,14 +256,14 @@ public static class MidiImporter
             {
                 // Ties go to the later note: it is the one just played.
                 if (chosen is not { } best
-                    || (voice.Role == VoiceRole.Melody ? note.Key > best.Key : note.Key < best.Key)
+                    || (role == VoiceRole.Melody ? note.Key > best.Key : note.Key < best.Key)
                     || (note.Key == best.Key && note.Start > best.Start))
                     chosen = note;
             }
 
             if (chosen is { } pick && pick.Id != current)
             {
-                rows[row] = new NoteRow(Pitch(pick.Key + voice.Transpose, stats), instrument);
+                rows[row] = new NoteRow(Pitch(pick.Key + transpose, stats), 0);
                 heard.Add(pick.Id);
                 current = pick.Id;
             }
@@ -212,6 +283,143 @@ public static class MidiImporter
         return rows;
     }
 
+    private enum Drum { Kick, Snare, HiHat }
+
+    /// <summary>General MIDI drum keys this voice can play; anything else is left out.</summary>
+    private static Drum? DrumFor(int key) => key switch
+    {
+        35 or 36 => Drum.Kick,
+        >= 37 and <= 40 => Drum.Snare,
+        42 or 44 or 46 => Drum.HiHat,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Kick, then snare, then a new bass note, then - if wanted - a hi-hat on a row nothing else
+    /// uses. The kick is written with the bass note of the moment, so a bass note on the same
+    /// pitch right after it is already sounding and is not struck again. The snare carries the
+    /// bass note too: its own pitches are fixed, and reusing a note the song already has keeps the
+    /// note table from growing. Two hits of one drum on neighbouring rows are a flam; the later,
+    /// the main hit, is kept.
+    /// </summary>
+    private static PatternRow[] DrumsAndBass(VoiceImport voice, int channel, Range range, Stats stats,
+                                             Func<string, Func<Instrument>, int> number)
+    {
+        int count = range.RowCount;
+        var bass = voice.Source is null
+            ? Enumerable.Repeat<PatternRow>(new HoldRow(), count).ToArray()
+            : MonoLine(voice.Source, VoiceRole.Bass, voice.Transpose, range, stats);
+
+        var hits = new Dictionary<Drum, bool[]>
+        {
+            [Drum.Kick] = new bool[count], [Drum.Snare] = new bool[count], [Drum.HiHat] = new bool[count],
+        };
+        foreach (var note in voice.Drums?.Notes ?? [])
+        {
+            // A hit is a moment: one before the range is not in it.
+            if (range.Rows(note, stats) is not { Start: >= 0 } at)
+                continue;
+            if (DrumFor(note.Key) is { } drum && !hits[drum][at.Start])
+                hits[drum][at.Start] = true;
+            else
+                stats.DrumsLeftOut++;
+        }
+        foreach (var drum in hits.Keys.Where(d => d != Drum.HiHat))
+            for (int row = 0; row + 1 < count; row++)
+                if (hits[drum][row] && hits[drum][row + 1])
+                {
+                    hits[drum][row] = false;
+                    stats.DrumsLeftOut++;
+                }
+
+        // The bass note at a row: the one sounding, else the next within the beat, else the last.
+        NoteName? last = null;
+        bool sounding = false;
+        NoteName NoteAt(int row)
+        {
+            if (bass[row] is NoteRow onset)
+                return onset.Note;
+            if (sounding && last is { } held)
+                return held;
+            for (int ahead = row + 1; ahead < Math.Min(count, row + range.RowsPerBeat); ahead++)
+                if (bass[ahead] is NoteRow upcoming)
+                    return upcoming.Note;
+            return last ?? FirstBassNote(bass) ?? FallbackDrumNote;
+        }
+
+        int struck = hits.Values.Sum(h => h.Count(hit => hit)), placed = 0;
+        var rows = new PatternRow[count];
+        bool absorbNext = false;
+        string? playing = null;                  // whose note the voice is sounding
+        for (int row = 0; row < count; row++)
+        {
+            bool absorbed = absorbNext;
+            absorbNext = false;
+            bool bassOnset = bass[row] is NoteRow && !absorbed;
+
+            if (hits[Drum.Kick][row])
+            {
+                var note = NoteAt(row);
+                rows[row] = new NoteRow(note, number("kick", () => Kit("KickBass", channel)));
+                absorbNext = row + 1 < count && bass[row + 1] is NoteRow following && following.Note == note;
+                placed++;
+                playing = "kick";
+            }
+            else if (hits[Drum.Snare][row])
+            {
+                rows[row] = new NoteRow(NoteAt(row), number("snare", () => Kit("Snare", channel)));
+                if (bassOnset)
+                {
+                    stats.Placed--;
+                    stats.Dropped++;
+                }
+                placed++;
+                playing = "snare";
+            }
+            else if (bassOnset)
+            {
+                var onset = (NoteRow)bass[row];
+                rows[row] = onset with { InstrumentNumber = number("bass", () => voice.Instrument is { } t ? Clone(t) : Kit("Bass", channel)) };
+                playing = "bass";
+            }
+            else if (hits[Drum.HiHat][row] && voice.HiHat
+                     && !(playing is "bass" or "kick" && sounding && bass[row] is not NoteOffRow))
+            {
+                rows[row] = new NoteRow(last ?? NoteAt(row), number("hihat", () => Kit("Hihat", channel)));
+                placed++;
+                playing = "hihat";
+            }
+            else if (bass[row] is NoteOffRow && playing is "bass" or "kick")
+            {
+                // The bass note ended; a drum still ringing out is left to ring.
+                rows[row] = new NoteOffRow();
+                playing = null;
+            }
+            else
+            {
+                rows[row] = new HoldRow();
+            }
+
+            // Follow the bass part itself, whatever was written over it.
+            if (bass[row] is NoteRow heard)
+            {
+                last = heard.Note;
+                sounding = true;
+            }
+            else if (bass[row] is NoteOffRow)
+            {
+                sounding = false;
+            }
+        }
+
+        stats.DrumHits += placed;
+        stats.DrumsLeftOut += struck - placed;
+        return rows;
+    }
+
+    private static NoteName? FirstBassNote(PatternRow[] bass) =>
+        bass.OfType<NoteRow>().Select(n => (NoteName?)n.Note).FirstOrDefault();
+
     /// <summary>The player's 96 notes, C-0..B-7. Outside them a note moves by octaves until it
     /// fits, and is counted.</summary>
     private static NoteName Pitch(int key, Stats stats)
@@ -226,19 +434,14 @@ public static class MidiImporter
         return NoteName.AllNotes[index];
     }
 
-    private static Song Build(List<PatternRow[]?> lines, MidiImportOptions options, int rowsPerPattern)
+    private static Song Build(List<PatternRow[]?> lines, List<Instrument> instruments, int speed, int rowsPerPattern)
     {
-        var song = new Song { Speed = options.Speed };
-
-        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        var song = new Song { Speed = speed };
+        foreach (var instrument in instruments)
         {
-            var voice = options.Voices[channel];
-            if (voice.Source is null)
-                continue;
-
-            var instrument = voice.Instrument is { } template ? Clone(template) : Default(voice.Role);
-            instrument.Number = song.Instruments.Count + 1;
-            song.Instruments.Add(instrument);
+            var copy = Clone(instrument);
+            copy.Number = instrument.Number;
+            song.Instruments.Add(copy);
         }
 
         // Identical patterns are stored once, across all three channels.
@@ -304,9 +507,61 @@ public static class MidiImporter
 
     /// <summary>Plain starting sounds, meant to be replaced: a pulse lead and a narrower pulse
     /// bass. No note program, so they cost the song nothing beyond their table entries.</summary>
-    public static Instrument Default(VoiceRole role) => role == VoiceRole.Melody
-        ? new Instrument { Name = "Lead", Waveform = 0x41, AttackDecay = 0x09, SustainRelease = 0xA9, PulseWidth = 6 }
-        : new Instrument { Name = "Bass", Waveform = 0x41, AttackDecay = 0x08, SustainRelease = 0x88, PulseWidth = 3 };
+    public static Instrument Default(VoiceRole role) => role switch
+    {
+        VoiceRole.Melody => new Instrument { Name = "Lead", Waveform = 0x41, AttackDecay = 0x09, SustainRelease = 0xA9, PulseWidth = 6 },
+        VoiceRole.Bass => new Instrument { Name = "Bass", Waveform = 0x41, AttackDecay = 0x08, SustainRelease = 0x88, PulseWidth = 3 },
+        _ => Kit("KickBass", 0),
+    };
+
+    /// <summary>
+    /// The drum-and-bass kit, as Magnificent has it: a KickBass that thumps on noise and falls
+    /// onto the row's note, a bass with the same click, a snare and a hi-hat on fixed pitches. Each
+    /// opens its own filter program, routed here to the channel it plays on.
+    /// </summary>
+    public static Instrument Kit(string name, int channel)
+    {
+        var instrument = name switch
+        {
+            "KickBass" => Make(0x41, 0x07, 0xF7, [0x09, 0x81, 0x41], ["B-7", "B-7", "D-3", "F#2"], ArpeggioEnding.Root, 0,
+                [Setup(0x6F, 0x38), Sweep(0x38), Setup(0x3F, 0x03), Sweep(0x02), Setup(0x1F, 0x18), Sweep(0x10), Sweep(0x08), Sweep(0x05), Sweep(0x04)]),
+            "Bass" => Make(0x41, 0x05, 0xB7, [0x09, 0x81, 0x41], ["B-7", "B-7", "C#3"], ArpeggioEnding.Root, 0,
+                [Setup(0x1F, 0x01), Sweep(0x11), Sweep(0x10), Sweep(0x0F), Sweep(0x0E), Sweep(0x0A)]),
+            "Snare" => Make(0x81, 0x00, 0x97, [0x09, 0x81, 0x41, 0x41, 0x80], ["B-7", "B-7", "G-3", "E-3", "B-7"], ArpeggioEnding.Loop, 3,
+                [Setup(0x3F, 0x68), Sweep(0x68), Setup(0x6F, 0x04), Sweep(0x03), Sweep(0x04)]),
+            "Hihat" => Make(0x81, 0x00, 0x62, [0x09, 0x81, 0x80], ["A#7"], ArpeggioEnding.Hold, 0,
+                [FilterStep.Setup(0x1F, 0xB0, 0x01), Sweep(0x40)]),
+            _ => throw new ArgumentException($"No kit instrument called {name}.", nameof(name)),
+        };
+        instrument.Name = name;
+
+        // The filter's voice bits name the channel; the resonance in the high nibble is kept.
+        for (int i = 0; i < instrument.Filter.Count; i++)
+        {
+            var step = instrument.Filter[i];
+            if (step.IsSetup)
+                instrument.Filter[i] = FilterStep.Setup(step.ModeVolume!.Value,
+                    (byte)(step.ResonanceRouting!.Value & 0xF0 | 1 << channel), step.Cutoff, step.SweepRate);
+        }
+        return instrument;
+
+        static FilterStep Setup(byte modeVolume, byte cutoff) => FilterStep.Setup(modeVolume, 0xF0, cutoff);
+        static FilterStep Sweep(byte cutoff) => FilterStep.Sweep(cutoff);
+
+        static Instrument Make(byte wave, byte ad, byte sr, byte[] wavetable, string[] program,
+                               ArpeggioEnding ending, int loopPoint, FilterStep[] filter)
+        {
+            var made = new Instrument
+            {
+                Waveform = wave, AttackDecay = ad, SustainRelease = sr, PulseWidth = 7,
+                ArpeggioEnding = ending, ArpeggioLoopPoint = loopPoint,
+            };
+            made.Wavetable.AddRange(wavetable);
+            made.Arpeggio.AddRange(program.Select(NoteName.Parse));
+            made.Filter.AddRange(filter);
+            return made;
+        }
+    }
 }
 
 public sealed class MidiImportException(string message) : Exception(message);

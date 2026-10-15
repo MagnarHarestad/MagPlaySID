@@ -22,6 +22,8 @@ public sealed class MidiImportForm : Form
     private readonly ComboBox[] _source = new ComboBox[Song.ChannelCount];
     private readonly ComboBox[] _role = new ComboBox[Song.ChannelCount];
     private readonly ComboBox[] _octave = new ComboBox[Song.ChannelCount];
+    private readonly ComboBox[] _drums = new ComboBox[Song.ChannelCount];
+    private readonly CheckBox[] _hiHat = new CheckBox[Song.ChannelCount];
     private readonly Label[] _instrumentName = new Label[Song.ChannelCount];
     private readonly Instrument?[] _instrument = new Instrument?[Song.ChannelCount];
     private readonly ComboBox _grid = Combo("16th notes - 4 rows a beat", "32nd notes - 8 rows a beat");
@@ -66,14 +68,18 @@ public sealed class MidiImportForm : Form
         root.Controls.Add(_report);
         root.Controls.Add(Hint(
             "Each voice plays one note at a time: Melody keeps the highest note of a chord, Bass the " +
-            "lowest. Notes snap to the grid, and a bar that repeats is stored once. Instruments start " +
-            "as plain sounds - load your own .json instruments here or edit them afterwards."));
+            "lowest. Drums + bass puts the rhythm section on one voice the C64 way - kick and snare " +
+            "from the drum part, the bass line between them, the kick settling on the bass note. " +
+            "Notes snap to the grid, and a bar that repeats is stored once. Load your own .json " +
+            "instruments here (for Drums + bass, the bass) or edit them afterwards."));
         root.Controls.Add(BuildButtons());
         Controls.Add(root);
 
         ChooseDefaults();
-        foreach (var box in _source.Concat(_role).Concat(_octave).Append(_grid))
+        foreach (var box in _source.Concat(_role).Concat(_octave).Concat(_drums).Append(_grid))
             box.SelectedIndexChanged += (_, _) => Recalculate(sourcesChanged: true);
+        foreach (var box in _hiHat)
+            box.CheckedChanged += (_, _) => Recalculate(sourcesChanged: false);
         _grid.SelectedIndexChanged += (_, _) => SuggestSpeed();
         foreach (var number in new[] { _speed, _fromBar, _toBar })
             number.ValueChanged += (_, _) => Recalculate(sourcesChanged: false);
@@ -117,16 +123,21 @@ public sealed class MidiImportForm : Form
 
     private Control BuildVoices()
     {
-        var table = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 6 };
+        var table = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 8 };
         string[] sources = ["(silent)", .. _sources.Select(s => $"{Describe(s)}  {s.Name}".TrimEnd())];
+        string[] drumSources = ["(no drums)", .. sources[1..]];
 
         for (int voice = 0; voice < Song.ChannelCount; voice++)
         {
             int v = voice;
             _source[v] = Combo(sources);
-            _source[v].Width = 260;
-            _role[v] = Combo("Melody - highest note", "Bass - lowest note");
-            _role[v].Width = 170;
+            _source[v].Width = 220;
+            _role[v] = Combo("Melody - highest note", "Bass - lowest note", "Drums + bass");
+            _role[v].Width = 160;
+            _drums[v] = Combo(drumSources);
+            _drums[v].Width = 190;
+            _drums[v].SelectedIndex = 0;
+            _hiHat[v] = new CheckBox { Text = "Hi-hat", AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
             _octave[v] = Combo("-3 oct", "-2 oct", "-1 oct", "0 oct", "+1 oct", "+2 oct", "+3 oct");
             _octave[v].Width = 70;
             _octave[v].SelectedIndex = 3;
@@ -144,12 +155,14 @@ public sealed class MidiImportForm : Form
             table.Controls.Add(new Label { Text = $"Voice {v + 1}", AutoSize = true, Margin = new Padding(3, 8, 8, 3) }, 0, v);
             table.Controls.Add(_source[v], 1, v);
             table.Controls.Add(_role[v], 2, v);
-            table.Controls.Add(_octave[v], 3, v);
-            table.Controls.Add(_instrumentName[v], 4, v);
+            table.Controls.Add(_drums[v], 3, v);
+            table.Controls.Add(_hiHat[v], 4, v);
+            table.Controls.Add(_octave[v], 5, v);
+            table.Controls.Add(_instrumentName[v], 6, v);
             var buttons = new FlowLayoutPanel { AutoSize = true, Margin = Padding.Empty };
             buttons.Controls.Add(load);
             buttons.Controls.Add(reset);
-            table.Controls.Add(buttons, 5, v);
+            table.Controls.Add(buttons, 7, v);
         }
 
         return table;
@@ -191,22 +204,39 @@ public sealed class MidiImportForm : Form
         return panel;
     }
 
-    /// <summary>The highest-pitched melodic part on voice 1, the lowest on voice 3 as bass, and
-    /// the next highest on voice 2 when there are three. A part with under a fifth of the busiest
-    /// one's notes is an intro or an effect, not a line to build on; drums are left to the user.</summary>
+    /// <summary>
+    /// With a drum part, the demo songs' layout: drums and the lowest part as bass on voice 1, the
+    /// highest part on voice 2, the next on voice 3. Without one: the highest on voice 1, the next
+    /// on voice 2, the lowest as bass on voice 3. A part with under a fifth of the busiest one's
+    /// notes is an intro or an effect, not a line to build on.
+    /// </summary>
     private void ChooseDefaults()
     {
-        var parts = _sources.Where(s => !s.IsDrums).ToList();
+        var parts = _sources.Where(s => !s.LooksLikeDrums).ToList();
         int busiest = parts.Select(s => s.NoteCount).DefaultIfEmpty(0).Max();
         var melodic = parts.Where(s => s.NoteCount * 5 >= busiest).OrderByDescending(s => s.AverageKey).ToList();
-        int Index(MidiSource s) => _sources.ToList().IndexOf(s) + 1;
+        var drums = _sources.Where(s => s.LooksLikeDrums).OrderByDescending(s => s.NoteCount).FirstOrDefault();
+        int Index(MidiSource? s) => s is null ? 0 : _sources.ToList().IndexOf(s) + 1;
 
-        _source[0].SelectedIndex = melodic.Count > 0 ? Index(melodic[0]) : 0;
-        _source[1].SelectedIndex = melodic.Count > 2 ? Index(melodic[1]) : 0;
-        _source[2].SelectedIndex = melodic.Count > 1 ? Index(melodic[^1]) : 0;
-        _role[0].SelectedIndex = 0;
-        _role[1].SelectedIndex = 0;
-        _role[2].SelectedIndex = 1;
+        if (drums is not null)
+        {
+            _source[0].SelectedIndex = Index(melodic.Count > 1 ? melodic[^1] : null);
+            _drums[0].SelectedIndex = Index(drums);
+            _source[1].SelectedIndex = Index(melodic.ElementAtOrDefault(0));
+            _source[2].SelectedIndex = Index(melodic.Count > 2 ? melodic[1] : null);
+            _role[0].SelectedIndex = 2;
+            _role[1].SelectedIndex = 0;
+            _role[2].SelectedIndex = 0;
+        }
+        else
+        {
+            _source[0].SelectedIndex = Index(melodic.ElementAtOrDefault(0));
+            _source[1].SelectedIndex = Index(melodic.Count > 2 ? melodic[1] : null);
+            _source[2].SelectedIndex = Index(melodic.Count > 1 ? melodic[^1] : null);
+            _role[0].SelectedIndex = 0;
+            _role[1].SelectedIndex = 0;
+            _role[2].SelectedIndex = 1;
+        }
     }
 
     private void SuggestSpeed()
@@ -220,9 +250,15 @@ public sealed class MidiImportForm : Form
     private MidiSource? SourceOf(int voice) =>
         _source[voice].SelectedIndex is > 0 and var i ? _sources[i - 1] : null;
 
+    private MidiSource? DrumsOf(int voice) =>
+        Role(voice) == VoiceRole.DrumsAndBass && _drums[voice].SelectedIndex is > 0 and var i ? _sources[i - 1] : null;
+
+    private VoiceImport VoiceOf(int v) =>
+        new(SourceOf(v), Role(v), (_octave[v].SelectedIndex - 3) * 12, _instrument[v], DrumsOf(v), _hiHat[v].Checked);
+
     private void Recalculate(bool sourcesChanged)
     {
-        if (_updating || _source.Any(s => s is null))
+        if (_updating || _source.Any(s => s is null) || _role.Any(r => r.SelectedIndex < 0))
             return;
 
         _updating = true;
@@ -231,7 +267,8 @@ public sealed class MidiImportForm : Form
             if (sourcesChanged)
             {
                 // The bar range follows the chosen parts; a range left at its end stays at the end.
-                int total = Math.Max(1, MidiImporter.BarsIn(_midi, Enumerable.Range(0, Song.ChannelCount).Select(SourceOf), RowsPerBeat));
+                int total = Math.Max(1, MidiImporter.BarsIn(_midi,
+                    Enumerable.Range(0, Song.ChannelCount).SelectMany(v => MidiImporter.PartsOf(VoiceOf(v))), RowsPerBeat));
                 bool atEnd = _toBar.Value == _toBar.Maximum;
                 _fromBar.Maximum = total;
                 _toBar.Maximum = total;
@@ -248,20 +285,20 @@ public sealed class MidiImportForm : Form
 
         for (int v = 0; v < Song.ChannelCount; v++)
         {
-            var source = SourceOf(v);
-            _instrumentName[v].Text = source is null ? ""
-                : _instrument[v]?.Name is { Length: > 0 } name ? name
+            bool kit = Role(v) == VoiceRole.DrumsAndBass;
+            _drums[v].Enabled = kit;
+            _hiHat[v].Enabled = kit;
+            string sound = _instrument[v]?.Name is { Length: > 0 } name ? name
                 : _instrument[v] is not null ? "(loaded)"
-                : $"{MidiImporter.Default(Role(v)).Name} (default)";
+                : $"{(kit ? "Bass" : MidiImporter.Default(Role(v)).Name)} (default)";
+            _instrumentName[v].Text = !VoiceOf(v).Plays ? "" : kit ? $"Kit + {sound}" : sound;
         }
 
         _speedBpm.Text = $"= {MidiImporter.SongBpm((int)_speed.Value, RowsPerBeat):0.#} BPM";
 
         try
         {
-            var voices = Enumerable.Range(0, Song.ChannelCount)
-                .Select(v => new VoiceImport(SourceOf(v), Role(v), (_octave[v].SelectedIndex - 3) * 12, _instrument[v]))
-                .ToList();
+            var voices = Enumerable.Range(0, Song.ChannelCount).Select(VoiceOf).ToList();
             Result = MidiImporter.Import(_midi, new MidiImportOptions(
                 voices, RowsPerBeat, (int)_speed.Value, (int)_fromBar.Value - 1, (int)(_toBar.Value - _fromBar.Value) + 1));
             _report.Text = Describe(Result.Report);
@@ -277,7 +314,12 @@ public sealed class MidiImportForm : Form
         }
     }
 
-    private VoiceRole Role(int voice) => _role[voice].SelectedIndex == 1 ? VoiceRole.Bass : VoiceRole.Melody;
+    private VoiceRole Role(int voice) => _role[voice].SelectedIndex switch
+    {
+        1 => VoiceRole.Bass,
+        2 => VoiceRole.DrumsAndBass,
+        _ => VoiceRole.Melody,
+    };
 
     private static string Describe(MidiImportReport report)
     {
@@ -297,6 +339,9 @@ public sealed class MidiImportForm : Form
             bent.Add($"{report.NotesShifted} moved by octaves into C-0..B-7");
         if (bent.Count > 0)
             lines.Add(string.Join("; ", bent) + ".");
+        if (report.DrumHits + report.DrumsLeftOut > 0)
+            lines.Add($"{report.DrumHits} drum hits placed, {report.DrumsLeftOut} left out - hi-hats when off, " +
+                      "toms and cymbals, flams, and hits a kick or snare already had.");
 
         double off = (report.SongBpm / report.SourceBpm - 1) * 100;
         if (Math.Abs(off) >= 0.5)
@@ -335,7 +380,7 @@ public sealed class MidiImportForm : Form
         $"T{source.Track + 1} ch{source.Channel + 1}";
 
     private static string Sound(MidiSource source) =>
-        source.IsDrums ? "Drums" : source.Program is { } p ? $"{GmFamilies[p / 8]} ({p + 1})" : "";
+        source.LooksLikeDrums ? "Drums" : source.Program is { } p ? $"{GmFamilies[p / 8]} ({p + 1})" : "";
 
     private static string KeyName(int key) =>
         $"{"C C#D D#E F F#G G#A A#B "[(key % 12 * 2)..(key % 12 * 2 + 2)].Trim()}{key / 12 - 1}";
