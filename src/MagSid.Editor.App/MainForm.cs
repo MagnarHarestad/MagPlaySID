@@ -1961,7 +1961,9 @@ public sealed class MainForm : Form
             return;
         }
 
-        StopPatternPreview(); // F3's own device, not guarded by _isPlaybackActive - hand it back
+        // An F3 preview keeps playing: the audition opens its own device beside it, as it already
+        // does beside song playback. Stopping it here meant that drawing a note into the pattern
+        // being played - the reason to loop it - ended the loop.
 
         if (forcedRelease is { } release)
         {
