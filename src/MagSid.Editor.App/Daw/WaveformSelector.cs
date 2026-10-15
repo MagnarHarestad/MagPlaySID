@@ -30,7 +30,6 @@ namespace MagSid.Editor.App.Daw;
 internal sealed class WaveformSelector : Control
 {
     private const int TabHeight = 28;
-    private const int ModifierWidth = 86;
     private const int ModifierGap = 10;
 
     /// <summary>No waveform, test and gate on.</summary>
@@ -125,11 +124,12 @@ internal sealed class WaveformSelector : Control
         }
     }
 
-    /// <summary>Where the waveform tabs end and the modifier group begins. The modifiers take a
-    /// fixed strip on the right so they stay the same size whatever the panel does, and the four
-    /// waveforms and Silence share what is left.</summary>
-    private int WaveformStripWidth =>
-        Math.Max(Tabs.Length * 40, Width - (Modifiers.Length * ModifierWidth) - ModifierGap);
+    /// <summary>One button's width: the four waveforms, Silence, Sync and Ring all the same size,
+    /// sharing the width less the gap that sets the modifiers apart as their own group.</summary>
+    private int ModifierWidth => Math.Max(40, (Width - ModifierGap) / (Tabs.Length + Modifiers.Length));
+
+    /// <summary>Where the waveform tabs end and the modifier group begins.</summary>
+    private int WaveformStripWidth => Tabs.Length * ModifierWidth;
 
     private int TabAt(int x, int y)
     {
