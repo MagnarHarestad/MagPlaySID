@@ -437,7 +437,14 @@ public sealed class InstrumentEditorPanel : UserControl
         var mode = new DataGridViewTextBoxColumn { Name = "Mode", HeaderText = "Mode/Vol" };
         var res = new DataGridViewTextBoxColumn { Name = "Res", HeaderText = "Res+Voice" };
         var cutoff = new DataGridViewTextBoxColumn { Name = "Cutoff", HeaderText = "Cutoff" };
-        var sweepRate = new DataGridViewTextBoxColumn { Name = "Sweep", HeaderText = "Sweep" };
+        // The last column takes whatever width is left, so the table ends at its last cell rather
+        // than in a strip of cell-coloured background past it; the others keep fitting their own
+        // contents (AllCells, above).
+        var sweepRate = new DataGridViewTextBoxColumn
+        {
+            Name = "Sweep", HeaderText = "Sweep",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 56,
+        };
 
         _grid.Columns.AddRange(step, waveform, note, hex, filterType, mode, res, cutoff, sweepRate);
 
