@@ -98,6 +98,9 @@ public static class MidiImporter
     /// chords - fewer is a few passing moments, not an accompaniment.</summary>
     private const int MinChordBeats = 8;
 
+    /// <summary>MIDI C3 - a lone part pitched lower on average is taken for a bass.</summary>
+    private const int LowestLeadKey = 48;
+
     /// <summary>The speed closest to the file's tempo, and the tempo that speed actually plays.
     /// A row lasts a whole number of 50Hz frames, so most tempos land a few percent off.</summary>
     public static (int Speed, double Bpm) SuggestSpeed(double bpm, int rowsPerBeat)
@@ -129,12 +132,11 @@ public static class MidiImporter
     }
 
     /// <summary>
-    /// A starting choice of parts. With a drum part, the demo songs' layout: drums and the lowest
-    /// part as bass on voice 1, the highest part on voice 2, the next on voice 3. Without one: the
-    /// highest on voice 1, the next on voice 2, the lowest as bass on voice 3. When a part carries
-    /// chords, voice 2 plays them as arpeggios and the melody moves to whichever voice is left. A
-    /// part with under a fifth of the busiest one's notes is an intro or an effect, not a line to
-    /// build on.
+    /// A starting choice of parts, laid out the way the demo songs are: the lowest part as bass on
+    /// voice 1 - with the drums when there are any, since a bass's filter settings suit channel 1 -
+    /// the highest part, the lead, on voice 3, and voice 2 between them: the chords as arpeggios
+    /// when a part carries them, else the next highest part. A part with under a fifth of the
+    /// busiest one's notes is an intro or an effect, not a line to build on.
     /// </summary>
     public static IReadOnlyList<VoiceImport> SuggestVoices(MidiSong midi)
     {
@@ -147,18 +149,21 @@ public static class MidiImporter
         var next = melodic.Count > 2 ? melodic[1] : null;
         var lowest = melodic.Count > 1 ? melodic[^1] : null;
 
+        // A single part that sits below C-3 is a bass line with nothing over it, not a lead.
+        if (melodic.Count == 1 && melodic[0].AverageKey < LowestLeadKey)
+            (lowest, highest) = (melodic[0], null);
+
         // The part that carries the harmony most, read as chords on voice 2.
         var harmony = parts.Select(s => (Source: s, Beats: ChordAnalyzer.ChordBeats(s, midi.TicksPerQuarter)))
             .Where(x => x.Beats >= MinChordBeats).OrderByDescending(x => x.Beats).Select(x => x.Source).FirstOrDefault();
 
-        if (harmony is not null)
-            return drums is not null
-                ? [new(lowest, VoiceRole.DrumsAndBass, Drums: drums), new(harmony, VoiceRole.Chords), new(highest, VoiceRole.Melody)]
-                : [new(highest, VoiceRole.Melody), new(harmony, VoiceRole.Chords), new(lowest, VoiceRole.Bass)];
-
-        return drums is not null
-            ? [new(lowest, VoiceRole.DrumsAndBass, Drums: drums), new(highest, VoiceRole.Melody), new(next, VoiceRole.Melody)]
-            : [new(highest, VoiceRole.Melody), new(next, VoiceRole.Melody), new(lowest, VoiceRole.Bass)];
+        var bass = drums is not null
+            ? new VoiceImport(lowest, VoiceRole.DrumsAndBass, Drums: drums)
+            : new VoiceImport(lowest, VoiceRole.Bass);
+        var middle = harmony is not null
+            ? new VoiceImport(harmony, VoiceRole.Chords)
+            : new VoiceImport(next, VoiceRole.Melody);
+        return [bass, middle, new(highest, VoiceRole.Melody)];
     }
 
     /// <summary>Every part a voice reads, for <see cref="BarsIn"/>.</summary>

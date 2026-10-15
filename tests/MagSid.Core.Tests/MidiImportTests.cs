@@ -493,13 +493,33 @@ public class MidiImportTests
     }
 
     [Fact]
-    public void A_part_that_carries_chords_is_suggested_for_voice_2()
+    public void Bass_goes_to_voice_1_chords_to_voice_2_and_the_lead_to_voice_3()
     {
         var voices = MidiImporter.SuggestVoices(ChordsAndTune());
 
-        Assert.Equal(VoiceRole.Chords, voices[1].Role);
-        Assert.Equal("Piano", voices[1].Source!.Name);
-        Assert.Equal("Tune", voices[0].Source!.Name);
+        Assert.Equal((VoiceRole.Bass, "Piano"), (voices[0].Role, voices[0].Source!.Name));
+        Assert.Equal((VoiceRole.Chords, "Piano"), (voices[1].Role, voices[1].Source!.Name));
+        Assert.Equal((VoiceRole.Melody, "Tune"), (voices[2].Role, voices[2].Source!.Name));
+    }
+
+    [Fact]
+    public void Drums_and_a_lone_bass_line_go_to_voice_1()
+    {
+        var voices = MidiImporter.SuggestVoices(DraxBar());
+
+        Assert.Equal(VoiceRole.DrumsAndBass, voices[0].Role);
+        Assert.Equal(("bass", "drums"), (voices[0].Source!.Name, voices[0].Drums!.Name));
+        Assert.False(voices[1].Plays);
+        Assert.False(voices[2].Plays);
+    }
+
+    [Fact]
+    public void A_lone_tune_is_the_lead_on_voice_3()
+    {
+        var voices = MidiImporter.SuggestVoices(Read(new Smf().Track("Tune").Note(0, Tpq, 72).Note(Tpq, Tpq, 76)));
+
+        Assert.False(voices[0].Plays);
+        Assert.Equal((VoiceRole.Melody, "Tune"), (voices[2].Role, voices[2].Source!.Name));
     }
 
     [Theory]
