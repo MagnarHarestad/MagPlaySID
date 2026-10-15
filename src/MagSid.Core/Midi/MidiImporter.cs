@@ -19,6 +19,14 @@ public enum VoiceRole
     /// for it. This is how channel 1 is built in the demo songs.
     /// </summary>
     DrumsAndBass,
+
+    /// <summary>
+    /// The harmony as arpeggio instruments, one per chord, the way the demo songs' ARP_ instruments
+    /// work: the chord of each beat is found from the part, the same chord in any inversion is one
+    /// instrument, and when there are more chords than instruments left the rare ones play their
+    /// nearest kept chord.
+    /// </summary>
+    Chords,
 }
 
 /// <summary>
@@ -60,7 +68,9 @@ public sealed record MidiImportReport(
     double SongBpm,
     int TempoChanges,
     int DrumHits = 0,
-    int DrumsLeftOut = 0);
+    int DrumsLeftOut = 0,
+    int ChordsFound = 0,
+    int ChordsKept = 0);
 
 public sealed record MidiImportResult(Song Song, MidiImportReport Report);
 
@@ -83,6 +93,10 @@ public static class MidiImporter
     private const int PitchCount = 96;
 
     private static readonly NoteName FallbackDrumNote = NoteName.Parse("C-2");
+
+    /// <summary>Beats of three or more pitch classes a part needs before it is offered as the
+    /// chords - fewer is a few passing moments, not an accompaniment.</summary>
+    private const int MinChordBeats = 8;
 
     /// <summary>The speed closest to the file's tempo, and the tempo that speed actually plays.
     /// A row lasts a whole number of 50Hz frames, so most tempos land a few percent off.</summary>
@@ -117,8 +131,10 @@ public static class MidiImporter
     /// <summary>
     /// A starting choice of parts. With a drum part, the demo songs' layout: drums and the lowest
     /// part as bass on voice 1, the highest part on voice 2, the next on voice 3. Without one: the
-    /// highest on voice 1, the next on voice 2, the lowest as bass on voice 3. A part with under a
-    /// fifth of the busiest one's notes is an intro or an effect, not a line to build on.
+    /// highest on voice 1, the next on voice 2, the lowest as bass on voice 3. When a part carries
+    /// chords, voice 2 plays them as arpeggios and the melody moves to whichever voice is left. A
+    /// part with under a fifth of the busiest one's notes is an intro or an effect, not a line to
+    /// build on.
     /// </summary>
     public static IReadOnlyList<VoiceImport> SuggestVoices(MidiSong midi)
     {
@@ -130,6 +146,15 @@ public static class MidiImporter
         var highest = melodic.ElementAtOrDefault(0);
         var next = melodic.Count > 2 ? melodic[1] : null;
         var lowest = melodic.Count > 1 ? melodic[^1] : null;
+
+        // The part that carries the harmony most, read as chords on voice 2.
+        var harmony = parts.Select(s => (Source: s, Beats: ChordAnalyzer.ChordBeats(s, midi.TicksPerQuarter)))
+            .Where(x => x.Beats >= MinChordBeats).OrderByDescending(x => x.Beats).Select(x => x.Source).FirstOrDefault();
+
+        if (harmony is not null)
+            return drums is not null
+                ? [new(lowest, VoiceRole.DrumsAndBass, Drums: drums), new(harmony, VoiceRole.Chords), new(highest, VoiceRole.Melody)]
+                : [new(highest, VoiceRole.Melody), new(harmony, VoiceRole.Chords), new(lowest, VoiceRole.Bass)];
 
         return drums is not null
             ? [new(lowest, VoiceRole.DrumsAndBass, Drums: drums), new(highest, VoiceRole.Melody), new(next, VoiceRole.Melody)]
@@ -152,14 +177,17 @@ public static class MidiImporter
         int firstBar = Math.Clamp(options.FirstBar, 0, Math.Max(0, totalBars - 1));
         int bars = Math.Clamp(options.BarCount ?? totalBars - firstBar, 1, Math.Max(1, totalBars - firstBar));
         var range = new Range(midi.TicksPerQuarter / (double)options.RowsPerBeat, firstBar * rowsPerBar,
-                              bars * rowsPerBar, options.RowsPerBeat);
+                              bars * rowsPerBar, options.RowsPerBeat, rowsPerBar);
 
         // Instruments are numbered as they are first used, so a sound nothing plays - a snare in
-        // a part without one - never reaches the song.
+        // a part without one - never reaches the song. Chords go last: they take whatever of the 16
+        // the other voices leave.
         var stats = new Stats();
         var instruments = new List<Instrument>();
-        var lines = new List<PatternRow[]?>();
-        for (int channel = 0; channel < Song.ChannelCount; channel++)
+        var lines = new PatternRow[]?[Song.ChannelCount];
+        var order = Enumerable.Range(0, Song.ChannelCount)
+            .OrderBy(c => options.Voices[c].Role == VoiceRole.Chords ? 1 : 0);
+        foreach (int channel in order)
         {
             var voice = options.Voices[channel];
             var allocated = new Dictionary<string, int>();
@@ -175,9 +203,12 @@ public static class MidiImporter
                 return number;
             }
 
-            lines.Add(!voice.Plays ? null
-                : voice.Role == VoiceRole.DrumsAndBass ? DrumsAndBass(voice, channel, range, stats, Number)
-                : Melodic(voice, range, stats, Number));
+            lines[channel] = !voice.Plays ? null : voice.Role switch
+            {
+                VoiceRole.DrumsAndBass => DrumsAndBass(voice, channel, range, stats, Number),
+                VoiceRole.Chords => Chords(voice, range, stats, SongValidator.MaxInstrumentNumber - instruments.Count, Number),
+                _ => Melodic(voice, range, stats, Number),
+            };
         }
 
         MidiImportResult? best = null;
@@ -187,7 +218,7 @@ public static class MidiImporter
             if (rowsPerBar * barsPerPattern > MaxRowsPerPattern)
                 break;
 
-            var song = Build(lines, instruments, options.Speed, rowsPerBar * barsPerPattern);
+            var song = Build(lines.ToList(), instruments, options.Speed, rowsPerBar * barsPerPattern);
             if (Problem(song) is { } problem)
             {
                 lastProblem = problem;
@@ -201,7 +232,7 @@ public static class MidiImporter
                     bars, rowsPerBar, barsPerPattern, song.Patterns.Count, size,
                     stats.Placed, stats.Dropped, stats.Moved, stats.Shifted,
                     midi.Bpm, SongBpm(options.Speed, options.RowsPerBeat), midi.TempoChanges,
-                    stats.DrumHits, stats.DrumsLeftOut));
+                    stats.DrumHits, stats.DrumsLeftOut, stats.ChordsFound, stats.ChordsKept));
             }
         }
 
@@ -211,16 +242,16 @@ public static class MidiImporter
 
     private sealed class Stats
     {
-        public int Placed, Dropped, Moved, Shifted, DrumHits, DrumsLeftOut;
+        public int Placed, Dropped, Moved, Shifted, DrumHits, DrumsLeftOut, ChordsFound, ChordsKept;
     }
 
     /// <summary>The imported stretch of the file, in rows.</summary>
-    private sealed record Range(double TicksPerRow, int FirstRow, int RowCount, int RowsPerBeat)
+    private sealed record Range(double TicksPerRow, int FirstRow, int RowCount, int RowsPerBeat, int RowsPerBar)
     {
         /// <summary>A note's start and end rows within the range, or null when it lies outside.
         /// A note too short to reach the next row still gets one; one already sounding when the
         /// range begins starts before row 0.</summary>
-        public (int Start, int End)? Rows(MidiNote note, Stats stats)
+        public (int Start, int End)? Rows(MidiNote note, Stats? stats)
         {
             double exact = note.Start / TicksPerRow;
             int start = (int)Math.Round(exact) - FirstRow;
@@ -228,7 +259,7 @@ public static class MidiImporter
             if (end <= 0 || start >= RowCount)
                 return null;
 
-            if (Math.Abs(exact - Math.Round(exact)) > 0.05)
+            if (stats is not null && Math.Abs(exact - Math.Round(exact)) > 0.05)
                 stats.Moved++;
             return (start, Math.Min(end, RowCount));
         }
@@ -437,6 +468,105 @@ public static class MidiImporter
         stats.DrumHits += placed;
         stats.DrumsLeftOut += struck - placed;
         return rows;
+    }
+
+    /// <summary>
+    /// The chord of every beat, as arpeggio instruments. Each pitch class counts for the rows it
+    /// sounds in the beat, and the lowest note sounding gets a little more, since it is usually
+    /// the root. Consecutive beats of one chord are one note held. With more chords than
+    /// <paramref name="budget"/> instruments, the most-played are kept and every other chord plays
+    /// the kept one it shares most notes with.
+    /// </summary>
+    private static PatternRow[] Chords(VoiceImport voice, Range range, Stats stats, int budget,
+                                       Func<string, Func<Instrument>, int> number)
+    {
+        if (budget <= 0)
+            throw new MidiImportException(
+                $"The other voices use all {SongValidator.MaxInstrumentNumber} instruments - none is left for chords.");
+
+        int count = range.RowCount, beatRows = range.RowsPerBeat;
+        int beats = (count + beatRows - 1) / beatRows;
+        var weights = Enumerable.Range(0, beats).Select(_ => new double[12]).ToArray();
+        var lowest = new int[beats];
+        Array.Fill(lowest, int.MaxValue);
+        foreach (var note in voice.Source!.Notes)
+        {
+            if (range.Rows(note, null) is not { } at)
+                continue;
+            for (int row = Math.Max(0, at.Start); row < at.End; row++)
+            {
+                weights[row / beatRows][note.Key % 12]++;
+                lowest[row / beatRows] = Math.Min(lowest[row / beatRows], note.Key);
+            }
+        }
+
+        var chords = new Chord?[beats];
+        Chord? previous = null;
+        for (int beat = 0; beat < beats; beat++)
+        {
+            if (lowest[beat] != int.MaxValue)
+                weights[beat][lowest[beat] % 12] += beatRows / 2.0;
+            chords[beat] = ChordAnalyzer.Identify(weights[beat], previous);
+            previous = chords[beat] ?? previous;
+        }
+
+        // A chord of a single beat inside the bar that shares two notes with the one before is a
+        // passing harmony, not a change: it keeps the chord before. Harmony moves on the downbeat.
+        int beatsPerBar = Math.Max(1, range.RowsPerBar / beatRows);
+        for (int beat = 1; beat < beats; beat++)
+        {
+            if (chords[beat] is { } passing && chords[beat - 1] is { } before && passing != before
+                && beat % beatsPerBar != 0
+                && (beat + 1 >= beats || chords[beat + 1] != passing)
+                && passing.PitchClasses.Intersect(before.PitchClasses).Count() >= 2)
+                chords[beat] = before;
+        }
+
+        // The most-played chords keep an instrument; ties go to the one heard first.
+        var played = chords.Select((c, beat) => (c, beat)).Where(x => x.c is not null)
+            .GroupBy(x => x.c!).Select(g => (Chord: g.Key, Beats: g.Count(), First: g.Min(x => x.beat)))
+            .OrderByDescending(g => g.Beats).ThenBy(g => g.First).ToList();
+        var kept = played.Take(budget).Select(g => g.Chord).ToList();
+        var nearest = played.ToDictionary(g => g.Chord, g => kept.Contains(g.Chord) ? g.Chord
+            : kept.OrderByDescending(k => k.PitchClasses.Intersect(g.Chord.PitchClasses).Count())
+                  .ThenByDescending(k => k.Root == g.Chord.Root)
+                  .First());
+        stats.ChordsFound += played.Count;
+        stats.ChordsKept += kept.Count;
+
+        var rows = Enumerable.Repeat<PatternRow>(new HoldRow(), count).ToArray();
+        Chord? sounding = null;
+        for (int beat = 0; beat < beats; beat++)
+        {
+            var chord = chords[beat] is { } c ? nearest[c] : null;
+            int row = beat * beatRows;
+            if (chord is null && sounding is not null)
+                rows[row] = new NoteOffRow();
+            else if (chord is not null && chord != sounding)
+                rows[row] = new NoteRow(chord.Notes[0],
+                    number("chord " + chord.Name, () => ChordInstrument(chord, voice.Instrument)));
+            sounding = chord;
+        }
+
+        return rows;
+    }
+
+    /// <summary>An arpeggio of <paramref name="chord"/>, one note a frame round and round, on the
+    /// sound of <paramref name="template"/> - or the demo songs' pulse arpeggio.</summary>
+    public static Instrument ChordInstrument(Chord chord, Instrument? template = null)
+    {
+        var instrument = template is not null ? Clone(template) : new Instrument
+        {
+            Waveform = 0x41, AttackDecay = 0x00, SustainRelease = 0x8A, PulseWidth = 2, PulseSweep = 22,
+        };
+        if (template is null)
+            instrument.Wavetable.AddRange([0x09, 0x41]);
+        instrument.Name = "Chord " + chord.Name;
+        instrument.Arpeggio.Clear();
+        instrument.Arpeggio.AddRange(chord.Notes);
+        instrument.ArpeggioEnding = ArpeggioEnding.Loop;
+        instrument.ArpeggioLoopPoint = 0;
+        return instrument;
     }
 
     private static NoteName? FirstBassNote(PatternRow[] bass) =>

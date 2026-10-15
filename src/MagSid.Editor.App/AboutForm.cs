@@ -388,7 +388,10 @@ public sealed class AboutForm : Form
              "Import MIDI makes a new song from a .mid file. Choose a track for each of the three " +
              "voices: Melody keeps the highest note of a chord, Bass the lowest, and Drums + bass " +
              "puts kick, snare and the bass line on one voice the way the demo songs' channel 1 " +
-             "does - the KickBass settles on the bass note, hi-hats only if ticked. Notes snap to a " +
+             "does - the KickBass settles on the bass note, hi-hats only if ticked. Chords reads the " +
+             "chord of each beat from the part that carries the harmony and plays it as an arpeggio " +
+             "instrument: major or minor, a seventh only when it is really there, and an inversion " +
+             "is the same chord - so C-E-G, E-G-C and G-C-E share one instrument. Notes snap to a " +
              "16th or 32nd grid at one speed, and repeated bars are stored once; the dialog shows " +
              "the size and what had to give before anything is replaced. Run Optimize afterwards.\n\n");
         Mono("  Voiced threshold %   How sure pitch detection must be\n" +

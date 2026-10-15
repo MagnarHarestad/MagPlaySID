@@ -372,6 +372,136 @@ public class MidiImportTests
         Assert.Equal((2, 1), (result.Report.DrumHits, result.Report.DrumsLeftOut));
     }
 
+    // ---------------------------------------------------------------------------- chords
+
+    private static double[] Weights(params (int Pc, double Weight)[] notes)
+    {
+        var weights = new double[12];
+        foreach (var (pc, weight) in notes) weights[pc] += weight;
+        return weights;
+    }
+
+    [Theory]
+    [InlineData(0, 4, 7)]     // C E G
+    [InlineData(4, 7, 0)]     // E G C
+    [InlineData(7, 0, 4)]     // G C E
+    public void Every_inversion_of_a_chord_is_the_same_chord(int first, int second, int third)
+    {
+        // The first note is the lowest, so it carries the bass bonus - the inversion's own root.
+        var chord = ChordAnalyzer.Identify(Weights((first, 6), (second, 4), (third, 4)), null);
+
+        Assert.Equal(new Chord(0, ChordQuality.Major), chord);
+        Assert.Equal("C", chord!.Name);
+    }
+
+    [Fact]
+    public void Minor_seventh_and_plain_triads_are_told_apart()
+    {
+        Assert.Equal("Am", ChordAnalyzer.Identify(Weights((9, 4), (0, 4), (4, 4)), null)!.Name);
+        Assert.Equal("G7", ChordAnalyzer.Identify(Weights((7, 4), (11, 4), (2, 4), (5, 4)), null)!.Name);
+
+        // A seventh heard only in passing does not make a four-note chord.
+        Assert.Equal("G", ChordAnalyzer.Identify(Weights((7, 4), (11, 4), (2, 4), (5, 0.5)), null)!.Name);
+    }
+
+    [Fact]
+    public void A_chord_never_has_more_than_four_notes()
+    {
+        // Every note of C major 9 and more.
+        var chord = ChordAnalyzer.Identify(Weights((0, 4), (4, 4), (7, 4), (11, 4), (2, 4), (5, 2)), null)!;
+
+        Assert.InRange(chord.Notes.Count, 3, 4);
+    }
+
+    [Fact]
+    public void Two_notes_of_the_chord_already_playing_keep_it()
+    {
+        var c = new Chord(0, ChordQuality.Major);
+
+        Assert.Equal(c, ChordAnalyzer.Identify(Weights((0, 4), (7, 4)), c));
+        Assert.Null(ChordAnalyzer.Identify(new double[12], c));
+    }
+
+    [Fact]
+    public void A_chord_is_an_arpeggio_instrument_around_the_middle_of_the_range()
+    {
+        var instrument = MidiImporter.ChordInstrument(new Chord(9, ChordQuality.Minor));
+
+        Assert.Equal("Chord Am", instrument.Name);
+        Assert.Equal(["A-3", "C-4", "E-4"], instrument.Arpeggio.Select(n => n.ToString()));
+        Assert.Equal(ArpeggioEnding.Loop, instrument.ArpeggioEnding);
+    }
+
+    /// <summary>A bar each of C, F, G and C again - the last as E-G-C, held and broken - with a
+    /// tune on top.</summary>
+    private static MidiSong ChordsAndTune()
+    {
+        var smf = new Smf().Track("Tune");
+        for (int beat = 0; beat < 16; beat++)
+            smf.Note(beat * Tpq, Tpq, 72 + beat % 3 * 2);
+        smf.Track("Piano");
+        int[][] bars = [[60, 64, 67], [65, 69, 72], [67, 71, 74], [64, 67, 72]];
+        for (int bar = 0; bar < 4; bar++)
+            foreach (int key in bars[bar])
+                smf.Note(bar * 4 * Tpq, 4 * Tpq, key);
+        return Read(smf);
+    }
+
+    [Fact]
+    public void Chords_play_on_their_voice_one_instrument_per_chord_whatever_the_inversion()
+    {
+        var midi = ChordsAndTune();
+        var (tune, piano) = (midi.Sources()[0], midi.Sources()[1]);
+
+        var result = Import(midi, new VoiceImport(tune, VoiceRole.Melody), new VoiceImport(piano, VoiceRole.Chords));
+
+        Assert.Equal(
+            "C-4:Chord C . . . . . . . . . . . . . . . " +
+            "F-4:Chord F . . . . . . . . . . . . . . . " +
+            "G-3:Chord G . . . . . . . . . . . . . . . " +
+            "C-4:Chord C . . . . . . . . . . . . . . .",
+            Named(result.Song, 1));
+        Assert.Equal((3, 3), (result.Report.ChordsFound, result.Report.ChordsKept));
+        Assert.Empty(SongValidator.Validate(result.Song));
+    }
+
+    [Fact]
+    public void More_chords_than_instruments_play_their_nearest_kept_chord()
+    {
+        // Twenty different major and minor chords, one a bar, the first ones longest.
+        var smf = new Smf().Track("Tune");
+        smf.Note(0, Tpq, 84);
+        smf.Track("Piano");
+        long at = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            int root = 48 + i % 12, third = i < 12 ? 4 : 3;
+            long length = (i < 4 ? 8 : 4) * Tpq;
+            foreach (int key in new[] { root, root + third, root + 7 })
+                smf.Note(at, length, key);
+            at += length;
+        }
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody),
+                            new VoiceImport(midi.Sources()[1], VoiceRole.Chords));
+
+        Assert.Equal(20, result.Report.ChordsFound);
+        Assert.Equal(15, result.Report.ChordsKept);       // 16 less the melody's instrument
+        Assert.Equal(16, result.Song.Instruments.Count);
+        Assert.Empty(SongValidator.Validate(result.Song));
+    }
+
+    [Fact]
+    public void A_part_that_carries_chords_is_suggested_for_voice_2()
+    {
+        var voices = MidiImporter.SuggestVoices(ChordsAndTune());
+
+        Assert.Equal(VoiceRole.Chords, voices[1].Role);
+        Assert.Equal("Piano", voices[1].Source!.Name);
+        Assert.Equal("Tune", voices[0].Source!.Name);
+    }
+
     [Theory]
     [InlineData(0, 0x01)]
     [InlineData(1, 0x02)]

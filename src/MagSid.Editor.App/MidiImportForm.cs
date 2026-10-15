@@ -71,7 +71,9 @@ public sealed class MidiImportForm : Form
             "lowest. Drums + bass puts the rhythm section on one voice the C64 way - kick and snare " +
             "from the drum part, the bass line between them, the kick settling on the bass note. " +
             "Notes snap to the grid, and a bar that repeats is stored once. Load your own .json " +
-            "instruments here (for Drums + bass, the bass) or edit them afterwards."));
+            "instruments here (for Drums + bass, the bass; for Chords, the sound every chord is " +
+            "played on) or edit them afterwards. Chords reads the chord of each beat; an inversion " +
+            "is the same chord, so C-E-G and E-G-C share one instrument, and a chord has at most 4 notes."));
         root.Controls.Add(BuildButtons());
         Controls.Add(root);
 
@@ -132,7 +134,7 @@ public sealed class MidiImportForm : Form
             int v = voice;
             _source[v] = Combo(sources);
             _source[v].Width = 220;
-            _role[v] = Combo("Melody - highest note", "Bass - lowest note", "Drums + bass");
+            _role[v] = Combo("Melody - highest note", "Bass - lowest note", "Drums + bass", "Chords - arpeggios");
             _role[v].Width = 160;
             _drums[v] = Combo(drumSources);
             _drums[v].Width = 190;
@@ -268,10 +270,12 @@ public sealed class MidiImportForm : Form
             bool kit = Role(v) == VoiceRole.DrumsAndBass;
             _drums[v].Enabled = kit;
             _hiHat[v].Enabled = kit;
+            bool chords = Role(v) == VoiceRole.Chords;
             string sound = _instrument[v]?.Name is { Length: > 0 } name ? name
                 : _instrument[v] is not null ? "(loaded)"
+                : chords ? "pulse (default)"
                 : $"{(kit ? "Bass" : MidiImporter.Default(Role(v)).Name)} (default)";
-            _instrumentName[v].Text = !VoiceOf(v).Plays ? "" : kit ? $"Kit + {sound}" : sound;
+            _instrumentName[v].Text = !VoiceOf(v).Plays ? "" : kit ? $"Kit + {sound}" : chords ? $"Chords on {sound}" : sound;
         }
 
         _speedBpm.Text = $"= {MidiImporter.SongBpm((int)_speed.Value, RowsPerBeat):0.#} BPM";
@@ -298,6 +302,7 @@ public sealed class MidiImportForm : Form
     {
         1 => VoiceRole.Bass,
         2 => VoiceRole.DrumsAndBass,
+        3 => VoiceRole.Chords,
         _ => VoiceRole.Melody,
     };
 
@@ -319,6 +324,11 @@ public sealed class MidiImportForm : Form
             bent.Add($"{report.NotesShifted} moved by octaves into C-0..B-7");
         if (bent.Count > 0)
             lines.Add(string.Join("; ", bent) + ".");
+        if (report.ChordsFound > 0)
+            lines.Add(report.ChordsKept == report.ChordsFound
+                ? $"{report.ChordsFound} chords, one arpeggio instrument each."
+                : $"{report.ChordsFound} chords; the {report.ChordsKept} most played became instruments " +
+                  "and the rest play the nearest of them - instruments run out at 16.");
         if (report.DrumHits + report.DrumsLeftOut > 0)
             lines.Add($"{report.DrumHits} drum hits placed, {report.DrumsLeftOut} left out - hi-hats when off, " +
                       "toms and cymbals, flams, and hits a kick or snare already had.");
