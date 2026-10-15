@@ -53,7 +53,8 @@ public sealed record MidiImportOptions(
     int? BarCount = null,
     bool UseBank = true,
     GmBank? Bank = null,
-    bool KeepVibrato = false)
+    bool KeepVibrato = false,
+    bool ChordGateOffs = true)
 {
     /// <summary>The bank parts' General MIDI programs are mapped to, or null for none.</summary>
     public GmBank? Sounds => UseBank ? Bank ?? GmBank.BuiltIn : null;
@@ -218,7 +219,7 @@ public static class MidiImporter
             lines[channel] = !voice.Plays ? null : voice.Role switch
             {
                 VoiceRole.DrumsAndBass => DrumsAndBass(voice, channel, options, range, stats, Number),
-                VoiceRole.Chords => Chords(voice, range, stats, SongValidator.MaxInstrumentNumber - instruments.Count, Number),
+                VoiceRole.Chords => Chords(voice, options, range, stats, SongValidator.MaxInstrumentNumber - instruments.Count, Number),
                 _ => Melodic(voice, channel, options, range, stats, Number),
             };
         }
@@ -489,8 +490,8 @@ public static class MidiImporter
     /// <paramref name="budget"/> instruments, the most-played are kept and every other chord plays
     /// the kept one it shares most notes with.
     /// </summary>
-    private static PatternRow[] Chords(VoiceImport voice, Range range, Stats stats, int budget,
-                                       Func<string, Func<Instrument>, int> number)
+    private static PatternRow[] Chords(VoiceImport voice, MidiImportOptions options, Range range, Stats stats,
+                                       int budget, Func<string, Func<Instrument>, int> number)
     {
         if (budget <= 0)
             throw new MidiImportException(
@@ -500,11 +501,14 @@ public static class MidiImporter
         int beats = (count + beatRows - 1) / beatRows;
         var weights = Enumerable.Range(0, beats).Select(_ => new double[12]).ToArray();
         var lowest = new int[beats];
+        var struck = new bool[beats];
         Array.Fill(lowest, int.MaxValue);
         foreach (var note in voice.Source!.Notes)
         {
             if (range.Rows(note, null) is not { } at)
                 continue;
+            if (at.Start >= 0)
+                struck[at.Start / beatRows] = true;
             for (int row = Math.Max(0, at.Start); row < at.End; row++)
             {
                 weights[row / beatRows][note.Key % 12]++;
@@ -546,33 +550,71 @@ public static class MidiImporter
         stats.ChordsFound += played.Count;
         stats.ChordsKept += kept.Count;
 
-        var rows = Enumerable.Repeat<PatternRow>(new HoldRow(), count).ToArray();
+        // Where a chord is struck: when it changes, and again on a beat where the part plays new
+        // notes - the accompaniment's own rhythm - and where the harmony stops.
+        var strikes = new List<(int Row, Chord? Chord)>();
         Chord? sounding = null;
         for (int beat = 0; beat < beats; beat++)
         {
             var chord = chords[beat] is { } c ? nearest[c] : null;
-            int row = beat * beatRows;
-            if (chord is null && sounding is not null)
-                rows[row] = new NoteOffRow();
-            else if (chord is not null && chord != sounding)
-                rows[row] = new NoteRow(chord.Notes[0],
-                    number("chord " + chord.Name, () => ChordInstrument(chord, voice.Instrument)));
+            if (chord != sounding || (chord is not null && struck[beat]))
+                strikes.Add((beat * beatRows, chord));
             sounding = chord;
+        }
+
+        // How long each chord rings before the next thing happens, in 16th rows.
+        int unit = Math.Max(1, beatRows / 4);
+        var spans = strikes.Select((s, i) => (s.Row, s.Chord, Span: (i + 1 < strikes.Count ? strikes[i + 1].Row : count) - s.Row))
+            .Where(s => s.Chord is not null).ToList();
+        var release = spans.GroupBy(s => s.Chord!).ToDictionary(g => g.Key, g =>
+        {
+            var lengths = g.Select(s => s.Span).Order().ToList();
+            int median = lengths[lengths.Count / 2];
+            return median > 16 * unit ? 0x0C : median > 8 * unit ? 0x0B : 0x0A;
+        });
+
+        // The demo songs never let an arpeggio ring on: its gate goes off three rows after it is
+        // struck, four for a chord that usually has more than eight rows to itself - which also
+        // gets the longer release, so it fades over the gap instead of stopping. The gate-off is in
+        // the instrument's wavetable, as the demo songs' ARP_ instruments have it, not a --- in the
+        // pattern: measured on the 25 midifiles, a pattern gate-off costs about three bytes each
+        // (+37 to +1971 a song), the wavetable one +11 to +92, shared by every chord instrument.
+        int? GateFrames(Chord chord) => options.ChordGateOffs && voice.Instrument is null
+            ? (release[chord] > 0x0A ? 4 : 3) * unit * (options.Speed + 1)
+            : null;
+
+        var rows = Enumerable.Repeat<PatternRow>(new HoldRow(), count).ToArray();
+        foreach (var (row, chord) in strikes)
+        {
+            rows[row] = chord is null
+                ? new NoteOffRow()
+                : new NoteRow(chord.Notes[0], number("chord " + chord.Name,
+                    () => ChordInstrument(chord, voice.Instrument, voice.Instrument is null ? release[chord] : null, GateFrames(chord))));
         }
 
         return rows;
     }
 
     /// <summary>An arpeggio of <paramref name="chord"/>, one note a frame round and round, on the
-    /// sound of <paramref name="template"/> - or the demo songs' pulse arpeggio.</summary>
-    public static Instrument ChordInstrument(Chord chord, Instrument? template = null)
+    /// sound of <paramref name="template"/> - or the demo songs' pulse arpeggio, with
+    /// <paramref name="release"/> as its release when given, and its gate going off after
+    /// <paramref name="gateFrames"/> frames when given.</summary>
+    public static Instrument ChordInstrument(Chord chord, Instrument? template = null, int? release = null,
+                                             int? gateFrames = null)
     {
         var instrument = template is not null ? Clone(template) : new Instrument
         {
-            Waveform = 0x41, AttackDecay = 0x00, SustainRelease = 0x8A, PulseWidth = 2, PulseSweep = 22,
+            Waveform = 0x41, AttackDecay = 0x00, SustainRelease = (byte)(0x80 | (release ?? 0x0A)),
+            PulseWidth = 2, PulseSweep = 22,
         };
         if (template is null)
-            instrument.Wavetable.AddRange([0x09, 0x41]);
+        {
+            instrument.Wavetable.Add(0x09);
+            for (int frame = 1; frame < (gateFrames ?? 2); frame++)
+                instrument.Wavetable.Add(0x41);
+            if (gateFrames is not null)
+                instrument.Wavetable.Add(0x40);              // gate off, and the last step holds
+        }
         instrument.Name = "Chord " + chord.Name;
         instrument.Arpeggio.Clear();
         instrument.Arpeggio.AddRange(chord.Notes);
@@ -682,8 +724,11 @@ public static class MidiImporter
         if (voice.Instrument is { } loaded)
             return (Clone(loaded), loaded.Name.Length > 0 ? loaded.Name : "(loaded)");
 
+        // General MIDI plays a channel that never names a program as program 1, the grand piano;
+        // a bass part keeps the bass, which suits it better than a piano would.
+        int? program = voice.Source?.Program ?? (voice.Role == VoiceRole.Melody ? 0 : null);
         if (voice.Role is VoiceRole.Melody or VoiceRole.Bass or VoiceRole.DrumsAndBass
-            && options.Sounds?.For(voice.Source?.Program) is { } sound)
+            && options.Sounds?.For(program) is { } sound)
         {
             var instrument = Clone(sound.Instrument);
             if (!options.KeepVibrato)
@@ -692,8 +737,8 @@ public static class MidiImporter
                 RouteFilter(instrument, channel);
             else
                 instrument.Filter.Clear();
-            int program = voice.Source!.Program!.Value;
-            return (instrument, $"{instrument.Name} - {sound.Origin} (GM {program + 1} {GmBank.FamilyName(program)})");
+            string named = voice.Source?.Program is null ? ", no program" : "";
+            return (instrument, $"{instrument.Name} - {sound.Origin} (GM {program!.Value + 1} {GmBank.FamilyName(program.Value)}{named})");
         }
 
         var plain = voice.Role == VoiceRole.DrumsAndBass ? Kit("Bass", channel) : Default(voice.Role);

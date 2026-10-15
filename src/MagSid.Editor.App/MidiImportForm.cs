@@ -33,6 +33,7 @@ public sealed class MidiImportForm : Form
     private readonly NumericUpDown _toBar = Number(1, 1);
     private readonly CheckBox _useBank = new() { Text = "GM sound bank", Checked = true, AutoSize = true, Margin = new Padding(18, 6, 3, 3) };
     private readonly CheckBox _keepVibrato = new() { Text = "Keep vibrato (+112 bytes)", AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
+    private readonly CheckBox _chordGateOffs = new() { Text = "Chord gate-off", Checked = true, AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
     private readonly GmBank _bank = GmBank.Load(EditorSettings.BankDirectory);
     private readonly Label _report = new() { AutoSize = true, MaximumSize = new Size(760, 0), Margin = new Padding(3, 10, 3, 3) };
     private readonly Button _import = new() { Text = "Import", DialogResult = DialogResult.OK, AutoSize = true };
@@ -192,6 +193,8 @@ public sealed class MidiImportForm : Form
         row.Controls.Add(_toBar);
         row.Controls.Add(_useBank);
         row.Controls.Add(_keepVibrato);
+        row.Controls.Add(_chordGateOffs);
+        _chordGateOffs.CheckedChanged += (_, _) => Recalculate(sourcesChanged: false);
         _useBank.CheckedChanged += (_, _) => Recalculate(sourcesChanged: false);
         _keepVibrato.CheckedChanged += (_, _) => Recalculate(sourcesChanged: false);
         return row;
@@ -307,7 +310,7 @@ public sealed class MidiImportForm : Form
 
     private MidiImportOptions Options(IReadOnlyList<VoiceImport> voices) => new(
         voices, RowsPerBeat, (int)_speed.Value, (int)_fromBar.Value - 1, (int)(_toBar.Value - _fromBar.Value) + 1,
-        UseBank: _useBank.Checked, Bank: _bank, KeepVibrato: _keepVibrato.Checked);
+        UseBank: _useBank.Checked, Bank: _bank, KeepVibrato: _keepVibrato.Checked, ChordGateOffs: _chordGateOffs.Checked);
 
     private VoiceRole Role(int voice) => _role[voice].SelectedIndex switch
     {
@@ -317,7 +320,7 @@ public sealed class MidiImportForm : Form
         _ => VoiceRole.Melody,
     };
 
-    private static string Describe(MidiImportReport report)
+    private string Describe(MidiImportReport report)
     {
         var lines = new List<string>
         {
@@ -340,6 +343,9 @@ public sealed class MidiImportForm : Form
                 ? $"{report.ChordsFound} chords, one arpeggio instrument each."
                 : $"{report.ChordsFound} chords; the {report.ChordsKept} most played became instruments " +
                   "and the rest play the nearest of them - instruments run out at 16.");
+        if (report.ChordsFound > 0 && _chordGateOffs.Checked)
+            lines.Add("Each chord's gate goes off 3 rows after it is struck, 4 rows - with a longer release, " +
+                      "$B or $C - for chords that usually ring longer than 8; in the chord's wavetable, so it costs no pattern bytes.");
         if (report.DrumHits + report.DrumsLeftOut > 0)
             lines.Add($"{report.DrumHits} drum hits placed, {report.DrumsLeftOut} left out - hi-hats when off, " +
                       "toms and cymbals, flams, and hits a kick or snare already had.");

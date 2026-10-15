@@ -447,6 +447,14 @@ public class MidiImportTests
         return Read(smf);
     }
 
+    /// <summary>Rows until the chord instrument's wavetable takes the gate off, at
+    /// <paramref name="speed"/>; null when it never does.</summary>
+    private static double? GateOffRows(Instrument chord, int speed = 5)
+    {
+        int frame = chord.Wavetable.FindIndex(b => (b & 0x01) == 0);
+        return frame < 0 ? null : frame / (double)(speed + 1);
+    }
+
     [Fact]
     public void Chords_play_on_their_voice_one_instrument_per_chord_whatever_the_inversion()
     {
@@ -462,7 +470,117 @@ public class MidiImportTests
             "C-4:Chord C . . . . . . . . . . . . . . .",
             Named(result.Song, 1));
         Assert.Equal((3, 3), (result.Report.ChordsFound, result.Report.ChordsKept));
+
+        // A bar to itself: the gate goes off after four rows and the release is $B.
+        var chords = result.Song.Instruments.Where(i => i.Name.StartsWith("Chord")).ToList();
+        Assert.All(chords, i => Assert.Equal(0x0B, i.SustainRelease & 0x0F));
+        Assert.All(chords, i => Assert.Equal(4, GateOffRows(i)));
         Assert.Empty(SongValidator.Validate(result.Song));
+    }
+
+    /// <summary>One chord per bar, played as the given rhythm of onsets (in beats).</summary>
+    private static MidiSong ChordRhythm(int bars, params int[] beatsStruck)
+    {
+        var smf = new Smf().Track("Tune").Note(0, Tpq, 84).Track("Piano");
+        int[][] chords = [[60, 64, 67], [65, 69, 72]];
+        for (int bar = 0; bar < bars; bar++)
+            for (int i = 0; i < beatsStruck.Length; i++)
+            {
+                int beat = beatsStruck[i], next = i + 1 < beatsStruck.Length ? beatsStruck[i + 1] : 4;
+                foreach (int key in chords[bar % 2])
+                    smf.Note((bar * 4 + beat) * Tpq, (next - beat) * Tpq, key);
+            }
+        return Read(smf);
+    }
+
+    [Fact]
+    public void A_chord_is_struck_again_where_the_part_plays_and_gated_off_after_three_rows()
+    {
+        var midi = ChordRhythm(1, 0, 2);       // half notes: eight rows each
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords));
+
+        Assert.Equal("C-4:Chord C . . . . . . . C-4:Chord C . . . . . . .", Named(result.Song, 1));
+        var chord = result.Song.Instruments.Single(i => i.Name == "Chord C");
+        Assert.Equal(0x0A, chord.SustainRelease & 0x0F);
+        Assert.Equal(3, GateOffRows(chord));
+    }
+
+    [Fact]
+    public void The_gate_off_costs_no_pattern_bytes()
+    {
+        var midi = ChordRhythm(4, 0, 2);
+        var voices = new[] { new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords),
+                             new VoiceImport(null, VoiceRole.Bass) };
+
+        var gated = MidiImporter.Import(midi, new MidiImportOptions(voices, 4, 5));
+        var ringing = MidiImporter.Import(midi, new MidiImportOptions(voices, 4, 5, ChordGateOffs: false));
+
+        Assert.DoesNotContain("---", Named(gated.Song, 1));
+        Assert.Equal(SongSizeCalculator.Measure(ringing.Song).PatternBytes, SongSizeCalculator.Measure(gated.Song).PatternBytes);
+    }
+
+    [Fact]
+    public void On_the_32nd_grid_the_rows_of_the_rules_count_double()
+    {
+        var midi = ChordRhythm(1, 0, 1, 2, 3);
+        var voices = new[] { new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords),
+                             new VoiceImport(null, VoiceRole.Bass) };
+
+        var result = MidiImporter.Import(midi, new MidiImportOptions(voices, 8, 2));
+
+        // Three 16ths are six rows here.
+        Assert.Equal(6, GateOffRows(result.Song.Instruments.Single(i => i.Name == "Chord C"), speed: 2));
+    }
+
+    [Fact]
+    public void A_chord_held_for_two_bars_gets_the_longest_release()
+    {
+        var smf = new Smf().Track("Tune").Note(0, Tpq, 84).Track("Piano");
+        foreach (int key in new[] { 60, 64, 67 })
+            smf.Note(0, 8 * Tpq, key);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords));
+
+        var chord = result.Song.Instruments.Single(i => i.Name == "Chord C");
+        Assert.Equal(0x0C, chord.SustainRelease & 0x0F);
+        Assert.Equal(4, GateOffRows(chord));
+    }
+
+    [Fact]
+    public void Chord_gate_offs_can_be_turned_off()
+    {
+        var midi = ChordRhythm(1, 0, 2);
+        var voices = new[] { new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords),
+                             new VoiceImport(null, VoiceRole.Bass) };
+
+        var result = MidiImporter.Import(midi, new MidiImportOptions(voices, 4, 5, ChordGateOffs: false));
+
+        Assert.Null(GateOffRows(result.Song.Instruments.Single(i => i.Name == "Chord C")));
+    }
+
+    [Fact]
+    public void A_melody_without_a_program_plays_as_a_piano_and_a_bass_as_a_bass()
+    {
+        var midi = Read(new Smf().Track("Tune").Note(0, Tpq, 72).Track("Low").Note(0, Tpq, 36));
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody), v3: new VoiceImport(midi.Sources()[1], VoiceRole.Bass));
+
+        Assert.Equal(["Lead2", "Bass"], result.Song.Instruments.Select(i => i.Name));
+    }
+
+    [Fact]
+    public void Notes_in_tight_succession_get_no_gate_off_on_lead_or_bass()
+    {
+        var smf = new Smf().Track("Tune");
+        for (int beat = 0; beat < 4; beat++)
+            smf.Note(beat * Tpq, Tpq, 72 + beat);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody));
+
+        Assert.Equal("C-5 . . . C#5 . . . D-5 . . . D#5 . . .", Rows(result.Song, 0));
     }
 
     [Fact]

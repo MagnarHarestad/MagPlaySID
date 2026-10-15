@@ -391,7 +391,12 @@ public sealed class AboutForm : Form
              "does - the KickBass settles on the bass note, hi-hats only if ticked. Chords reads the " +
              "chord of each beat from the part that carries the harmony and plays it as an arpeggio " +
              "instrument: major or minor, a seventh only when it is really there, and an inversion " +
-             "is the same chord - so C-E-G, E-G-C and G-C-E share one instrument. With GM sound bank " +
+             "is the same chord - so C-E-G, E-G-C and G-C-E share one instrument. A chord is struck " +
+             "again where the part plays, and with Chord gate-off its gate goes off 3 rows after it " +
+             "is struck - 4 rows, with a longer release ($B, or $C past 16 rows), for chords that " +
+             "usually ring longer than 8 - done in the chord's wavetable, so it costs no pattern " +
+             "bytes. Lead and bass keep the MIDI file's own note ends. " +
+             "A part without a program plays as a piano, a bass part as a bass. With GM sound bank " +
              "on, a part's General MIDI sound becomes an instrument from the demo songs, by family - " +
              "piano, organ, guitar, bass, strings, brass, flute, synth lead and so on - without " +
              "vibrato unless Keep vibrato is ticked, and with a filter only on channel 1. A file " +
