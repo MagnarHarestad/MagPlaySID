@@ -30,14 +30,23 @@ internal sealed class DawView : Panel
     /// on.</summary>
     private Instrument? _renaming;
 
+    /// <summary>The row being renamed: lifted a shade off the list, with the instrument's colour
+    /// underneath - the name is typed in place, in the list's own font, not in a box over it.</summary>
+    private static readonly Color RenameBack = Color.FromArgb(0x1E, 0x27, 0x3A);
+
     private readonly TextBox _rename = new()
     {
-        Visible = false,
-        BorderStyle = BorderStyle.FixedSingle,
-        BackColor = DawPalette.Inset,
+        BorderStyle = BorderStyle.None,
+        AutoSize = false,
+        BackColor = RenameBack,
         ForeColor = DawPalette.Text,
         Font = new Font("Consolas", 9f),
+        Dock = DockStyle.Fill,
     };
+
+    /// <summary>Holds the editor over the name part of the row; the row itself still draws the
+    /// number and the colour square, so they stay put while typing.</summary>
+    private readonly Panel _renameHost = new() { Visible = false, BackColor = RenameBack };
     private readonly ToggleButton _autoScroll = new("AUTOSCROLL") { Checked = true, Accent = DawPalette.Oscillator };
     private readonly ToggleButton _cycle = new("CYCLE") { Accent = DawPalette.Oscillator };
     private readonly ToggleButton _preRoll = new("PRE-ROLL") { Checked = true, Accent = DawPalette.Oscillator };
@@ -467,7 +476,17 @@ internal sealed class DawView : Panel
         if (e.Index < 0 || e.Index >= _instrumentList.Items.Count)
             return;
 
-        bool selected = (e.State & DrawItemState.Selected) != 0;
+        bool renaming = _renaming is { } edited && _song is { } owner
+            && e.Index < owner.Instruments.Count && owner.Instruments[e.Index] == edited;
+        bool selected = (e.State & DrawItemState.Selected) != 0 && !renaming;
+        if (renaming)
+        {
+            using var back = new SolidBrush(RenameBack);
+            e.Graphics.FillRectangle(back, e.Bounds);
+            using var underline = new SolidBrush(DawPalette.ForInstrument(_renaming!.Number));
+            e.Graphics.FillRectangle(underline, e.Bounds.X, e.Bounds.Bottom - 1, e.Bounds.Width, 1);
+        }
+
         var ink = selected ? SystemColors.HighlightText : _instrumentList.ForeColor;
         string text = _instrumentList.Items[e.Index]?.ToString() ?? string.Empty;
         const TextFormatFlags flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
@@ -572,6 +591,7 @@ internal sealed class DawView : Panel
         _instrumentList.DrawMode = DrawMode.OwnerDrawFixed;
         _instrumentList.ItemHeight = TextRenderer.MeasureText("01", _instrumentList.Font, Size.Empty, TextFormatFlags.NoPadding).Height;
         _instrumentList.DrawItem += DrawInstrumentItem;
+        _renameHost.Controls.Add(_rename);
         _instrumentList.SelectedIndexChanged += (_, _) =>
         {
             if (IsNewInstrumentRow(_instrumentList.SelectedIndex))
@@ -742,8 +762,20 @@ internal sealed class DawView : Panel
     private void ApplyArrangeHeight() =>
         _arrangeTop.Height = Math.Min(ArrangeView.PreferredHeight, InstrumentStripHeight);
 
-    /// <summary>Opens the editor over the selected row. Positioned past the number, which is not
-    /// part of the name and is not being edited.</summary>
+    /// <summary>Where the name starts in a row, as DrawInstrumentItem lays it out: one pixel left,
+    /// the renderer's own padding, then the number and three spaces of the monospaced font.</summary>
+    private int NameLeft()
+    {
+        var font = _instrumentList.Font;
+        const TextFormatFlags tight = TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+        int padding = (TextRenderer.MeasureText("01", font, Size.Empty, TextFormatFlags.NoPrefix).Width
+                     - TextRenderer.MeasureText("01", font, Size.Empty, tight).Width) / 2;
+        int column = TextRenderer.MeasureText("0000000000", font, Size.Empty, tight).Width / 10;
+        return -1 + padding + 5 * column;
+    }
+
+    /// <summary>Opens the editor over the name in the selected row. The number is not part of
+    /// the name and stays drawn by the list.</summary>
     private void BeginRename()
     {
         if (SelectedInstrument is not { } instrument
@@ -754,22 +786,27 @@ internal sealed class DawView : Panel
         }
 
         var item = _instrumentList.GetItemRectangle(_instrumentList.SelectedIndex);
-        if (_rename.Parent != parent)
+        if (_renameHost.Parent != parent)
         {
-            _rename.Parent?.Controls.Remove(_rename);
-            parent.Controls.Add(_rename);
+            _renameHost.Parent?.Controls.Remove(_renameHost);
+            parent.Controls.Add(_renameHost);
         }
 
-        _rename.Bounds = new Rectangle(
-            _instrumentList.Left + 26,
+        // The edit control keeps a small margin of its own before the first character; the host
+        // starts that much earlier, so the typed name sits exactly where the drawn one did.
+        _rename.Text = instrument.Name;
+        int margin = _rename.IsHandleCreated ? Math.Max(0, _rename.GetPositionFromCharIndex(0).X) : 1;
+        int left = NameLeft() - margin;
+        _renameHost.Bounds = new Rectangle(
+            _instrumentList.Left + left,
             _instrumentList.Top + item.Top,
-            Math.Max(40, _instrumentList.Width - 28),
-            Math.Max(item.Height, _rename.PreferredHeight));
+            Math.Max(40, _instrumentList.ClientSize.Width - left - 4),
+            item.Height - 1);
 
         _renaming = instrument;
-        _rename.Text = instrument.Name;
-        _rename.Visible = true;
-        _rename.BringToFront();
+        _instrumentList.Invalidate(item);
+        _renameHost.Visible = true;
+        _renameHost.BringToFront();
         _rename.Focus();
         _rename.SelectAll();
     }
@@ -779,14 +816,15 @@ internal sealed class DawView : Panel
     /// </summary>
     private void CommitRename(bool keep)
     {
-        if (!_rename.Visible)
+        if (!_renameHost.Visible)
         {
             return;
         }
 
         var instrument = _renaming;
         _renaming = null;
-        _rename.Visible = false;
+        _renameHost.Visible = false;
+        _instrumentList.Invalidate();
 
         if (!keep || instrument is null)
         {
