@@ -1,0 +1,38 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "PlockRingMod",
+  "waveform": "$17",
+  "attackDecay": "$07",
+  "sustainRelease": "$76",
+  "pulse": {
+    "width": 2,
+    "sweep": 22,
+    "continuous": false
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$81",
+    "$27",
+    "$27",
+    "$27",
+    "$27"
+  ],
+  "noteProgram": {
+    "steps": [
+      "B-7",
+      "B-7"
+    ],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

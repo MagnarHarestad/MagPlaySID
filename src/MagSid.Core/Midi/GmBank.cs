@@ -1,0 +1,91 @@
+using MagSid.Core.Model;
+using MagSid.Core.Serialization;
+
+namespace MagSid.Core.Midi;
+
+/// <summary>
+/// The sound a MIDI part gets when nobody picks one: its General MIDI program, by family, mapped
+/// to an instrument from the demo songs. A General MIDI program is one of 128, in 16 families of
+/// 8 - pianos, organs, guitars, basses and so on - and one demo-song sound stands for each family.
+///
+/// The sounds ship inside the editor as instrument files. A folder of the user's own can replace
+/// any of them: a file there named after a sound's key - Piano.json, Bass.json - is used instead,
+/// so saving an instrument under that name is all it takes to change what a piano becomes.
+/// </summary>
+public sealed class GmBank
+{
+    /// <summary>One sound of the bank and the demo song it comes from.</summary>
+    public sealed record Sound(string Key, string Origin, Instrument Instrument);
+
+    private static readonly (string Key, string Origin)[] Sounds =
+    [
+        ("Piano", "Magnificent"), ("Bells", "Magnificent"), ("Organ", "CityBomber4k"),
+        ("Guitar", "Breakdance"), ("Bass", "Magnificent"), ("SynthBass", "Clarity"),
+        ("Strings", "Fairlighty"), ("Brass", "Airstrike"), ("Reed", "BellaCiao"),
+        ("Flute", "Clarity"), ("SynthLead", "Lightforce"), ("SynthPad", "Clarity"),
+        ("SynthFx", "Breakdance"), ("Noise", "Breakdance"),
+    ];
+
+    /// <summary>The 16 GM families in program order, eight programs each.</summary>
+    private static readonly string[] Families =
+    [
+        "Piano", "Bells", "Organ", "Guitar", "Bass", "Strings", "Strings", "Brass",
+        "Reed", "Flute", "SynthLead", "SynthPad", "SynthFx", "SynthFx", "Bells", "Noise",
+    ];
+
+    private readonly Dictionary<string, Sound> _sounds;
+
+    private GmBank(Dictionary<string, Sound> sounds) => _sounds = sounds;
+
+    /// <summary>The sounds as they ship.</summary>
+    public static GmBank BuiltIn { get; } = Load(null);
+
+    public IEnumerable<Sound> All => Sounds.Select(s => _sounds[s.Key]);
+
+    /// <summary>The built-in sounds, each replaced by a readable file of the same key in
+    /// <paramref name="overrideDirectory"/> when there is one. A file that cannot be read is
+    /// passed over: a broken override must not stop an import.</summary>
+    public static GmBank Load(string? overrideDirectory)
+    {
+        var assembly = typeof(GmBank).Assembly;
+        var sounds = new Dictionary<string, Sound>();
+        foreach (var (key, origin) in Sounds)
+        {
+            string? own = overrideDirectory is null ? null : Path.Combine(overrideDirectory, key + ".json");
+            if (own is not null && File.Exists(own))
+            {
+                try
+                {
+                    sounds[key] = new Sound(key, "your bank", InstrumentFile.Read(File.ReadAllText(own)));
+                    continue;
+                }
+                catch (Exception ex) when (ex is InstrumentFileException or IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+
+            using var stream = assembly.GetManifestResourceStream($"Bank.{key}.json")
+                ?? throw new InvalidOperationException($"The built-in sound {key} is missing.");
+            sounds[key] = new Sound(key, origin, InstrumentFile.Read(new StreamReader(stream).ReadToEnd()));
+        }
+        return new GmBank(sounds);
+    }
+
+    /// <summary>The bank key a General MIDI program (0-127) plays as. Synth bass (38, 39) has a
+    /// sound of its own; everything else goes by family.</summary>
+    public static string KeyFor(int program) => program switch
+    {
+        38 or 39 => "SynthBass",
+        _ => Families[Math.Clamp(program, 0, 127) / 8],
+    };
+
+    /// <summary>The sound for <paramref name="program"/>, or null when the part names none.</summary>
+    public Sound? For(int? program) => program is { } p ? _sounds[KeyFor(p)] : null;
+
+    /// <summary>General MIDI's names for its 16 families, for showing a program.</summary>
+    public static string FamilyName(int program) => new[]
+    {
+        "Piano", "Chromatic perc.", "Organ", "Guitar", "Bass", "Strings", "Ensemble", "Brass",
+        "Reed", "Pipe", "Synth lead", "Synth pad", "Synth FX", "Ethnic", "Percussive", "Sound FX",
+    }[Math.Clamp(program, 0, 127) / 8];
+}

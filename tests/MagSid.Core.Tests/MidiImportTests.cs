@@ -522,6 +522,112 @@ public class MidiImportTests
         Assert.Equal((VoiceRole.Melody, "Tune"), (voices[2].Role, voices[2].Source!.Name));
     }
 
+    // ---------------------------------------------------------------------------- the GM bank
+
+    [Fact]
+    public void Every_sound_of_the_built_in_bank_is_an_instrument_a_song_can_take()
+    {
+        var sounds = GmBank.BuiltIn.All.ToList();
+
+        Assert.Equal(14, sounds.Count);
+        Assert.All(sounds, s => Assert.Empty(SongValidator.ValidateInstrument(s.Instrument, s.Key)));
+    }
+
+    [Theory]
+    [InlineData(0, "Piano")]
+    [InlineData(10, "Bells")]
+    [InlineData(19, "Organ")]
+    [InlineData(25, "Guitar")]
+    [InlineData(33, "Bass")]
+    [InlineData(38, "SynthBass")]
+    [InlineData(48, "Strings")]
+    [InlineData(61, "Brass")]
+    [InlineData(65, "Reed")]
+    [InlineData(73, "Flute")]
+    [InlineData(80, "SynthLead")]
+    [InlineData(89, "SynthPad")]
+    [InlineData(127, "Noise")]
+    public void A_general_midi_program_maps_by_family(int program, string key)
+    {
+        Assert.Equal(key, GmBank.KeyFor(program));
+    }
+
+    private static MidiImportResult ImportWithProgram(int program, VoiceRole role, int channel,
+                                                      bool keepVibrato = false, bool useBank = true,
+                                                      Instrument? own = null)
+    {
+        var midi = Read(new Smf().Track("Part").Raw(0, 0xC0, (byte)program).Note(0, Tpq, role == VoiceRole.Bass ? 40 : 72));
+        var voices = new VoiceImport[3];
+        for (int v = 0; v < 3; v++)
+            voices[v] = v == channel ? new VoiceImport(midi.Sources().Single(), role, Instrument: own) : new VoiceImport(null, role);
+        return MidiImporter.Import(midi, new MidiImportOptions(voices, 4, 5, UseBank: useBank, KeepVibrato: keepVibrato));
+    }
+
+    [Fact]
+    public void A_parts_program_picks_its_sound_from_the_bank()
+    {
+        var result = ImportWithProgram(80, VoiceRole.Melody, 2);
+
+        var lead = Assert.Single(result.Song.Instruments);
+        Assert.Equal("Lead1", lead.Name);       // Lightforce's
+        Assert.Equal(0x6F, lead.SustainRelease);
+    }
+
+    [Fact]
+    public void Vibrato_is_left_out_unless_asked_for()
+    {
+        var plain = Assert.Single(ImportWithProgram(48, VoiceRole.Melody, 2).Song.Instruments);
+        var kept = Assert.Single(ImportWithProgram(48, VoiceRole.Melody, 2, keepVibrato: true).Song.Instruments);
+
+        Assert.Equal("Pad", plain.Name);         // Fairlighty's
+        Assert.False(plain.HasVibrato);
+        Assert.True(kept.HasVibrato);
+    }
+
+    [Fact]
+    public void Only_channel_1_keeps_a_filter_program_routed_to_itself()
+    {
+        var onOne = Assert.Single(ImportWithProgram(33, VoiceRole.Bass, 0).Song.Instruments);
+        var onThree = Assert.Single(ImportWithProgram(33, VoiceRole.Bass, 2).Song.Instruments);
+
+        Assert.NotEmpty(onOne.Filter);
+        Assert.All(onOne.Filter.Where(f => f.IsSetup), f => Assert.Equal(0x01, f.ResonanceRouting!.Value & 0x0F));
+        Assert.Empty(onThree.Filter);
+    }
+
+    [Fact]
+    public void Without_the_bank_or_with_an_instrument_of_ones_own_the_bank_is_not_used()
+    {
+        var own = Instrument.CreateDefault(1);
+        own.Name = "Mine";
+
+        Assert.Equal("Lead", Assert.Single(ImportWithProgram(80, VoiceRole.Melody, 2, useBank: false).Song.Instruments).Name);
+        Assert.Equal("Mine", Assert.Single(ImportWithProgram(80, VoiceRole.Melody, 2, own: own).Song.Instruments).Name);
+    }
+
+    [Fact]
+    public void A_file_in_the_users_bank_folder_replaces_the_built_in_sound()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "magsid-bank-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var mine = Instrument.CreateDefault(1);
+            mine.Name = "My piano";
+            File.WriteAllText(Path.Combine(folder, "Piano.json"), Serialization.InstrumentFile.Write(mine));
+            File.WriteAllText(Path.Combine(folder, "Organ.json"), "not an instrument");
+
+            var bank = GmBank.Load(folder);
+
+            Assert.Equal(("My piano", "your bank"), (bank.For(0)!.Instrument.Name, bank.For(0)!.Origin));
+            Assert.Equal("CityBomber4k", bank.For(16)!.Origin);      // the broken file is passed over
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(0, 0x01)]
     [InlineData(1, 0x02)]

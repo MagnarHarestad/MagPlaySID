@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The GM sound bank: instruments taken from the demo songs, read by GmBank. -->
+    <EmbeddedResource Include="Midi\Bank\*.json" LogicalName="Bank.%(Filename).json" />
+  </ItemGroup>
+
 </Project>

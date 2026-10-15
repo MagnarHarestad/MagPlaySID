@@ -1,0 +1,31 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Lead Long",
+  "waveform": "$11",
+  "attackDecay": "$03",
+  "sustainRelease": "$6A",
+  "pulse": {
+    "width": 4,
+    "sweep": 72,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$22",
+    "depth": "$80"
+  },
+  "wavetable": [
+    "$45",
+    "$47"
+  ],
+  "noteProgram": {
+    "steps": [],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

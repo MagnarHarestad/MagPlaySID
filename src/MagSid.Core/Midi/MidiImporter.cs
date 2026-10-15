@@ -50,7 +50,14 @@ public sealed record MidiImportOptions(
     int RowsPerBeat,
     int Speed,
     int FirstBar = 0,
-    int? BarCount = null);
+    int? BarCount = null,
+    bool UseBank = true,
+    GmBank? Bank = null,
+    bool KeepVibrato = false)
+{
+    /// <summary>The bank parts' General MIDI programs are mapped to, or null for none.</summary>
+    public GmBank? Sounds => UseBank ? Bank ?? GmBank.BuiltIn : null;
+}
 
 /// <summary>What the import had to bend to fit, so it can be shown before the song replaces
 /// anything.</summary>
@@ -210,9 +217,9 @@ public static class MidiImporter
 
             lines[channel] = !voice.Plays ? null : voice.Role switch
             {
-                VoiceRole.DrumsAndBass => DrumsAndBass(voice, channel, range, stats, Number),
+                VoiceRole.DrumsAndBass => DrumsAndBass(voice, channel, options, range, stats, Number),
                 VoiceRole.Chords => Chords(voice, range, stats, SongValidator.MaxInstrumentNumber - instruments.Count, Number),
-                _ => Melodic(voice, range, stats, Number),
+                _ => Melodic(voice, channel, options, range, stats, Number),
             };
         }
 
@@ -270,14 +277,14 @@ public static class MidiImporter
         }
     }
 
-    private static PatternRow[] Melodic(VoiceImport voice, Range range, Stats stats,
-                                        Func<string, Func<Instrument>, int> number)
+    private static PatternRow[] Melodic(VoiceImport voice, int channel, MidiImportOptions options, Range range,
+                                        Stats stats, Func<string, Func<Instrument>, int> number)
     {
         var rows = MonoLine(voice.Source!, voice.Role, voice.Transpose, range, stats);
         if (!rows.Any(r => r is NoteRow))
             return rows;
 
-        int instrument = number("voice", () => voice.Instrument is { } template ? Clone(template) : Default(voice.Role));
+        int instrument = number("voice", () => SoundFor(voice, channel, options).Instrument);
         for (int i = 0; i < rows.Length; i++)
             if (rows[i] is NoteRow note)
                 rows[i] = note with { InstrumentNumber = instrument };
@@ -360,8 +367,8 @@ public static class MidiImporter
     /// note table from growing. Two hits of one drum on neighbouring rows are a flam; the later,
     /// the main hit, is kept.
     /// </summary>
-    private static PatternRow[] DrumsAndBass(VoiceImport voice, int channel, Range range, Stats stats,
-                                             Func<string, Func<Instrument>, int> number)
+    private static PatternRow[] DrumsAndBass(VoiceImport voice, int channel, MidiImportOptions options, Range range,
+                                             Stats stats, Func<string, Func<Instrument>, int> number)
     {
         int count = range.RowCount;
         var bass = voice.Source is null
@@ -437,7 +444,7 @@ public static class MidiImporter
             else if (bassOnset)
             {
                 var onset = (NoteRow)bass[row];
-                rows[row] = onset with { InstrumentNumber = number("bass", () => voice.Instrument is { } t ? Clone(t) : Kit("Bass", channel)) };
+                rows[row] = onset with { InstrumentNumber = number("bass", () => SoundFor(voice, channel, options).Instrument) };
                 playing = "bass";
             }
             else if (hits[Drum.HiHat][row] && voice.HiHat
@@ -662,6 +669,50 @@ public static class MidiImporter
     private static Instrument Clone(Instrument source) =>
         Serialization.InstrumentFile.Read(Serialization.InstrumentFile.Write(source));
 
+    /// <summary>
+    /// The sound a melodic voice - or the bass of a drums-and-bass voice - plays its notes on, and
+    /// how to name it. An instrument the user loaded is used as it is. Otherwise the part's General
+    /// MIDI program picks a sound from the bank, made to fit the import: no vibrato unless asked
+    /// for, since the first instrument with vibrato costs the player 112 bytes, and a filter
+    /// program only on channel 1 - the SID has one filter, and that is the bass's channel - routed
+    /// to it. A part without a program gets the role's plain default.
+    /// </summary>
+    public static (Instrument Instrument, string Description) SoundFor(VoiceImport voice, int channel, MidiImportOptions options)
+    {
+        if (voice.Instrument is { } loaded)
+            return (Clone(loaded), loaded.Name.Length > 0 ? loaded.Name : "(loaded)");
+
+        if (voice.Role is VoiceRole.Melody or VoiceRole.Bass or VoiceRole.DrumsAndBass
+            && options.Sounds?.For(voice.Source?.Program) is { } sound)
+        {
+            var instrument = Clone(sound.Instrument);
+            if (!options.KeepVibrato)
+                (instrument.VibratoDelaySpeed, instrument.VibratoDepth) = ((byte)0, (byte)0);
+            if (channel == 0)
+                RouteFilter(instrument, channel);
+            else
+                instrument.Filter.Clear();
+            int program = voice.Source!.Program!.Value;
+            return (instrument, $"{instrument.Name} - {sound.Origin} (GM {program + 1} {GmBank.FamilyName(program)})");
+        }
+
+        var plain = voice.Role == VoiceRole.DrumsAndBass ? Kit("Bass", channel) : Default(voice.Role);
+        return (plain, $"{plain.Name} (default)");
+    }
+
+    /// <summary>Points every setup step of the filter program at <paramref name="channel"/>; the
+    /// resonance in the high nibble is kept.</summary>
+    private static void RouteFilter(Instrument instrument, int channel)
+    {
+        for (int i = 0; i < instrument.Filter.Count; i++)
+        {
+            var step = instrument.Filter[i];
+            if (step.IsSetup)
+                instrument.Filter[i] = FilterStep.Setup(step.ModeVolume!.Value,
+                    (byte)(step.ResonanceRouting!.Value & 0xF0 | 1 << channel), step.Cutoff, step.SweepRate);
+        }
+    }
+
     /// <summary>Plain starting sounds, meant to be replaced: a pulse lead and a narrower pulse
     /// bass. No note program, so they cost the song nothing beyond their table entries.</summary>
     public static Instrument Default(VoiceRole role) => role switch
@@ -692,14 +743,7 @@ public static class MidiImporter
         };
         instrument.Name = name;
 
-        // The filter's voice bits name the channel; the resonance in the high nibble is kept.
-        for (int i = 0; i < instrument.Filter.Count; i++)
-        {
-            var step = instrument.Filter[i];
-            if (step.IsSetup)
-                instrument.Filter[i] = FilterStep.Setup(step.ModeVolume!.Value,
-                    (byte)(step.ResonanceRouting!.Value & 0xF0 | 1 << channel), step.Cutoff, step.SweepRate);
-        }
+        RouteFilter(instrument, channel);
         return instrument;
 
         static FilterStep Setup(byte modeVolume, byte cutoff) => FilterStep.Setup(modeVolume, 0xF0, cutoff);

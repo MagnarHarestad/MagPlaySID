@@ -31,6 +31,9 @@ public sealed class MidiImportForm : Form
     private readonly Label _speedBpm = new() { AutoSize = true, Margin = new Padding(6, 8, 18, 3), ForeColor = EditorPalette.Subtitle };
     private readonly NumericUpDown _fromBar = Number(1, 1);
     private readonly NumericUpDown _toBar = Number(1, 1);
+    private readonly CheckBox _useBank = new() { Text = "GM sound bank", Checked = true, AutoSize = true, Margin = new Padding(18, 6, 3, 3) };
+    private readonly CheckBox _keepVibrato = new() { Text = "Keep vibrato (+112 bytes)", AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
+    private readonly GmBank _bank = GmBank.Load(EditorSettings.BankDirectory);
     private readonly Label _report = new() { AutoSize = true, MaximumSize = new Size(760, 0), Margin = new Padding(3, 10, 3, 3) };
     private readonly Button _import = new() { Text = "Import", DialogResult = DialogResult.OK, AutoSize = true };
     private bool _updating;
@@ -70,7 +73,10 @@ public sealed class MidiImportForm : Form
             "Each voice plays one note at a time: Melody keeps the highest note of a chord, Bass the " +
             "lowest. Drums + bass puts the rhythm section on one voice the C64 way - kick and snare " +
             "from the drum part, the bass line between them, the kick settling on the bass note. " +
-            "Notes snap to the grid, and a bar that repeats is stored once. Load your own .json " +
+            "Notes snap to the grid, and a bar that repeats is stored once. With GM sound bank on, " +
+            "each part's General MIDI sound becomes a demo-song instrument - a piano Lead2, a synth " +
+            "lead Lightforce's Lead1 - replaceable by files of your own in " + EditorSettings.BankDirectory +
+            ". Load your own .json " +
             "instruments here (for Drums + bass, the bass; for Chords, the sound every chord is " +
             "played on) or edit them afterwards. Chords reads the chord of each beat; an inversion " +
             "is the same chord, so C-E-G and E-G-C share one instrument, and a chord has at most 4 notes."));
@@ -184,6 +190,10 @@ public sealed class MidiImportForm : Form
         row.Controls.Add(_fromBar);
         row.Controls.Add(Caption("to"));
         row.Controls.Add(_toBar);
+        row.Controls.Add(_useBank);
+        row.Controls.Add(_keepVibrato);
+        _useBank.CheckedChanged += (_, _) => Recalculate(sourcesChanged: false);
+        _keepVibrato.CheckedChanged += (_, _) => Recalculate(sourcesChanged: false);
         return row;
     }
 
@@ -271,10 +281,9 @@ public sealed class MidiImportForm : Form
             _drums[v].Enabled = kit;
             _hiHat[v].Enabled = kit;
             bool chords = Role(v) == VoiceRole.Chords;
-            string sound = _instrument[v]?.Name is { Length: > 0 } name ? name
-                : _instrument[v] is not null ? "(loaded)"
-                : chords ? "pulse (default)"
-                : $"{(kit ? "Bass" : MidiImporter.Default(Role(v)).Name)} (default)";
+            string sound = chords
+                ? _instrument[v] is { } loaded ? (loaded.Name.Length > 0 ? loaded.Name : "(loaded)") : "pulse (default)"
+                : MidiImporter.SoundFor(VoiceOf(v), v, Options([])).Description;
             _instrumentName[v].Text = !VoiceOf(v).Plays ? "" : kit ? $"Kit + {sound}" : chords ? $"Chords on {sound}" : sound;
         }
 
@@ -282,9 +291,7 @@ public sealed class MidiImportForm : Form
 
         try
         {
-            var voices = Enumerable.Range(0, Song.ChannelCount).Select(VoiceOf).ToList();
-            Result = MidiImporter.Import(_midi, new MidiImportOptions(
-                voices, RowsPerBeat, (int)_speed.Value, (int)_fromBar.Value - 1, (int)(_toBar.Value - _fromBar.Value) + 1));
+            Result = MidiImporter.Import(_midi, Options(Enumerable.Range(0, Song.ChannelCount).Select(VoiceOf).ToList()));
             _report.Text = Describe(Result.Report);
             _report.ForeColor = EditorPalette.Body;
             _import.Enabled = true;
@@ -297,6 +304,10 @@ public sealed class MidiImportForm : Form
             _import.Enabled = false;
         }
     }
+
+    private MidiImportOptions Options(IReadOnlyList<VoiceImport> voices) => new(
+        voices, RowsPerBeat, (int)_speed.Value, (int)_fromBar.Value - 1, (int)(_toBar.Value - _fromBar.Value) + 1,
+        UseBank: _useBank.Checked, Bank: _bank, KeepVibrato: _keepVibrato.Checked);
 
     private VoiceRole Role(int voice) => _role[voice].SelectedIndex switch
     {

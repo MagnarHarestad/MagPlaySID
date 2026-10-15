@@ -1,0 +1,43 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Hihat",
+  "waveform": "$81",
+  "attackDecay": "$00",
+  "sustainRelease": "$23",
+  "pulse": {
+    "width": 8,
+    "sweep": 0,
+    "continuous": false
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$81",
+    "$80"
+  ],
+  "noteProgram": {
+    "steps": [
+      "B-7",
+      "B-7",
+      "G-6"
+    ],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": [
+    {
+      "modeVolume": "$4F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$9C",
+      "sweep": 0
+    }
+  ]
+}

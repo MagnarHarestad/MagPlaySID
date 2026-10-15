@@ -1,0 +1,38 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Plocker_Ringmod_Flutish",
+  "waveform": "$11",
+  "attackDecay": "$00",
+  "sustainRelease": "$87",
+  "pulse": {
+    "width": 4,
+    "sweep": 12,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$81",
+    "$41",
+    "$17",
+    "$11",
+    "$10"
+  ],
+  "noteProgram": {
+    "steps": [
+      "B-7",
+      "B-7"
+    ],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

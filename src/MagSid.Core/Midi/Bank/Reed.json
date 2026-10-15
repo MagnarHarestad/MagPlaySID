@@ -1,0 +1,32 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Counter-Melody Lead",
+  "waveform": "$21",
+  "attackDecay": "$00",
+  "sustainRelease": "$AA",
+  "pulse": {
+    "width": 2,
+    "sweep": 24,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$25",
+    "depth": "$08"
+  },
+  "wavetable": [
+    "$09",
+    "$51",
+    "$20"
+  ],
+  "noteProgram": {
+    "steps": [],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

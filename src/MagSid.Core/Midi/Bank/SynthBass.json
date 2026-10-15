@@ -1,0 +1,45 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Bassline",
+  "waveform": "$41",
+  "attackDecay": "$00",
+  "sustainRelease": "$C8",
+  "pulse": {
+    "width": 8,
+    "sweep": 16,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$41",
+    "$41",
+    "$41"
+  ],
+  "noteProgram": {
+    "steps": [],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": [
+    {
+      "modeVolume": "$1F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$28",
+      "sweep": 0
+    },
+    {
+      "cutoff": "$17"
+    },
+    {
+      "cutoff": "$06"
+    }
+  ]
+}

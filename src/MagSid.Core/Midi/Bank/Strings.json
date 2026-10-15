@@ -1,0 +1,28 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Pad",
+  "waveform": "$11",
+  "attackDecay": "$A6",
+  "sustainRelease": "$A9",
+  "pulse": {
+    "width": 8,
+    "sweep": 0,
+    "continuous": false
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": true
+  },
+  "vibrato": {
+    "delaySpeed": "$41",
+    "depth": "$12"
+  },
+  "wavetable": [],
+  "noteProgram": {
+    "steps": [],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

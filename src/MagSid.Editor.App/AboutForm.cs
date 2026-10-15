@@ -391,7 +391,12 @@ public sealed class AboutForm : Form
              "does - the KickBass settles on the bass note, hi-hats only if ticked. Chords reads the " +
              "chord of each beat from the part that carries the harmony and plays it as an arpeggio " +
              "instrument: major or minor, a seventh only when it is really there, and an inversion " +
-             "is the same chord - so C-E-G, E-G-C and G-C-E share one instrument. Notes snap to a " +
+             "is the same chord - so C-E-G, E-G-C and G-C-E share one instrument. With GM sound bank " +
+             "on, a part's General MIDI sound becomes an instrument from the demo songs, by family - " +
+             "piano, organ, guitar, bass, strings, brass, flute, synth lead and so on - without " +
+             "vibrato unless Keep vibrato is ticked, and with a filter only on channel 1. A file " +
+             "named after a family's sound (Piano.json, Bass.json...) in %APPDATA%\\MagSid.Editor\\Bank " +
+             "replaces it. Notes snap to a " +
              "16th or 32nd grid at one speed, and repeated bars are stored once; the dialog shows " +
              "the size and what had to give before anything is replaced. Run Optimize afterwards.\n\n");
         Mono("  Voiced threshold %   How sure pitch detection must be\n" +

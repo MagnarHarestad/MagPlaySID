@@ -1,0 +1,32 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Bassline-Melody",
+  "waveform": "$41",
+  "attackDecay": "$00",
+  "sustainRelease": "$C8",
+  "pulse": {
+    "width": 4,
+    "sweep": 12,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$81",
+    "$41"
+  ],
+  "noteProgram": {
+    "steps": [],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

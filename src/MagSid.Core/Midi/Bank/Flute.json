@@ -1,0 +1,33 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "FluteRingModPulse",
+  "waveform": "$41",
+  "attackDecay": "$03",
+  "sustainRelease": "$6A",
+  "pulse": {
+    "width": 8,
+    "sweep": 0,
+    "continuous": false
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$47",
+    "$17",
+    "$11",
+    "$21"
+  ],
+  "noteProgram": {
+    "steps": [],
+    "ending": "loop",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

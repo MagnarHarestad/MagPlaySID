@@ -1,0 +1,28 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Long-BassLine",
+  "waveform": "$41",
+  "attackDecay": "$00",
+  "sustainRelease": "$9A",
+  "pulse": {
+    "width": 2,
+    "sweep": 22,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [],
+  "noteProgram": {
+    "steps": [],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

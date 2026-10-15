@@ -17,6 +17,10 @@ public static class EditorSettings
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "MagSid.Editor", "settings.json");
 
+    /// <summary>Where instruments of the user's own replace the GM sound bank's: Piano.json,
+    /// Bass.json and so on (see MagSid.Core.Midi.GmBank).</summary>
+    public static string BankDirectory => Path.Combine(Path.GetDirectoryName(FilePath)!, "Bank");
+
     private static bool _showHighHex;
     private static bool _swapSpacebar;
     private static bool _compactLoops;
