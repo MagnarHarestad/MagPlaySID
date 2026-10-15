@@ -594,14 +594,8 @@ public sealed class MainForm : Form
 
         // Through the session, the same as the retro list - so an instrument added here is added
         // the same way, with the same undo behaviour and the same numbering rules.
-        _dawView.InstrumentAddRequested += AddNewInstrument;
-        _dawView.InstrumentFromBankRequested += AddFromBank;
-        _dawView.InstrumentLoadRequested += DoLoadInstrument;
-        _dawView.InstrumentCopyRequested += instrument =>
-        {
-            if (_session.CopyInstrument(instrument) is { } copy)
-                SelectAddedInstrument(copy.Number);
-        };
+        _dawView.InstrumentAddRequested += () => _session.AddInstrument();
+        _dawView.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
         _dawView.InstrumentDeleteRequested += instrument => _session.DeleteInstrument(instrument);
 
         _dawView.PatternEdited += () =>
@@ -2180,8 +2174,8 @@ public sealed class MainForm : Form
 
     private const string InstrumentFilter = "MagSID instruments (*.json)|*.json|All files (*.*)|*.*";
 
-    /// <summary>A new plain instrument, selected and with its name open for typing in whichever
-    /// view is on screen - the + button, the "+ New instrument" row and Insert all end here.</summary>
+    /// <summary>A new plain instrument, selected and with its name open for typing - the Retro
+    /// list's + button, its "+ New instrument" row and Insert all end here.</summary>
     private void AddNewInstrument()
     {
         if (_session.AddInstrument() is not { } added)
@@ -2191,10 +2185,7 @@ public sealed class MainForm : Form
         }
 
         SelectAddedInstrument(added.Number);
-        if (_dawShowing)
-            _dawView.RenameSelectedInstrument();
-        else
-            _instrumentList.BeginRename(added.Number);
+        _instrumentList.BeginRename(added.Number);
     }
 
     /// <summary>A copy of one of the GM bank's sounds, as it is in the bank - named, and with its
