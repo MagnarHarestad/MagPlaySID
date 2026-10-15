@@ -30,15 +30,19 @@ internal sealed class DawInstrumentView : Panel
     /// <summary>See <see cref="_stripSlot"/>.</summary>
     public Control StripHost => _stripSlot;
 
-    /// <summary>Takes the title's place while the name is being typed. Edits the name only - the
-    /// number in front of it is the instrument's slot, not part of what it is called.</summary>
+    /// <summary>Takes the name's place in the title while it is being typed - borderless, in the
+    /// title's font and colour, on a lifted shade with the accent underneath. The number in front
+    /// stays drawn: it is the instrument's slot, not part of what it is called.</summary>
     private readonly TextBox _nameEditor = new()
     {
         Visible = false,
-        BorderStyle = BorderStyle.FixedSingle,
-        BackColor = DawPalette.Inset,
+        BorderStyle = BorderStyle.None,
+        AutoSize = false,
+        BackColor = DawPalette.PanelHeader,
         Font = new Font("Segoe UI", 13f),
     };
+
+    private readonly Panel _nameUnderline = new() { Visible = false, Height = 1 };
 
     private readonly WaveformSelector _waveform = new();
     private readonly EnvelopeView _envelope = new();
@@ -649,6 +653,7 @@ internal sealed class DawInstrumentView : Panel
         var header = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = DawPalette.Background };
         header.Controls.Add(_title);
         header.Controls.Add(_nameEditor);
+        header.Controls.Add(_nameUnderline);
 
         // --- oscillator -------------------------------------------------------------------
         // The envelope and pulse knobs come first, under the name - they are what is reached for
@@ -922,14 +927,25 @@ internal sealed class DawInstrumentView : Panel
             return;
         }
 
+        // Where the name starts inside the title: the label's own padding, then everything before
+        // the name. Measured with a letter after it, so the trailing spaces count; the padding
+        // the two measurements share cancels out.
+        var font = _title.Font;
+        string prefix = $"{instrument.Number:00}  ";
+        int letter = TextRenderer.MeasureText("X", font).Width;
+        int padding = (letter - TextRenderer.MeasureText("X", font, Size.Empty, TextFormatFlags.NoPadding).Width) / 2;
+        int nameLeft = _title.Left + padding + TextRenderer.MeasureText(prefix + "X", font).Width - letter;
+
         _renaming = instrument;
         _nameEditor.Text = instrument.Name;
         _nameEditor.ForeColor = _title.ForeColor;
-        _nameEditor.Bounds = new Rectangle(
-            _title.Left, _title.Top - 2, Math.Max(320, _title.Width + 60), _nameEditor.PreferredHeight);
+        int margin = _nameEditor.IsHandleCreated ? Math.Max(0, _nameEditor.GetPositionFromCharIndex(0).X) : 1;
+        _nameEditor.Bounds = new Rectangle(nameLeft - margin, _title.Top, 320, _title.Height);
+        _nameUnderline.BackColor = _title.ForeColor;
+        _nameUnderline.Bounds = new Rectangle(_nameEditor.Left, _nameEditor.Bottom, _nameEditor.Width, 1);
 
-        _title.Visible = false;
-        _nameEditor.Visible = true;
+        _title.Text = prefix;
+        _nameEditor.Visible = _nameUnderline.Visible = true;
         _nameEditor.BringToFront();
         _nameEditor.Focus();
         _nameEditor.SelectAll();
@@ -946,8 +962,9 @@ internal sealed class DawInstrumentView : Panel
 
         var instrument = _renaming;
         _renaming = null;
-        _nameEditor.Visible = false;
-        _title.Visible = true;
+        _nameEditor.Visible = _nameUnderline.Visible = false;
+        if (_instrument is { } shown)
+            _title.Text = TitleOf(shown);
 
         if (!keep || instrument is null)
         {
