@@ -784,10 +784,12 @@ internal sealed class DawView : Panel
         _instrument.Visible = tab == DawTab.Instrument;
         _placeholder.Visible = false;
 
-        // One list, two homes: full height beside the instrument editor, and beside the channel
-        // lanes on ARRANGE - where picking one sets the instrument the roll draws with, and
-        // re-voices the selected note. Moved rather than duplicated so the selection is one thing.
-        Control home = tab == DawTab.Arrange ? _arrangeTop : this;
+        // One list, two homes: beside the oscillator and vibrato on the instrument page, and beside
+        // the channel lanes on ARRANGE - where picking one sets the instrument the roll draws
+        // with, and re-voices the selected note. Either way what is below it - the program lanes,
+        // the piano roll - runs the full width under it. Moved rather than duplicated so the
+        // selection is one thing.
+        Control home = tab == DawTab.Arrange ? _arrangeTop : _instrument.StripHost;
         if (_instrumentList.Parent != home)
         {
             _instrumentList.Parent?.Controls.Remove(_instrumentList);

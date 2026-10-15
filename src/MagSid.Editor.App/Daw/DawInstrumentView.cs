@@ -18,6 +18,14 @@ internal sealed class DawInstrumentView : Panel
 {
     private readonly Label _title = new();
 
+    /// <summary>The name and the oscillator and vibrato row: where the DAW puts the instrument
+    /// strip on this page, so the program lanes and the filter editor below run the full width
+    /// under it - as the piano roll does under the strip on ARRANGE.</summary>
+    private readonly Panel _upper = new() { Dock = DockStyle.Top, BackColor = DawPalette.Background };
+
+    /// <summary>See <see cref="_upper"/>.</summary>
+    public Control StripHost => _upper;
+
     /// <summary>Takes the title's place while the name is being typed. Edits the name only - the
     /// number in front of it is the instrument's slot, not part of what it is called.</summary>
     private readonly TextBox _nameEditor = new()
@@ -791,10 +799,13 @@ internal sealed class DawInstrumentView : Panel
             programs.Controls.Add(withEnding, 0, row);
         }
 
+        _upper.Height = header.Height + top.Height;
+        _upper.Controls.Add(top);
+        _upper.Controls.Add(header);
+
         Controls.Add(programs);
         Controls.Add(_filterStep);
-        Controls.Add(top);
-        Controls.Add(header);
+        Controls.Add(_upper);
     }
 
     /// <summary>LOOP, HOLD and ROOT are one choice, so they latch as a group - and the loop's own
