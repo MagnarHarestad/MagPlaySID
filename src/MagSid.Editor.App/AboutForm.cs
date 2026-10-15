@@ -225,6 +225,7 @@ public sealed class AboutForm : Form
 
         Heading("Instrument strip");
         Mono("  Click              Select (on Arrange it also re-voices the selected note)\n" +
+             "  + New instrument   The row after the last instrument: adds one, named as you type\n" +
              "  F2 / Double-click  Rename\n" +
              "  Right-click        Add, Copy, Delete\n\n");
 

@@ -52,6 +52,11 @@ internal sealed class DawView : Panel
     private readonly FlowLayoutPanel _tabs = new();
     private readonly ListBox _instrumentList = new();
 
+    /// <summary>The last row of the strip when there is room for another instrument: clicking it
+    /// adds one. Never selected - choosing it by the keyboard puts the selection back.</summary>
+    private const string NewInstrumentText = "+ New instrument";
+    private int _lastInstrumentIndex = -1;
+
     private readonly List<TabButton> _tabButtons = [];
 
     private Song? _song;
@@ -388,11 +393,20 @@ internal sealed class DawView : Panel
             _instrumentList.Items.Add($"{instrument.Number:00}   {InstrumentNames.Display(instrument)}");
         }
 
+        if (_song.Instruments.Count < MagSid.Core.Validation.SongValidator.MaxInstrumentNumber)
+            _instrumentList.Items.Add(NewInstrumentText);
+
         _instrumentList.EndUpdate();
 
-        if (_instrumentList.Items.Count > 0)
-            _instrumentList.SelectedIndex = Math.Clamp(previous, 0, _instrumentList.Items.Count - 1);
+        if (_song.Instruments.Count > 0)
+            _instrumentList.SelectedIndex = Math.Clamp(previous, 0, _song.Instruments.Count - 1);
     }
+
+    private bool IsNewInstrumentRow(int index) =>
+        _song is { } song && index == song.Instruments.Count && index < _instrumentList.Items.Count;
+
+    /// <summary>Opens the selected instrument's name for typing - what follows adding one.</summary>
+    public void RenameSelectedInstrument() => BeginRename();
 
     /// <summary>One row of the instrument list: the text exactly where the plain list put it, and
     /// the instrument's colour in the gap after the number.</summary>
@@ -406,6 +420,8 @@ internal sealed class DawView : Panel
         var ink = selected ? SystemColors.HighlightText : _instrumentList.ForeColor;
         string text = _instrumentList.Items[e.Index]?.ToString() ?? string.Empty;
         const TextFormatFlags flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+        if (IsNewInstrumentRow(e.Index))
+            ink = DawPalette.Oscillator;
         TextRenderer.DrawText(e.Graphics, text, e.Font ?? _instrumentList.Font, e.Bounds with { X = e.Bounds.X - 1 }, ink, flags);
 
         if (_song is not { } song || e.Index >= song.Instruments.Count)
@@ -503,9 +519,20 @@ internal sealed class DawView : Panel
         _instrumentList.DrawItem += DrawInstrumentItem;
         _instrumentList.SelectedIndexChanged += (_, _) =>
         {
+            if (IsNewInstrumentRow(_instrumentList.SelectedIndex))
+            {
+                _instrumentList.SelectedIndex = _song is { } song && _lastInstrumentIndex >= 0 && _lastInstrumentIndex < song.Instruments.Count
+                    ? _lastInstrumentIndex
+                    : -1;
+                return;
+            }
+
+            _lastInstrumentIndex = _instrumentList.SelectedIndex;
             CommitRename(keep: true);
             ShowSelectedInstrument();
         };
+        _instrumentList.MouseMove += (_, e) =>
+            _instrumentList.Cursor = IsNewInstrumentRow(_instrumentList.IndexFromPoint(e.Location)) ? Cursors.Hand : Cursors.Default;
 
         // F2 or a double-click, the two gestures Explorer taught everyone. The retro view renames
         // in its own grid cell; this is the same edit, reached the same way a list allows.
@@ -556,6 +583,13 @@ internal sealed class DawView : Panel
         // the list is refreshed, and neither should touch the pattern.
         _instrumentList.MouseClick += (_, e) =>
         {
+            // Posted: adding rebuilds the list, which is not done from inside its own click.
+            if (IsNewInstrumentRow(_instrumentList.IndexFromPoint(e.Location)))
+            {
+                BeginInvoke(() => InstrumentAddRequested?.Invoke());
+                return;
+            }
+
             if (_arrangePage.Visible && _instrumentList.IndexFromPoint(e.Location) >= 0
                 && SelectedInstrument is { } instrument)
                 _pianoRoll.SetSelectedNoteInstrument(instrument.Number);
