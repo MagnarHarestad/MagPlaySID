@@ -4,7 +4,7 @@ namespace MagSid.Editor.App.Daw;
 /// belong together. <see cref="Body"/> is where content goes; the header paints itself.</summary>
 internal sealed class SectionPanel : Panel
 {
-    private const int HeaderHeight = 28;
+    public const int HeaderHeight = 28;
 
     private readonly string _title;
     private readonly Color _accent;
