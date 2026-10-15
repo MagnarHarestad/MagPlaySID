@@ -50,6 +50,9 @@ Settings — MIDI device, knob bindings, view preferences — are kept in
   tracker way: `ZSXDCVGBHNJM` is one octave and `Q2W3ER5T6Y7U` the next.
 - **Menu → Export to .sid** (F9) writes a PSID file. **Menu → Load and Play .sid** plays one, and
   exports it as WAV, MP3 or FLAC.
+- **Menu → Import MIDI** makes a new song from a `.mid` file: bass and drums on channel 1, the
+  chords as arpeggio instruments on channel 2, the lead on channel 3, and each part's General MIDI
+  sound mapped to an instrument from the demo songs. `midifiles/` has 25 free tunes to try it on.
 
 **Menu → About** lists every key and control, view by view.
 
