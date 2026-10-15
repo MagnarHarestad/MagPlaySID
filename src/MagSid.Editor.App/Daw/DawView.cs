@@ -790,6 +790,14 @@ internal sealed class DawView : Panel
         // the piano roll - runs the full width under it. Moved rather than duplicated so the
         // selection is one thing.
         Control home = tab == DawTab.Arrange ? _arrangeTop : _instrument.StripHost;
+
+        // Beside the lanes it runs their height, which ApplyArrangeHeight already holds to 16
+        // rows; on the instrument page it is sized to its 16 rows itself, so its background does
+        // not run on past the last one.
+        _instrumentList.Dock = tab == DawTab.Arrange ? DockStyle.Left : DockStyle.Top;
+        if (tab != DawTab.Arrange)
+            _instrumentList.Height = 16 * _instrumentList.ItemHeight;
+
         if (_instrumentList.Parent != home)
         {
             _instrumentList.Parent?.Controls.Remove(_instrumentList);

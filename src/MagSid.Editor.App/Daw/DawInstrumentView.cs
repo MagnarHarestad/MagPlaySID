@@ -23,8 +23,12 @@ internal sealed class DawInstrumentView : Panel
     /// width under it - as the piano roll does under the strip on ARRANGE.</summary>
     private readonly Panel _upper = new() { Dock = DockStyle.Top, BackColor = DawPalette.Background };
 
-    /// <summary>See <see cref="_upper"/>.</summary>
-    public Control StripHost => _upper;
+    /// <summary>The strip's place on this page: the left of <see cref="_upper"/>, as wide as the
+    /// strip, with the page's own background under the strip's 16 rows.</summary>
+    private readonly Panel _stripSlot = new() { Dock = DockStyle.Left, Width = 186, BackColor = DawPalette.Background };
+
+    /// <summary>See <see cref="_stripSlot"/>.</summary>
+    public Control StripHost => _stripSlot;
 
     /// <summary>Takes the title's place while the name is being typed. Edits the name only - the
     /// number in front of it is the instrument's slot, not part of what it is called.</summary>
@@ -621,7 +625,7 @@ internal sealed class DawInstrumentView : Panel
         _title.Font = new Font("Segoe UI", 13f);
         _title.ForeColor = DawPalette.Oscillator;
         _title.AutoSize = true;
-        _title.Location = new Point(16, 12);
+        _title.Location = new Point(16, 9);
 
         // The name is edited where it is read. A click on it opens it, Enter keeps what was typed,
         // Escape throws it away, and clicking elsewhere keeps it - the same rules as renaming in
@@ -640,7 +644,9 @@ internal sealed class DawInstrumentView : Panel
 
         // The name alone: the wave, A/D and S/R bytes a line under it read the same as the
         // controls right below.
-        var header = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = DawPalette.Background };
+        // Name 40 and the envelope row 184 make the 224 of the instrument strip's 16 rows, so the
+        // oscillator row starts right under the strip and has the height for a taller waveform.
+        var header = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = DawPalette.Background };
         header.Controls.Add(_title);
         header.Controls.Add(_nameEditor);
 
@@ -658,7 +664,7 @@ internal sealed class DawInstrumentView : Panel
         var oscillatorRow = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 8 + SectionPanel.HeaderHeight + 76 + 1,
+            Height = 8 + SectionPanel.HeaderHeight + 94 + 1,
             Padding = new Padding(0, 8, 0, 0),
             BackColor = DawPalette.Background,
         };
@@ -667,7 +673,7 @@ internal sealed class DawInstrumentView : Panel
         // The curve gave back the height the oscillator's own header now takes, so the program
         // lanes below keep theirs.
         _envelope.Dock = DockStyle.Bottom;
-        _envelope.Height = 80;
+        _envelope.Height = 68;
 
         var knobRow = new FlowLayoutPanel
         {
@@ -742,7 +748,7 @@ internal sealed class DawInstrumentView : Panel
         effects.Body.Controls.Add(effectKnobs);
         effects.Body.Controls.Add(effectNote);
 
-        var top = new Panel { Dock = DockStyle.Top, Height = 196, BackColor = DawPalette.Background };
+        var top = new Panel { Dock = DockStyle.Top, Height = 184, BackColor = DawPalette.Background };
         top.Controls.Add(effects);
         top.Controls.Add(sound);
 
@@ -813,6 +819,7 @@ internal sealed class DawInstrumentView : Panel
         _upper.Height = header.Height + top.Height;
         _upper.Controls.Add(top);
         _upper.Controls.Add(header);
+        _upper.Controls.Add(_stripSlot);
 
         Controls.Add(programs);
         Controls.Add(_filterStep);
