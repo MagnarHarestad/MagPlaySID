@@ -33,7 +33,7 @@ public sealed class InstrumentListControl : UserControl
     /// format's C64 ancestors greets an unnamed instrument with something rather than a blank
     /// that reads as "not loaded yet". Purely a display default - an instrument's stored Name
     /// stays empty until something is actually typed over it.</summary>
-    private const string UnnamedPlaceholder = "Flute";
+    private const string UnnamedPlaceholder = InstrumentNames.Unnamed;
 
     /// <summary>Written in the first empty slot: clicking it adds an instrument there, where the
     /// eye goes looking for the next one.</summary>
@@ -369,6 +369,16 @@ public sealed class InstrumentListControl : UserControl
         if (number is >= 1 and <= SongValidator.MaxInstrumentNumber)
         {
             _grid.CurrentCell = _grid.Rows[number - 1].Cells[0];
+
+            // The grid raises SelectionChanged while CurrentRow is still the old row, so the
+            // editor below was handed the instrument being left and fell one selection behind -
+            // an instrument added from the sound bank showed the one picked before it. Told again
+            // here, now the row has moved; a repeat of the same instrument is a no-op there.
+            if (!_suppressEvents)
+            {
+                _header.SetState(_instruments.Count, SelectedInstrument is not null);
+                CurrentInstrumentChanged?.Invoke(SelectedInstrument);
+            }
         }
     }
 
