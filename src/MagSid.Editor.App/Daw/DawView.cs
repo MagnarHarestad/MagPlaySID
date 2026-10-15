@@ -385,9 +385,7 @@ internal sealed class DawView : Panel
         _instrumentList.Items.Clear();
         foreach (var instrument in _song.Instruments)
         {
-            _instrumentList.Items.Add(string.IsNullOrWhiteSpace(instrument.Name)
-                ? $"{instrument.Number:00}"
-                : $"{instrument.Number:00}   {instrument.Name}");
+            _instrumentList.Items.Add($"{instrument.Number:00}   {InstrumentNames.Display(instrument)}");
         }
 
         _instrumentList.EndUpdate();

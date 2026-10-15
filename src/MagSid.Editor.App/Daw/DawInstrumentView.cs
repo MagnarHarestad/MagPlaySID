@@ -902,9 +902,7 @@ internal sealed class DawInstrumentView : Panel
     }
 
     private static string TitleOf(Instrument instrument) =>
-        string.IsNullOrWhiteSpace(instrument.Name)
-            ? $"Instrument {instrument.Number:00}"
-            : $"{instrument.Number:00}  {instrument.Name}";
+        $"{instrument.Number:00}  {InstrumentNames.Display(instrument)}";
 
     // The instrument the open editor belongs to, caught when it opened - the view can be handed
     // another instrument while it is open, and the typed name belongs to the one it was opened on.
