@@ -154,6 +154,12 @@ public sealed class TrackerGridControl : Control
     private int TopRow => _cursorRow - VisibleRows / 2;
 
     private int VisibleRows => Math.Max(1, (Height - HeaderHeight) / RowHeight);
+
+    /// <summary>Rows that touch the grid area, the part-row at the bottom included. VisibleRows
+    /// counts only whole ones - right for centring the cursor - but drawing only those left the
+    /// strip under the last one empty, and while playing, where the rows glide up by part of a
+    /// row, an empty band opened at the bottom instead of the next row coming into view.</summary>
+    private int DrawnRows => Math.Max(1, (Height - HeaderHeight + RowHeight - 1) / RowHeight);
     private int _cursorRow;
     private int _cursorChannel;
     private CursorField _cursorField;
@@ -2253,7 +2259,7 @@ public sealed class TrackerGridControl : Control
             loopRowPerChannel[ch] = total > 0 ? total - 1 : -1;
         }
 
-        for (int i = 0; i < visibleRows; i++)
+        for (int i = 0; i < DrawnRows; i++)
         {
             int row = TopRow + i;
             int y = HeaderHeight + i * RowHeight;
@@ -2554,7 +2560,9 @@ public sealed class TrackerGridControl : Control
             Pattern? lastPattern = null;
             int lastNth = -1;
 
-            for (int i = 0; i < visibleRows; i++)
+            // One row past the bottom: the glide lifts every row by up to a row, and the next one
+            // has to be there to fill the space it leaves.
+            for (int i = 0; i <= DrawnRows; i++)
             {
                 int row = channelTopRow + i;
                 int y = HeaderHeight + i * RowHeight - subPixelOffset;
