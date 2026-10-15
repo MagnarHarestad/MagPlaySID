@@ -43,3 +43,13 @@ footer { border-top:1px solid var(--border); color:var(--dim); font-size:13px; m
 footer .wrap { padding:20px; display:flex; gap:16px; flex-wrap:wrap; }
 footer a { color:var(--dim); }
 @media (max-width:560px) { header nav a:not(:last-child) { display:none; } .hero { padding-top:40px; } .hero h1 { font-size:32px; } }
+.files { display:grid; grid-template-columns:minmax(200px, 1fr) minmax(300px, 2.4fr); gap:28px; margin-top:20px; }
+.files h3 { color:#fff; font-size:16px; margin:0 0 10px; }
+.files h3 small { color:var(--dim); font-weight:400; font-size:13px; margin-left:6px; }
+.files ul { list-style:none; padding:0; margin:0; }
+.files li { padding:5px 0; border-bottom:1px solid var(--border); }
+.files .midi { width:100%; border-collapse:collapse; font-size:14px; }
+.files .midi td { padding:5px 8px 5px 0; border-bottom:1px solid var(--border); vertical-align:top; }
+.files .midi td:nth-child(2), .files .midi td:nth-child(3) { color:var(--dim); }
+.files .more { color:var(--dim); font-size:13.5px; margin-top:10px; }
+@media (max-width:720px) { .files { grid-template-columns:1fr; } .files .midi td:nth-child(2) { display:none; } }
