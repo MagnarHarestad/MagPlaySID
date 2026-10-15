@@ -594,8 +594,14 @@ public sealed class MainForm : Form
 
         // Through the session, the same as the retro list - so an instrument added here is added
         // the same way, with the same undo behaviour and the same numbering rules.
-        _dawView.InstrumentAddRequested += () => _session.AddInstrument();
-        _dawView.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
+        _dawView.InstrumentAddRequested += AddNewInstrument;
+        _dawView.InstrumentFromBankRequested += AddFromBank;
+        _dawView.InstrumentLoadRequested += DoLoadInstrument;
+        _dawView.InstrumentCopyRequested += instrument =>
+        {
+            if (_session.CopyInstrument(instrument) is { } copy)
+                SelectAddedInstrument(copy.Number);
+        };
         _dawView.InstrumentDeleteRequested += instrument => _session.DeleteInstrument(instrument);
 
         _dawView.PatternEdited += () =>
@@ -845,17 +851,9 @@ public sealed class MainForm : Form
         _session.HistoryChanged += RefreshHistoryMenuState;
         _session.DirtyChanged += RefreshStatusBar;
 
-        _instrumentList.AddRequested += () =>
-        {
-            if (_session.AddInstrument() is null)
-            {
-                MessageBox.Show(this,
-                    $"This song already has all {SongValidator.MaxInstrumentNumber} instruments a " +
-                    "pattern can select - a row names its instrument with a single $C0..$CF byte, " +
-                    "so there is no seventeenth to name.",
-                    "Instrument limit reached", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-        };
+        _instrumentList.AddRequested += AddNewInstrument;
+        _instrumentList.AddFromBankRequested += AddFromBank;
+        _instrumentList.LoadRequested += DoLoadInstrument;
         _instrumentList.CopyRequested += i =>
         {
             if (_session.CopyInstrument(i) is { } copy)
@@ -2181,6 +2179,51 @@ public sealed class MainForm : Form
     }
 
     private const string InstrumentFilter = "MagSID instruments (*.json)|*.json|All files (*.*)|*.*";
+
+    /// <summary>A new plain instrument, selected and with its name open for typing in whichever
+    /// view is on screen - the + button, the "+ New instrument" row and Insert all end here.</summary>
+    private void AddNewInstrument()
+    {
+        if (_session.AddInstrument() is not { } added)
+        {
+            ShowInstrumentLimit();
+            return;
+        }
+
+        SelectAddedInstrument(added.Number);
+        if (_dawShowing)
+            _dawView.RenameSelectedInstrument();
+        else
+            _instrumentList.BeginRename(added.Number);
+    }
+
+    /// <summary>A copy of one of the GM bank's sounds, as it is in the bank - named, and with its
+    /// own vibrato and filter - added after the song's own instruments.</summary>
+    private void AddFromBank(GmBank.Sound sound)
+    {
+        var instrument = InstrumentFile.Read(InstrumentFile.Write(sound.Instrument));
+        if (_session.ImportInstrument(instrument) is not { } added)
+        {
+            ShowInstrumentLimit();
+            return;
+        }
+
+        SelectAddedInstrument(added.Number);
+        ShowNotice($"Added {added.Name} from the sound bank ({sound.Origin})");
+    }
+
+    private void SelectAddedInstrument(int number)
+    {
+        _instrumentList.SelectInstrumentNumber(number);
+        _dawView.SelectInstrument(number);
+    }
+
+    private void ShowInstrumentLimit() =>
+        MessageBox.Show(this,
+            $"This song already has all {SongValidator.MaxInstrumentNumber} instruments a " +
+            "pattern can select - a row names its instrument with a single $C0..$CF byte, " +
+            "so there is no seventeenth.",
+            "Instrument limit reached", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     /// <summary>The instrument selected in whichever view is on screen.</summary>
     private Instrument? CurrentInstrument()

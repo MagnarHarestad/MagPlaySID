@@ -187,8 +187,14 @@ public sealed class AboutForm : Form
              "  Ctrl+Up / Ctrl+Down  Move the position\n\n");
 
         Heading("Retro instruments");
-        Body("The list shows all 16 slots. Right-click for Add, Copy or Delete; edit the Name column to " +
-             "rename. The editor below edits the selected instrument directly.\n\n" +
+        Body("The list shows all 16 slots and how many are used. The + over it adds an instrument, and " +
+             "so does clicking \"+ New instrument\" in the first empty slot or pressing Insert; the " +
+             "arrow beside + adds one from the sound bank - the demo songs' piano, bass, strings, " +
+             "synth lead and the rest - or from a file. The other two buttons duplicate and delete " +
+             "(Delete). A new instrument opens its name for typing; edit the Name column to rename " +
+             "later. Right-click still has Add, Copy and Delete. The editor below edits the selected " +
+             "instrument directly. \"Open bank folder\" on the arrow shows where an instrument saved " +
+             "as Piano.json, Bass.json... replaces that bank sound.\n\n" +
              "Menu → Save Instrument writes the selected instrument to a .json file, and Load " +
              "Instrument adds one or more such files as new instruments - in either view.\n\n");
         Mono("  A/D, S/R           Envelope, one hex byte each\n" +
@@ -219,6 +225,9 @@ public sealed class AboutForm : Form
 
         Heading("Instrument strip");
         Mono("  Click              Select (on Arrange it also re-voices the selected note)\n" +
+             "  + / Insert         New instrument; the arrow beside + adds from the sound bank\n" +
+             "                     or a file. \"+ New instrument\" at the end of the list too\n" +
+             "  Duplicate, Delete  The buttons beside +; Delete also on the key\n" +
              "  F2 / Double-click  Rename\n" +
              "  Right-click        Add, Copy, Delete\n\n");
 

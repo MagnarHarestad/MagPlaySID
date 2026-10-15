@@ -1,0 +1,165 @@
+using MagSid.Core.Midi;
+using MagSid.Core.Validation;
+
+namespace MagSid.Editor.App.Controls;
+
+/// <summary>
+/// The strip over an instrument list, the same in Retro and the DAW: its title, how many of the
+/// 16 instruments are in use, and the buttons that act on the list - add, a menu of other ways to
+/// add, duplicate and delete. Adding used to be only on a right-click menu, which nothing on
+/// screen pointed to.
+///
+/// The menu offers a new plain instrument, any sound of the GM bank (read when the menu opens, so
+/// files dropped into the user's bank folder show up without a restart), an instrument file, a
+/// copy of the selected instrument, and the bank folder itself.
+/// </summary>
+public sealed class InstrumentListHeader : Panel
+{
+    public const int StripHeight = 28;
+
+    // Windows' own icon font, on every Windows 10 and 11; plain characters where it is missing.
+    private static readonly bool HasIconFont =
+        new Font("Segoe MDL2 Assets", 9f).Name == "Segoe MDL2 Assets";
+
+    private readonly Label _title = new() { AutoSize = true };
+    private readonly Label _count = new() { AutoSize = true };
+    private readonly Button _add = IconButton("", "+");
+    private readonly Button _more = IconButton("", "v");
+    private readonly Button _duplicate = IconButton("", "Dup");
+    private readonly Button _delete = IconButton("", "Del");
+    private readonly ToolTip _tips = new();
+    private readonly ContextMenuStrip _menu = new();
+    private readonly ToolStripMenuItem _menuDuplicate = new("&Duplicate selected");
+    private readonly ToolStripMenuItem _menuNew = new("&New instrument") { ShortcutKeyDisplayString = "Ins" };
+    private readonly ToolStripMenuItem _bankMenu = new("From sound &bank");
+    private bool _full;
+
+    public event Action? AddRequested;
+    public event Action<GmBank.Sound>? AddFromBankRequested;
+    public event Action? LoadRequested;
+    public event Action? DuplicateRequested;
+    public event Action? DeleteRequested;
+
+    public InstrumentListHeader(string title, Color background, Color text, Color faint, Color hover)
+    {
+        Dock = DockStyle.Top;
+        Height = StripHeight;
+        BackColor = background;
+
+        _title.Text = title;
+        _title.ForeColor = text;
+        _title.Location = new Point(4, 6);
+        _count.ForeColor = faint;
+        Controls.Add(_title);
+        Controls.Add(_count);
+
+        foreach (var button in new[] { _add, _more, _duplicate, _delete })
+        {
+            button.BackColor = background;
+            button.ForeColor = text;
+            button.FlatAppearance.MouseOverBackColor = hover;
+            button.FlatAppearance.MouseDownBackColor = hover;
+            Controls.Add(button);
+        }
+        _more.Width = 16;
+
+        _tips.SetToolTip(_add, "New instrument (Ins)");
+        _tips.SetToolTip(_more, "More ways to add: from the sound bank, from a file, a duplicate");
+        _tips.SetToolTip(_duplicate, "Duplicate the selected instrument");
+        _tips.SetToolTip(_delete, "Delete the selected instrument (Del)");
+
+        _add.Click += (_, _) => AddRequested?.Invoke();
+        _more.Click += (_, _) => _menu.Show(_more, new Point(0, _more.Height));
+        _duplicate.Click += (_, _) => DuplicateRequested?.Invoke();
+        _delete.Click += (_, _) => DeleteRequested?.Invoke();
+
+        _menuNew.Click += (_, _) => AddRequested?.Invoke();
+        _menuDuplicate.Click += (_, _) => DuplicateRequested?.Invoke();
+        var load = new ToolStripMenuItem("&Load from file...", null, (_, _) => LoadRequested?.Invoke());
+        var folder = new ToolStripMenuItem("Open bank &folder", null, (_, _) => OpenBankFolder());
+        _menu.Items.AddRange([_menuNew, _bankMenu, load, new ToolStripSeparator(), _menuDuplicate, new ToolStripSeparator(), folder]);
+        _menu.Opening += (_, _) => FillBankMenu();
+        DarkTheme.Apply(_menu);
+
+        Resize += (_, _) => LayOut();
+        LayOut();
+        SetState(0, hasSelection: false);
+    }
+
+    /// <summary>How many instruments the song has, and whether one is selected - what decides
+    /// which buttons can do anything.</summary>
+    public void SetState(int count, bool hasSelection)
+    {
+        int max = SongValidator.MaxInstrumentNumber;
+        _full = count >= max;
+        _count.Text = $"{count}/{max}";
+        _add.Enabled = _menuNew.Enabled = _bankMenu.Enabled = !_full;
+        _duplicate.Enabled = _menuDuplicate.Enabled = hasSelection && !_full;
+        _delete.Enabled = hasSelection;
+        _tips.SetToolTip(_add, _full
+            ? $"All {max} instruments are in use - a pattern names one with a single byte"
+            : "New instrument (Ins)");
+        LayOut();
+    }
+
+    private void LayOut()
+    {
+        int x = Width - 2;
+        foreach (var button in new[] { _delete, _duplicate, _more, _add })
+        {
+            x -= button.Width;
+            button.Location = new Point(x, (Height - button.Height) / 2);
+            if (button == _more)
+                x += 1;                                     // the arrow sits tight against +
+        }
+        _count.Location = new Point(Math.Max(_title.Right + 8, x - _count.PreferredWidth - 8), 7);
+    }
+
+    private void FillBankMenu()
+    {
+        _bankMenu.DropDownItems.Clear();
+        foreach (var sound in GmBank.Load(EditorSettings.BankDirectory).All)
+        {
+            var item = new ToolStripMenuItem($"{Pretty(sound.Key)}  -  {sound.Instrument.Name} ({sound.Origin})");
+            item.Click += (_, _) => AddFromBankRequested?.Invoke(sound);
+            _bankMenu.DropDownItems.Add(item);
+        }
+        DarkTheme.Apply(_bankMenu.DropDown);
+    }
+
+    private static string Pretty(string key) => key switch
+    {
+        "SynthBass" => "Synth bass",
+        "SynthLead" => "Synth lead",
+        "SynthPad" => "Synth pad",
+        "SynthFx" => "Synth FX",
+        _ => key,
+    };
+
+    /// <summary>Where files of the user's own replace the bank's sounds - made on first use, so
+    /// there is somewhere to save them.</summary>
+    private static void OpenBankFolder()
+    {
+        Directory.CreateDirectory(EditorSettings.BankDirectory);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = EditorSettings.BankDirectory,
+            UseShellExecute = true,
+        });
+    }
+
+    private static Button IconButton(string glyph, string fallback)
+    {
+        var button = new Button
+        {
+            Text = HasIconFont ? glyph : fallback,
+            Font = HasIconFont ? new Font("Segoe MDL2 Assets", 9f) : new Font("Segoe UI", 8f),
+            FlatStyle = FlatStyle.Flat,
+            Size = new Size(HasIconFont ? 24 : 30, 22),
+            TabStop = false,
+            UseVisualStyleBackColor = false,
+        };
+        button.FlatAppearance.BorderSize = 0;
+        return button;
+    }
+}

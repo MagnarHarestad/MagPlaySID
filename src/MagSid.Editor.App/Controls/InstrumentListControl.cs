@@ -1,3 +1,4 @@
+using MagSid.Core.Midi;
 using MagSid.Core.Model;
 using MagSid.Core.Validation;
 
@@ -34,12 +35,18 @@ public sealed class InstrumentListControl : UserControl
     /// stays empty until something is actually typed over it.</summary>
     private const string UnnamedPlaceholder = "Flute";
 
+    /// <summary>Written in the first empty slot: clicking it adds an instrument there, where the
+    /// eye goes looking for the next one.</summary>
+    private const string NewInstrumentText = "+ New instrument";
+
     private IReadOnlyList<Instrument> _instruments = [];
 
-    // Kept so PreferredHeight can add up the real, already-AutoSized height of the header rather
-    // than guessing a constant that would drift out of sync with the actual layout.
-    private Label? _header;
+    private readonly InstrumentListHeader _header = new("Instruments", EditorPalette.Background,
+        EditorPalette.Heading, EditorPalette.Subtitle, EditorPalette.ButtonHover);
     private bool _suppressEvents;
+
+    /// <summary>The row showing <see cref="NewInstrumentText"/>, or -1 when all 16 are used.</summary>
+    private int _newInstrumentRow = -1;
 
     // Drag-to-reorder state: the row index the current left-button drag started from (or most
     // recently moved to - see the CellMouseMove handler), -1 when no drag is in progress. Row
@@ -49,6 +56,8 @@ public sealed class InstrumentListControl : UserControl
     private int _dragRowIndex = -1;
 
     public event Action? AddRequested;
+    public event Action<GmBank.Sound>? AddFromBankRequested;
+    public event Action? LoadRequested;
     /// <summary>The selected instrument should be cloned into a new instrument number - see
     /// EditorSession.CopyInstrument for what "cloned" actually copies.</summary>
     public event Action<Instrument>? CopyRequested;
@@ -125,13 +134,29 @@ public sealed class InstrumentListControl : UserControl
         _grid.Dock = DockStyle.Top;
         _grid.Height = _grid.ColumnHeadersHeight + _grid.RowTemplate.Height * SongValidator.MaxInstrumentNumber + 2;
 
-        var header = _header = new Label
+        // Every way to add is posted rather than run inside the grid's own event: adding rebuilds
+        // every row, which a DataGridView refuses to have done to it from its own mouse handler.
+        _header.AddRequested += RequestAdd;
+        _header.AddFromBankRequested += sound => BeginInvoke(() => AddFromBankRequested?.Invoke(sound));
+        _header.LoadRequested += () => LoadRequested?.Invoke();
+        _header.DuplicateRequested += () => { if (SelectedInstrument is { } i) CopyRequested?.Invoke(i); };
+        _header.DeleteRequested += () => { if (SelectedInstrument is { } i) DeleteRequested?.Invoke(i); };
+
+        _grid.KeyDown += (_, e) =>
         {
-            Text = "Instruments",
-            Dock = DockStyle.Top,
-            Padding = new Padding(4, 4, 4, 0),
-            ForeColor = EditorPalette.Heading,
+            if (e.KeyCode == Keys.Insert)
+            {
+                RequestAdd();
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Delete && SelectedInstrument is { } doomed)
+            {
+                DeleteRequested?.Invoke(doomed);
+                e.Handled = true;
+            }
         };
+        _grid.CellMouseEnter += (_, e) => _grid.Cursor = e.RowIndex >= 0 && e.RowIndex == _newInstrumentRow ? Cursors.Hand : Cursors.Default;
+        _grid.CellMouseLeave += (_, _) => _grid.Cursor = Cursors.Default;
 
         // Add/Delete moved off a button row (which sat between the header and the grid, taking
         // up permanent vertical space whether or not anything needed doing) onto a right-click
@@ -151,6 +176,9 @@ public sealed class InstrumentListControl : UserControl
         {
             if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
                 _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[0];
+
+            if (e.Button == MouseButtons.Left && e.RowIndex >= 0 && e.RowIndex == _newInstrumentRow)
+                RequestAdd();
 
             _dragRowIndex = e.Button == MouseButtons.Left && e.RowIndex >= 0 && InstrumentAtRow(e.RowIndex) is not null
                 ? e.RowIndex
@@ -214,6 +242,7 @@ public sealed class InstrumentListControl : UserControl
                 return;
             }
 
+            _header.SetState(_instruments.Count, SelectedInstrument is not null);
             CurrentInstrumentChanged?.Invoke(SelectedInstrument);
 
             // Focused is the test for "the user just did this by clicking or arrowing in this
@@ -236,7 +265,25 @@ public sealed class InstrumentListControl : UserControl
         // slice below that, so this list has to read bottom-to-top of the on-screen result:
         // grid, header.
         Controls.Add(_grid);
-        Controls.Add(header);
+        Controls.Add(_header);
+    }
+
+    private void RequestAdd()
+    {
+        if (_instruments.Count < SongValidator.MaxInstrumentNumber)
+            BeginInvoke(() => AddRequested?.Invoke());
+    }
+
+    /// <summary>Selects <paramref name="number"/> and opens its name for typing - what follows
+    /// adding one, so it can be named straight away.</summary>
+    public void BeginRename(int number)
+    {
+        if (number is < 1 or > SongValidator.MaxInstrumentNumber || InstrumentByNumber(number) is null)
+            return;
+
+        _grid.CurrentCell = _grid.Rows[number - 1].Cells["Name"];
+        _grid.Focus();
+        _grid.BeginEdit(selectAll: true);
     }
 
     public Instrument? SelectedInstrument =>
@@ -246,7 +293,7 @@ public sealed class InstrumentListControl : UserControl
     /// a context menu now, not a row of their own - see the constructor) - for a parent that
     /// docks it Top rather than Fill, which needs an explicit Height to dock against since
     /// nothing above computes one for it.</summary>
-    public int PreferredHeight => (_header?.Height ?? 0) + _grid.Height;
+    public int PreferredHeight => _header.Height + _grid.Height;
 
     /// <summary>Always exactly SongValidator.MaxInstrumentNumber rows, one per slot - not one
     /// per instrument that happens to exist. A song can never hold more instruments than that
@@ -270,6 +317,7 @@ public sealed class InstrumentListControl : UserControl
 
         _suppressEvents = true;
         _grid.Rows.Clear();
+        _newInstrumentRow = -1;
         for (int number = 1; number <= SongValidator.MaxInstrumentNumber; number++)
         {
             // The "#" cell itself is blank for an empty slot too, not just Name/Prog. - so the
@@ -278,11 +326,17 @@ public sealed class InstrumentListControl : UserControl
             // own ask). The slot still occupies a row either way; only its own number label
             // is withheld.
             var instrument = InstrumentByNumber(number);
+            bool offerNew = instrument is null && _newInstrumentRow < 0;
             int row = instrument is { } inst
                 ? _grid.Rows.Add(number.ToString("D2"), inst.Name.Length > 0 ? inst.Name : UnnamedPlaceholder, DescribePrograms(inst))
-                : _grid.Rows.Add(string.Empty, string.Empty, string.Empty);
+                : _grid.Rows.Add(string.Empty, offerNew ? NewInstrumentText : string.Empty, string.Empty);
 
             ApplySlotStyle(_grid.Rows[row], occupied: instrument is not null);
+            if (offerNew)
+            {
+                _newInstrumentRow = row;
+                _grid.Rows[row].Cells["Name"].Style.ForeColor = EditorPalette.Title;
+            }
         }
 
         if (selectedNumber is { } number2)
@@ -291,6 +345,7 @@ public sealed class InstrumentListControl : UserControl
         }
 
         _suppressEvents = false;
+        _header.SetState(_instruments.Count, SelectedInstrument is not null);
 
         // One explicit, settled notification instead of however many interim ones Rows.Clear()/
         // Rows.Add()/SelectRow happened to fire above (all suppressed - see SelectionChanged's

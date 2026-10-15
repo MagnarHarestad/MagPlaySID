@@ -51,6 +51,14 @@ internal sealed class DawView : Panel
     private readonly Panel _placeholder = new();
     private readonly FlowLayoutPanel _tabs = new();
     private readonly ListBox _instrumentList = new();
+    private readonly Panel _instrumentColumn = new();
+    private readonly Controls.InstrumentListHeader _instrumentHeader =
+        new("INSTRUMENTS", DawPalette.PanelHeader, DawPalette.Text, DawPalette.TextDim, DawPalette.BorderSoft);
+
+    /// <summary>The last row of the list when there is room for another instrument: clicking it
+    /// adds one. Never selected - choosing it by the keyboard puts the selection back.</summary>
+    private const string NewInstrumentText = "+ New instrument";
+    private int _lastInstrumentIndex = -1;
 
     private readonly List<TabButton> _tabButtons = [];
 
@@ -102,6 +110,8 @@ internal sealed class DawView : Panel
     /// its undo history - the DAW never touches the instrument collection itself, so both views
     /// always add instruments the same way.</summary>
     public event Action? InstrumentAddRequested;
+    public event Action<MagSid.Core.Midi.GmBank.Sound>? InstrumentFromBankRequested;
+    public event Action? InstrumentLoadRequested;
 
     public event Action<Instrument>? InstrumentCopyRequested;
 
@@ -390,11 +400,31 @@ internal sealed class DawView : Panel
                 : $"{instrument.Number:00}   {instrument.Name}");
         }
 
+        if (_song.Instruments.Count < MagSid.Core.Validation.SongValidator.MaxInstrumentNumber)
+            _instrumentList.Items.Add(NewInstrumentText);
+
         _instrumentList.EndUpdate();
 
-        if (_instrumentList.Items.Count > 0)
-            _instrumentList.SelectedIndex = Math.Clamp(previous, 0, _instrumentList.Items.Count - 1);
+        if (_song.Instruments.Count > 0)
+            _instrumentList.SelectedIndex = Math.Clamp(previous, 0, _song.Instruments.Count - 1);
+        UpdateInstrumentHeader();
     }
+
+    private bool IsNewInstrumentRow(int index) =>
+        _song is { } song && index == song.Instruments.Count && index < _instrumentList.Items.Count;
+
+    private void UpdateInstrumentHeader() =>
+        _instrumentHeader.SetState(_song?.Instruments.Count ?? 0, SelectedInstrument is not null);
+
+    /// <summary>Posted rather than run inside the list's own event: adding rebuilds the list.</summary>
+    private void RequestInstrumentAdd()
+    {
+        if (_song is { } song && song.Instruments.Count < MagSid.Core.Validation.SongValidator.MaxInstrumentNumber)
+            BeginInvoke(() => InstrumentAddRequested?.Invoke());
+    }
+
+    /// <summary>Opens the selected instrument's name for typing - what follows adding one.</summary>
+    public void RenameSelectedInstrument() => BeginRename();
 
     /// <summary>One row of the instrument list: the text exactly where the plain list put it, and
     /// the instrument's colour in the gap after the number.</summary>
@@ -408,6 +438,8 @@ internal sealed class DawView : Panel
         var ink = selected ? SystemColors.HighlightText : _instrumentList.ForeColor;
         string text = _instrumentList.Items[e.Index]?.ToString() ?? string.Empty;
         const TextFormatFlags flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+        if (IsNewInstrumentRow(e.Index))
+            ink = DawPalette.Oscillator;
         TextRenderer.DrawText(e.Graphics, text, e.Font ?? _instrumentList.Font, e.Bounds with { X = e.Bounds.X - 1 }, ink, flags);
 
         if (_song is not { } song || e.Index >= song.Instruments.Count)
@@ -489,8 +521,11 @@ internal sealed class DawView : Panel
         _octaveLabel.Margin = new Padding(20, 3, 0, 0);
         _tabs.Controls.Add(_octaveLabel);
 
-        _instrumentList.Dock = DockStyle.Left;
-        _instrumentList.Width = 186;
+        _instrumentList.Dock = DockStyle.Fill;
+        _instrumentColumn.Dock = DockStyle.Left;
+        _instrumentColumn.Width = 186;
+        _instrumentColumn.Controls.Add(_instrumentList);
+        _instrumentColumn.Controls.Add(_instrumentHeader);
         _instrumentList.BackColor = Color.FromArgb(0x12, 0x17, 0x22);
         _instrumentList.ForeColor = DawPalette.Text;
         _instrumentList.BorderStyle = BorderStyle.None;
@@ -505,19 +540,47 @@ internal sealed class DawView : Panel
         _instrumentList.DrawItem += DrawInstrumentItem;
         _instrumentList.SelectedIndexChanged += (_, _) =>
         {
+            if (IsNewInstrumentRow(_instrumentList.SelectedIndex))
+            {
+                _instrumentList.SelectedIndex = _lastInstrumentIndex >= 0 && _song is { } song && _lastInstrumentIndex < song.Instruments.Count
+                    ? _lastInstrumentIndex
+                    : -1;
+                return;
+            }
+
+            _lastInstrumentIndex = _instrumentList.SelectedIndex;
             CommitRename(keep: true);
             ShowSelectedInstrument();
+            UpdateInstrumentHeader();
         };
+
+        _instrumentHeader.AddRequested += RequestInstrumentAdd;
+        _instrumentHeader.AddFromBankRequested += sound => BeginInvoke(() => InstrumentFromBankRequested?.Invoke(sound));
+        _instrumentHeader.LoadRequested += () => InstrumentLoadRequested?.Invoke();
+        _instrumentHeader.DuplicateRequested += () => { if (SelectedInstrument is { } i) InstrumentCopyRequested?.Invoke(i); };
+        _instrumentHeader.DeleteRequested += () => { if (SelectedInstrument is { } i) InstrumentDeleteRequested?.Invoke(i); };
+        _instrumentList.MouseMove += (_, e) =>
+            _instrumentList.Cursor = IsNewInstrumentRow(_instrumentList.IndexFromPoint(e.Location)) ? Cursors.Hand : Cursors.Default;
 
         // F2 or a double-click, the two gestures Explorer taught everyone. The retro view renames
         // in its own grid cell; this is the same edit, reached the same way a list allows.
         _instrumentList.DoubleClick += (_, _) => BeginRename();
         _instrumentList.KeyDown += (_, e) =>
         {
-            if (e.KeyCode != Keys.F2)
-                return;
-
-            BeginRename();
+            switch (e.KeyCode)
+            {
+                case Keys.F2:
+                    BeginRename();
+                    break;
+                case Keys.Insert:
+                    RequestInstrumentAdd();
+                    break;
+                case Keys.Delete when SelectedInstrument is { } doomed:
+                    InstrumentDeleteRequested?.Invoke(doomed);
+                    break;
+                default:
+                    return;
+            }
             e.Handled = true;
         };
 
@@ -558,6 +621,12 @@ internal sealed class DawView : Panel
         // the list is refreshed, and neither should touch the pattern.
         _instrumentList.MouseClick += (_, e) =>
         {
+            if (IsNewInstrumentRow(_instrumentList.IndexFromPoint(e.Location)))
+            {
+                RequestInstrumentAdd();
+                return;
+            }
+
             if (_arrangePage.Visible && _instrumentList.IndexFromPoint(e.Location) >= 0
                 && SelectedInstrument is { } instrument)
                 _pianoRoll.SetSelectedNoteInstrument(instrument.Number);
@@ -639,7 +708,7 @@ internal sealed class DawView : Panel
         Controls.Add(_arrangePage);
         Controls.Add(_instrument);
         Controls.Add(_placeholder);
-        Controls.Add(_instrumentList);
+        Controls.Add(_instrumentColumn);
         Controls.Add(_tabs);
 
         Show(DawTab.Arrange);
@@ -648,7 +717,7 @@ internal sealed class DawView : Panel
     /// <summary>Sixteen rows of the instrument list - the song format's own limit, so the list can
     /// never grow past it. Read off the list itself rather than assumed: ItemHeight follows the
     /// font, and a ListBox quietly overrides what it is set to.</summary>
-    private int InstrumentStripHeight => 16 * _instrumentList.ItemHeight;
+    private int InstrumentStripHeight => _instrumentHeader.Height + 16 * _instrumentList.ItemHeight;
 
     /// <summary>Applied twice: once while building, and again when the list gets its handle.
     /// Until then ItemHeight still reports whatever it was assigned rather than what the font
