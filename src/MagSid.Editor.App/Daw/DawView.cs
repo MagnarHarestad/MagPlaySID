@@ -18,7 +18,9 @@ internal sealed class DawView : Panel
     private readonly ArrangeView _arrange = new();
     private readonly PianoRollView _pianoRoll = new();
     private readonly Panel _arrangePage = new();
-    private readonly Splitter _arrangeSplitter = new();
+    /// <summary>A fixed rule between the lanes and the roll. It was a splitter once, but the lanes
+    /// are held to the instrument strip's 16 rows, so dragging it only broke that.</summary>
+    private readonly Panel _arrangeSplitter = new();
     private readonly Panel _arrangeTop = new();
     private readonly Label _octaveLabel = new();
     private readonly RollToolbar _tools = new() { Dock = DockStyle.Top };
@@ -688,8 +690,6 @@ internal sealed class DawView : Panel
         _arrangeSplitter.Dock = DockStyle.Top;
         _arrangeSplitter.Height = 5;
         _arrangeSplitter.BackColor = DawPalette.Border;
-        _arrangeSplitter.MinSize = 120;
-        _arrangeSplitter.MinExtra = 160;
 
         _pianoRoll.Dock = DockStyle.Fill;
         _pianoRoll.Edited += () => PatternEdited?.Invoke();
@@ -718,7 +718,7 @@ internal sealed class DawView : Panel
         });
 
         // Docking runs in reverse z-order: the fill goes in first so the top-docked lanes and the
-        // splitter under them claim their strips before it takes what is left.
+        // rule under them claim their strips before it takes what is left.
         _arrangePage.Dock = DockStyle.Fill;
         _arrangePage.BackColor = DawPalette.Background;
         _arrangeTop.Dock = DockStyle.Top;
@@ -731,8 +731,7 @@ internal sealed class DawView : Panel
         _arrangeTop.BackColor = DawPalette.Background;
         _arrangeTop.Controls.Add(_arrange);
 
-        // The roll's tools sit directly above it, under the splitter, so they travel with the roll
-        // when the splitter is dragged rather than with the lanes.
+        // The roll's tools sit directly above it, under the rule.
         _tools.ToolChanged += tool => _pianoRoll.Tool = tool;
         _pianoRoll.ToolRequested += tool => _tools.Tool = tool;
         _pianoRoll.Tool = _tools.Tool;
