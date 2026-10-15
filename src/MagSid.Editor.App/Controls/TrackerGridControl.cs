@@ -590,14 +590,26 @@ public sealed class TrackerGridControl : Control
     /// anything resolvable, e.g. past the end of a channel's chain.</summary>
     public (int Channel, int OrderIndex, int RowIndex, int TicksInto)? CursorSongLocation()
     {
-        if (_song is null || ResolveDisplayRow(_cursorChannel, _cursorRow) is not { } resolved)
+        // A channel shorter than the cursor row has gone round its order by then, and its entry
+        // and row name only the first time round: in Magnificent, whose channel 1 is one 384-row
+        // pattern, row 390 there is that pattern's row 6, and F2 played from row 6. The longest
+        // channel - the song's timeline - has not gone round yet, so the place is read there.
+        int channel = _cursorChannel;
+        if (_cursorRow >= SinglePassRowCount(channel))
+        {
+            int longest = Enumerable.Range(0, 3).OrderByDescending(SinglePassRowCount).First();
+            if (_cursorRow < SinglePassRowCount(longest))
+                channel = longest;
+        }
+
+        if (_song is null || ResolveDisplayRow(channel, _cursorRow) is not { } resolved)
         {
             return null;
         }
 
         // With loops unrolled a display row is a tick, so the row counts the ticks into its
         // entry - which pass of a loop, as well as which row.
-        return (_cursorChannel, resolved.OrderIndex, resolved.LocalRow, _unrollLoops ? resolved.Nth : -1);
+        return (channel, resolved.OrderIndex, resolved.LocalRow, _unrollLoops ? resolved.Nth : -1);
     }
 
     /// <summary>Which pattern is currently on screen for each channel, at the cursor's row - null
@@ -2508,9 +2520,12 @@ public sealed class TrackerGridControl : Control
     ///
     /// The row-number gutter (normally the static view's leftmost column) has no single value
     /// that means the same thing for all three channels here, since they scroll at independent
-    /// rates - so it's drawn once, from channel 1's row axis, as a shared ruler rather than a
-    /// per-channel value; leaving it blank read as "the numbers disappeared" rather than as
-    /// a deliberate simplification.</summary>
+    /// rates - so it's drawn once, as a shared ruler rather than a per-channel value; leaving it
+    /// blank read as "the numbers disappeared" rather than as a deliberate simplification. The
+    /// ruler is the channel with the longest order, the song's timeline - the one stopping parks
+    /// the cursor by (see <see cref="JumpEditCursorToLivePlaybackPosition"/>). It used to be
+    /// channel 1, and in Magnificent, whose channel 1 is one 384-row pattern going round, F2 at
+    /// row 390 numbered the rows from 006.</summary>
     private void DrawPlaybackFollowView(Graphics g, int visibleRows)
     {
         // Row 0's sub-pixel offset can still reach up to one RowHeight above HeaderHeight even
@@ -2537,6 +2552,10 @@ public sealed class TrackerGridControl : Control
         int centerIndex = visibleRows / 2;
         int centerY = HeaderHeight + centerIndex * RowHeight;
         long currentSamples = AudioClockSamples?.Invoke() ?? 0;
+
+        // The ruler's channel, or the first that has played anything when that one has not yet.
+        int longest = Enumerable.Range(0, 3).OrderByDescending(SinglePassRowCount).First();
+        int ruler = new[] { longest, 0, 1, 2 }.FirstOrDefault(c => GetCurrentAnchor(c, currentSamples) is not null, longest);
 
         for (int ch = 0; ch < 3; ch++)
         {
@@ -2594,7 +2613,7 @@ public sealed class TrackerGridControl : Control
 
                 g.DrawLine(isBoundary ? PenPatternBoundary : PenGridLine, colX, y, colX + ChannelColWidth, y);
 
-                if (ch == 0)
+                if (ch == ruler)
                 {
                     g.DrawString(row.ToString("D4"), GridFont, BrushRowNumber, 2, y + 1);
                 }
