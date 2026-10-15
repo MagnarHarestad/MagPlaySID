@@ -583,10 +583,17 @@ internal sealed class DawView : Panel
         // the list is refreshed, and neither should touch the pattern.
         _instrumentList.MouseClick += (_, e) =>
         {
-            // Posted: adding rebuilds the list, which is not done from inside its own click.
+            // Posted: adding rebuilds the list, which is not done from inside its own click. A new
+            // instrument is one to shape, so from ARRANGE it opens on the instrument page - the
+            // tab first, since the list moves with it and its name is opened for typing there.
             if (IsNewInstrumentRow(_instrumentList.IndexFromPoint(e.Location)))
             {
-                BeginInvoke(() => InstrumentAddRequested?.Invoke());
+                BeginInvoke(() =>
+                {
+                    if (_current != DawTab.Instrument)
+                        Show(DawTab.Instrument);
+                    InstrumentAddRequested?.Invoke();
+                });
                 return;
             }
 
