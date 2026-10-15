@@ -127,9 +127,10 @@ public sealed class AboutForm : Form
              "the first figure is live: the dearest of the frames just heard.\n\n");
 
         Heading("The menu bar");
-        Mono("  Menu              About, New, Open, Save, Save As, Load Instrument,\n" +
-             "                    Save Instrument, Export to .sid, Load and Play .sid,\n" +
-             "                    Show High Hex-Values, Swap Spacebar Behavior, Exit\n" +
+        Mono("  Menu              About, New, Open, Import MIDI, Save, Save As,\n" +
+             "                    Load Instrument, Save Instrument, Export to .sid,\n" +
+             "                    Load and Play .sid, Show High Hex-Values,\n" +
+             "                    Swap Spacebar Behavior, Exit\n" +
              "  Signal Path       Frame-by-frame trace of one instrument\n" +
              "  Digi to SID-osc   Turn a .wav into ring-modulated instruments\n" +
              "  Optimize          Shrink the song without changing how it sounds\n" +
@@ -383,7 +384,11 @@ public sealed class AboutForm : Form
              "Signal Path traces one instrument frame by frame - register writes, gate, envelope " +
              "and output - and plays it while a marker follows along.\n\n" +
              "Digi to SID-osc turns a .wav into ring-modulated instruments, the classic C64 " +
-             "speech trick. Load a clip, adjust the settings, Audition, then Add to Song.\n\n");
+             "speech trick. Load a clip, adjust the settings, Audition, then Add to Song.\n\n" +
+             "Import MIDI makes a new song from a .mid file. Choose a track for each of the three " +
+             "voices: Melody keeps the highest note of a chord, Bass the lowest. Notes snap to a " +
+             "16th or 32nd grid at one speed, and repeated bars are stored once; the dialog shows " +
+             "the size and what had to give before anything is replaced. Run Optimize afterwards.\n\n");
         Mono("  Voiced threshold %   How sure pitch detection must be\n" +
              "  Cutoff min / max     Filter range for the formant sweep\n" +
              "  Segment ms           Retrigger interval - shorter buzzes, longer blurs\n" +

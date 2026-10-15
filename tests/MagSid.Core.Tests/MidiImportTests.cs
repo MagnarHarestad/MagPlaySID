@@ -1,0 +1,309 @@
+using MagSid.Core.Midi;
+using MagSid.Core.Model;
+using MagSid.Core.Validation;
+using Xunit;
+
+namespace MagSid.Core.Tests;
+
+public class MidiImportTests
+{
+    private const int Tpq = 96;          // ticks per quarter in every file built here
+    private const int Row = Tpq / 4;     // one 16th - a row at the 16th grid
+
+    /// <summary>Builds a standard MIDI file from absolute-time events, so a test reads as the
+    /// notes it plays.</summary>
+    private sealed class Smf
+    {
+        private readonly List<List<(long Tick, byte[] Bytes)>> _tracks = [];
+        private List<(long Tick, byte[] Bytes)> Current => _tracks[^1];
+
+        public Smf Track(string? name = null)
+        {
+            _tracks.Add([]);
+            if (name is not null)
+                Meta(0, 0x03, System.Text.Encoding.ASCII.GetBytes(name));
+            return this;
+        }
+
+        public Smf Meta(long tick, int type, byte[] body)
+        {
+            Current.Add((tick, [0xFF, (byte)type, (byte)body.Length, .. body]));
+            return this;
+        }
+
+        public Smf Tempo(int bpm)
+        {
+            int us = 60_000_000 / bpm;
+            return Meta(0, 0x51, [(byte)(us >> 16), (byte)(us >> 8), (byte)us]);
+        }
+
+        public Smf Note(long start, long length, int key, int channel = 0, int velocity = 100)
+        {
+            Current.Add((start, [(byte)(0x90 | channel), (byte)key, (byte)velocity]));
+            Current.Add((start + length, [(byte)(0x80 | channel), (byte)key, 0]));
+            return this;
+        }
+
+        public Smf Raw(long tick, params byte[] bytes)
+        {
+            Current.Add((tick, bytes));
+            return this;
+        }
+
+        public byte[] Bytes(int format = 1)
+        {
+            var file = new List<byte>();
+            file.AddRange("MThd"u8.ToArray());
+            file.AddRange(BigEndian(6, 4));
+            file.AddRange(BigEndian(format, 2));
+            file.AddRange(BigEndian(_tracks.Count, 2));
+            file.AddRange(BigEndian(Tpq, 2));
+
+            foreach (var track in _tracks)
+            {
+                var body = new List<byte>();
+                long last = 0;
+                // Offs before ons at the same tick, as a sequencer writes them.
+                foreach (var (tick, bytes) in track.OrderBy(e => e.Tick).ThenBy(e => (e.Bytes[0] & 0xF0) == 0x90 ? 1 : 0))
+                {
+                    body.AddRange(VarLen(tick - last));
+                    body.AddRange(bytes);
+                    last = tick;
+                }
+                body.AddRange([0x00, 0xFF, 0x2F, 0x00]);
+                file.AddRange("MTrk"u8.ToArray());
+                file.AddRange(BigEndian(body.Count, 4));
+                file.AddRange(body);
+            }
+
+            return file.ToArray();
+        }
+
+        private static byte[] BigEndian(int value, int bytes) =>
+            Enumerable.Range(0, bytes).Select(i => (byte)(value >> (8 * (bytes - 1 - i)))).ToArray();
+
+        private static byte[] VarLen(long value)
+        {
+            var bytes = new List<byte> { (byte)(value & 0x7F) };
+            while ((value >>= 7) > 0)
+                bytes.Insert(0, (byte)(0x80 | (value & 0x7F)));
+            return bytes.ToArray();
+        }
+    }
+
+    private static MidiSong Read(Smf smf) => MidiFileReader.Read(smf.Bytes());
+
+    private static MidiImportResult Import(MidiSong midi, VoiceImport? v1 = null, VoiceImport? v2 = null,
+                                           VoiceImport? v3 = null, int rowsPerBeat = 4, int speed = 5) =>
+        MidiImporter.Import(midi, new MidiImportOptions(
+            [v1 ?? new VoiceImport(null, VoiceRole.Melody), v2 ?? new VoiceImport(null, VoiceRole.Melody),
+             v3 ?? new VoiceImport(null, VoiceRole.Bass)], rowsPerBeat, speed));
+
+    private static string Rows(Song song, int channel) =>
+        string.Join(" ", song.ChannelOrders[channel].Tokens.OfType<PatternRefToken>()
+            .SelectMany(t => song.Patterns[t.PatternNumber - 1].Rows)
+            .Select(r => r switch { NoteRow n => n.Note.ToString(), NoteOffRow => "---", _ => "." }));
+
+    // ---------------------------------------------------------------------------- the file reader
+
+    [Fact]
+    public void Reads_tracks_names_tempo_signature_and_notes()
+    {
+        var midi = Read(new Smf()
+            .Track("Conductor").Tempo(140).Meta(0, 0x58, [3, 2, 24, 8])
+            .Track("Lead").Raw(0, 0xC0, 81).Note(0, Tpq, 60).Note(Tpq, Tpq, 62));
+
+        Assert.Equal(Tpq, midi.TicksPerQuarter);
+        Assert.Equal(140, midi.Bpm, 0);
+        Assert.Equal((3, 4), (midi.BeatsPerBar, midi.BeatUnit));
+        Assert.Equal(["Conductor", "Lead"], midi.Tracks.Select(t => t.Name));
+
+        var source = Assert.Single(midi.Sources());
+        Assert.Equal("Lead", source.Name);
+        Assert.Equal(81, source.Program);
+        Assert.Equal([(0L, (long)Tpq, 60), (Tpq, 2 * Tpq, 62)], source.Notes.Select(n => (n.Start, n.End, n.Key)));
+    }
+
+    [Fact]
+    public void Running_status_and_a_zero_velocity_note_on_end_a_note()
+    {
+        // 90 3C 64, then running status: 3C 00 ends it, 3E 64 / 3E 00 is a second note.
+        var midi = Read(new Smf().Track()
+            .Raw(0, 0x90, 60, 100).Raw(Tpq, 60, 0).Raw(Tpq, 62, 100).Raw(2 * Tpq, 62, 0));
+
+        Assert.Equal([(0L, (long)Tpq, 60), (Tpq, 2 * Tpq, 62)],
+            midi.Sources().Single().Notes.Select(n => (n.Start, n.End, n.Key)));
+    }
+
+    [Fact]
+    public void A_format_0_file_offers_each_channel_as_its_own_source()
+    {
+        var midi = MidiFileReader.Read(new Smf().Track()
+            .Note(0, Tpq, 72, channel: 0).Note(0, Tpq, 36, channel: 1).Note(0, Tpq, 38, channel: 9).Bytes(format: 0));
+
+        Assert.Equal([0, 1, 9], midi.Sources().Select(s => s.Channel));
+        Assert.True(midi.Sources()[2].IsDrums);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x52, 0x49, 0x46, 0x46 }, "Not a MIDI file")]
+    [InlineData(new byte[] { 0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 1 }, "ends in the middle")]
+    public void A_broken_file_is_refused_with_a_reason(byte[] data, string reason)
+    {
+        var ex = Assert.Throws<MidiFileException>(() => MidiFileReader.Read(data));
+        Assert.Contains(reason, ex.Message);
+    }
+
+    // ---------------------------------------------------------------------------- the conversion
+
+    [Fact]
+    public void A_melody_becomes_notes_holds_and_a_note_off_on_the_16th_grid()
+    {
+        // Quarter C4, eighth D4, rest an eighth, half E4. MIDI 60 is the player's C-4.
+        var midi = Read(new Smf().Track().Note(0, Tpq, 60).Note(Tpq, Tpq / 2, 62).Note(2 * Tpq, 2 * Tpq, 64));
+        var source = midi.Sources().Single();
+
+        var result = Import(midi, new VoiceImport(source, VoiceRole.Melody));
+
+        Assert.Equal("C-4 . . . D-4 . --- . E-4 . . . . . . .", Rows(result.Song, 0));
+        Assert.Equal(1, result.Report.Bars);
+        Assert.Equal(3, result.Report.NotesPlaced);
+        Assert.Empty(SongValidator.Validate(result.Song));
+    }
+
+    [Fact]
+    public void A_melody_keeps_the_top_of_a_chord_and_a_bass_the_bottom()
+    {
+        var midi = Read(new Smf().Track().Note(0, Tpq, 60).Note(0, Tpq, 64).Note(0, Tpq, 67));
+        var source = midi.Sources().Single();
+
+        var result = Import(midi, new VoiceImport(source, VoiceRole.Melody), v3: new VoiceImport(source, VoiceRole.Bass));
+
+        Assert.StartsWith("G-4", Rows(result.Song, 0));
+        Assert.StartsWith("C-4", Rows(result.Song, 2));
+        Assert.Equal(2 + 2, result.Report.NotesDropped);   // each voice drops two of the three
+    }
+
+    [Fact]
+    public void A_higher_note_takes_over_and_the_held_note_comes_back_after_it()
+    {
+        // C4 held a whole bar, a grace E4 on the second beat.
+        var midi = Read(new Smf().Track().Note(0, 4 * Tpq, 60).Note(Tpq, Row, 64));
+
+        var result = Import(midi, new VoiceImport(midi.Sources().Single(), VoiceRole.Melody));
+
+        Assert.Equal("C-4 . . . E-4 C-4 . . . . . . . . . .", Rows(result.Song, 0));
+    }
+
+    [Fact]
+    public void Notes_off_the_grid_snap_to_the_nearest_row_and_are_counted()
+    {
+        var midi = Read(new Smf().Track().Note(Row + 3, Row, 60).Note(2 * Row, Row, 62));
+
+        var result = Import(midi, new VoiceImport(midi.Sources().Single(), VoiceRole.Melody));
+
+        Assert.StartsWith(". C-4 D-4 ---", Rows(result.Song, 0));
+        Assert.Equal(1, result.Report.NotesMoved);
+    }
+
+    [Fact]
+    public void A_note_outside_the_players_range_moves_by_octaves_and_is_counted()
+    {
+        var midi = Read(new Smf().Track().Note(0, Tpq, 120).Note(Tpq, Tpq, 5));
+
+        var result = Import(midi, new VoiceImport(midi.Sources().Single(), VoiceRole.Melody));
+
+        Assert.StartsWith("C-7 . . . F-0", Rows(result.Song, 0));
+        Assert.Equal(2, result.Report.NotesShifted);
+    }
+
+    [Fact]
+    public void Transpose_moves_a_voice()
+    {
+        var midi = Read(new Smf().Track().Note(0, Tpq, 60));
+
+        var result = Import(midi, new VoiceImport(midi.Sources().Single(), VoiceRole.Melody, Transpose: -12));
+
+        Assert.StartsWith("C-3", Rows(result.Song, 0));
+    }
+
+    [Fact]
+    public void A_bar_that_repeats_is_stored_once()
+    {
+        var smf = new Smf().Track();
+        for (int bar = 0; bar < 8; bar++)
+            smf.Note(bar * 4 * Tpq, Tpq, bar % 2 == 0 ? 60 : 67);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources().Single(), VoiceRole.Melody));
+
+        // Two different bars plus the silent voices' pattern, however long the patterns are.
+        Assert.Equal(8, result.Report.Bars);
+        Assert.True(result.Song.Patterns.Count <= 3);
+        Assert.Equal(8 * 16, Rows(result.Song, 0).Split(' ').Length);
+    }
+
+    [Fact]
+    public void The_pattern_length_is_whichever_makes_the_smallest_song()
+    {
+        // A bar of 16ths on one pitch each bar, all different: nothing repeats, so longer patterns
+        // only save pointers and order bytes.
+        var smf = new Smf().Track();
+        for (int bar = 0; bar < 8; bar++)
+            smf.Note(bar * 4 * Tpq, 4 * Tpq, 48 + bar);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources().Single(), VoiceRole.Melody));
+
+        Assert.Equal(4, result.Report.BarsPerPattern);
+        Assert.Equal(result.Report.TotalBytes, SongSizeCalculator.Measure(result.Song).TotalBytes);
+    }
+
+    [Fact]
+    public void Only_voices_that_play_get_an_instrument()
+    {
+        var midi = Read(new Smf().Track().Note(0, Tpq, 40));
+        var bass = Assert.Single(midi.Sources());
+
+        var result = Import(midi, v3: new VoiceImport(bass, VoiceRole.Bass));
+
+        var instrument = Assert.Single(result.Song.Instruments);
+        Assert.Equal((1, "Bass"), (instrument.Number, instrument.Name));
+        Assert.StartsWith("E-2", Rows(result.Song, 2));
+        Assert.Equal(new NoteRow(NoteName.Parse("E-2"), 1), result.Song.Patterns
+            .SelectMany(p => p.Rows).OfType<NoteRow>().Single());
+    }
+
+    [Fact]
+    public void A_bar_range_imports_only_those_bars()
+    {
+        var smf = new Smf().Track();
+        for (int bar = 0; bar < 4; bar++)
+            smf.Note(bar * 4 * Tpq, Tpq, 60 + bar);
+        var midi = Read(smf);
+        var voices = new[] { new VoiceImport(midi.Sources().Single(), VoiceRole.Melody),
+                             new VoiceImport(null, VoiceRole.Melody), new VoiceImport(null, VoiceRole.Bass) };
+
+        var result = MidiImporter.Import(midi, new MidiImportOptions(voices, 4, 5, FirstBar: 2, BarCount: 1));
+
+        Assert.Equal("D-4 . . . --- . . . . . . . . . . .", Rows(result.Song, 0));   // bar 3 is key 62
+    }
+
+    [Fact]
+    public void Every_voice_silent_is_refused()
+    {
+        var midi = Read(new Smf().Track().Note(0, Tpq, 60));
+
+        Assert.Throws<MidiImportException>(() => Import(midi));
+    }
+
+    [Theory]
+    [InlineData(120, 4, 5, 125.0)]
+    [InlineData(100, 4, 7, 93.75)]
+    [InlineData(120, 8, 2, 125.0)]
+    [InlineData(150, 4, 4, 150.0)]
+    public void The_suggested_speed_is_the_nearest_whole_frame_row(double bpm, int rowsPerBeat, int speed, double plays)
+    {
+        Assert.Equal((speed, plays), MidiImporter.SuggestSpeed(bpm, rowsPerBeat));
+    }
+}

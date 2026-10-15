@@ -83,6 +83,19 @@ public sealed class EditorSession
         StructureChanged?.Invoke();
     }
 
+    /// <summary>A song made in the editor rather than read from a file - an import. It has no
+    /// path yet and is unsaved, so closing asks before it is lost.</summary>
+    public void LoadImported(Song song)
+    {
+        Song = song;
+        FilePath = null;
+        IsDirty = true;
+        _history.Reset(Song);
+        HistoryChanged?.Invoke();
+        StructureChanged?.Invoke();
+        DirtyChanged?.Invoke();
+    }
+
     public void Save(string? path = null)
     {
         string target = path ?? FilePath ?? throw new InvalidOperationException("No file path set.");

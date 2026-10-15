@@ -5,6 +5,7 @@ using MagSid.Core;
 using MagSid.Core.Model;
 using MagSid.Core.Serialization;
 using MagSid.Core.Validation;
+using MagSid.Core.Midi;
 using MagSid.Editor.App.Controls;
 using MagSid.Editor.App.Export;
 using MagSid.Editor.App.Daw;
@@ -243,6 +244,7 @@ public sealed class MainForm : Form
         var aboutItem = new ToolStripMenuItem("A&bout", null, (_, _) => DoAbout());
         var newItem = new ToolStripMenuItem("&New", null, (_, _) => DoNew());
         var openItem = new ToolStripMenuItem("&Open...", null, (_, _) => DoOpen());
+        var importMidiItem = new ToolStripMenuItem("Import &MIDI...", null, (_, _) => DoImportMidi());
         var saveItem = new ToolStripMenuItem("&Save", null, (_, _) => DoSave());
         var saveAsItem = new ToolStripMenuItem("Save &As...", null, (_, _) => DoSaveAs());
         var loadInstrumentItem = new ToolStripMenuItem("Load &Instrument...", null, (_, _) => DoLoadInstrument());
@@ -301,7 +303,7 @@ public sealed class MainForm : Form
         exportSidItem.ShortcutKeys = Keys.F9;
 
         file.DropDownItems.AddRange([aboutItem, new ToolStripSeparator(), _undoItem, _redoItem,
-            new ToolStripSeparator(), newItem, openItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), loadInstrumentItem, saveInstrumentItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
+            new ToolStripSeparator(), newItem, openItem, importMidiItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), loadInstrumentItem, saveInstrumentItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
         menu.Items.Add(file);
 
         var signalPathItem = new ToolStripMenuItem("&Signal Path", null, (_, _) => DoSignalPath());
@@ -1863,6 +1865,51 @@ public sealed class MainForm : Form
         {
             MessageBox.Show(this, ex.Message, "Cannot open file", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>Makes a new song from a MIDI file - see MidiImportForm for the choices and
+    /// MidiImporter for how the notes are fitted to three voices.</summary>
+    private void DoImportMidi()
+    {
+        if (!ConfirmDiscardIfDirty())
+            return;
+
+        using var open = new OpenFileDialog
+        {
+            Filter = "MIDI files (*.mid;*.midi)|*.mid;*.midi|All files (*.*)|*.*",
+            Title = "Import MIDI",
+        };
+        if (EditorSettings.MidiImportDirectory is { Length: > 0 } remembered)
+            open.InitialDirectory = remembered;
+        if (open.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        EditorSettings.MidiImportDirectory = Path.GetDirectoryName(open.FileName) ?? "";
+
+        MidiSong midi;
+        try
+        {
+            midi = MidiFileReader.Read(File.ReadAllBytes(open.FileName));
+        }
+        catch (Exception ex) when (ex is MidiFileException or IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, ex.Message, "Cannot read MIDI file", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (midi.Sources().Count == 0)
+        {
+            MessageBox.Show(this, "The MIDI file has no notes.", "Import MIDI", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new MidiImportForm(midi, Path.GetFileName(open.FileName));
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Result is not { } result)
+            return;
+
+        StopSongForSwap();
+        _session.LoadImported(result.Song);
+        ShowNotice($"Imported {Path.GetFileName(open.FileName)}: {result.Report.Bars} bars, {result.Report.TotalBytes} bytes");
     }
 
     private void DoSave()

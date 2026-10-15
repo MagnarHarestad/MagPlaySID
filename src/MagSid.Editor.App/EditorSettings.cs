@@ -25,6 +25,7 @@ public static class EditorSettings
     private static string _sidOpenDirectory = string.Empty;
     private static string _audioExportDirectory = string.Empty;
     private static string _instrumentDirectory = string.Empty;
+    private static string _midiImportDirectory = string.Empty;
     private static string _midiDevice = string.Empty;
     private static string _midiKnobBindings = string.Empty;
     private static bool _loaded;
@@ -157,6 +158,13 @@ public static class EditorSettings
         set => SetDirectory(ref _instrumentDirectory, value);
     }
 
+    /// <summary>Where a MIDI file was last imported from.</summary>
+    public static string MidiImportDirectory
+    {
+        get => ExistingDirectory(ref _midiImportDirectory);
+        set => SetDirectory(ref _midiImportDirectory, value);
+    }
+
     /// <summary>The MIDI input last used, by name rather than index - a device's number moves when
     /// another is plugged in, and reopening by number would quietly attach to the wrong one.</summary>
     public static string MidiDevice
@@ -228,6 +236,7 @@ public static class EditorSettings
                 _sidOpenDirectory = stored.SidOpenDirectory ?? string.Empty;
                 _audioExportDirectory = stored.AudioExportDirectory ?? string.Empty;
                 _instrumentDirectory = stored.InstrumentDirectory ?? string.Empty;
+                _midiImportDirectory = stored.MidiImportDirectory ?? string.Empty;
                 _midiDevice = stored.MidiDevice ?? string.Empty;
                 _midiKnobBindings = stored.MidiKnobBindings ?? string.Empty;
             }
@@ -253,6 +262,7 @@ public static class EditorSettings
                 SidOpenDirectory = _sidOpenDirectory,
                 AudioExportDirectory = _audioExportDirectory,
                 InstrumentDirectory = _instrumentDirectory,
+                MidiImportDirectory = _midiImportDirectory,
                 MidiDevice = _midiDevice,
                 MidiKnobBindings = _midiKnobBindings,
             }));
@@ -273,6 +283,7 @@ public static class EditorSettings
         public string? SidOpenDirectory { get; set; }
         public string? AudioExportDirectory { get; set; }
         public string? InstrumentDirectory { get; set; }
+        public string? MidiImportDirectory { get; set; }
         public string? MidiDevice { get; set; }
         public string? MidiKnobBindings { get; set; }
     }
