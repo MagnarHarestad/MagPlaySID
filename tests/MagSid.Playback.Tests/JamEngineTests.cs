@@ -43,6 +43,30 @@ public class JamEngineTests
     }
 
     [Fact]
+    public void Resetting_the_filter_takes_every_voice_out_of_it_and_stops_its_program()
+    {
+        var (engine, writes) = Build();
+        var filtered = MakeInstrument(1);
+        filtered.Filter.Add(FilterStep.Setup(0x1f, 0xf1, 0x20, sweepRate: 4));
+        filtered.Filter.Add(FilterStep.Sweep(0x30));
+
+        engine.NoteOn(Note("C-4"), filtered);
+        writes.Clear();
+
+        engine.ResetFilter();
+
+        // Routing and resonance off, volume 15 - the sound bank's next card is heard on its own.
+        Assert.Contains((0x17, 0x00), writes);
+        Assert.Contains((0x18, 0x0f), writes);
+
+        // The old program and its sweep are gone: frames go by without touching the filter.
+        writes.Clear();
+        for (int i = 0; i < 8; i++)
+            engine.Frame();
+        Assert.DoesNotContain(writes, w => w.Offset is >= 0x15 and <= 0x18);
+    }
+
+    [Fact]
     public void A_fourth_note_steals_the_oldest_held_voice()
     {
         var (engine, writes) = Build();

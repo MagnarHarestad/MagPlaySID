@@ -2218,6 +2218,7 @@ public sealed class MainForm : Form
         {
             _jamEngine ??= new JamEngine(_chipModel);
             _jamEngine.Start();
+            _jamEngine.ResetFilter();
             _jamEngine.NoteOn(note, instrument);
         }
         catch (Exception ex) when (ex is InvalidOperationException or NAudio.MmException)

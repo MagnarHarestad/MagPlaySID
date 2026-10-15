@@ -31,6 +31,20 @@ public sealed class FilterEngine
     private int _phase;
     private int _sweepRate;
 
+    /// <summary>Lets the filter go: no program, no sweep. Writes nothing - the caller sets the
+    /// registers it wants the chip left with.</summary>
+    public void Reset()
+    {
+        _program = null;
+        _stepIndex = 0;
+        _phase = 0;
+        _sweepRate = 0;
+        LastStep = -1;
+        OwnerInstrumentNumber = -1;
+        FramesSinceClaim = 0;
+        Cutoff = -1;
+    }
+
     /// <summary>Hands this instrument the shared filter, restarting its program from the top.
     /// Call only when the instrument actually has one (Filter.Count &gt; 0) - a note with no
     /// filter program of its own should leave whichever voice already owns the filter

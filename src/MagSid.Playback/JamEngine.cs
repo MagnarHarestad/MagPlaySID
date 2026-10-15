@@ -130,6 +130,25 @@ public sealed class JamEngine : IWaveProvider, IDisposable
         }
     }
 
+    /// <summary>
+    /// Takes the filter back to how the engine starts: no voice through it, no resonance, volume
+    /// 15, no program or sweep running. A song leaves the filter with whichever instrument claimed
+    /// it last, and so does jamming - but sounds auditioned one after another are each to be heard
+    /// as they are, not through the filter the one before set up.
+    /// </summary>
+    public void ResetFilter()
+    {
+        if (_disposed)
+            return;
+
+        lock (_chip)
+        {
+            _filter.Reset();
+            _write(0x17, 0x00);
+            _write(0x18, 0x0f);
+        }
+    }
+
     /// <summary>Releases the voice currently sounding this note, if any - a key-up for a note
     /// that was stolen by a later chord note, or that was never sounding (e.g. two keys mapped
     /// to the same note), is simply ignored rather than releasing whatever else happens to be
