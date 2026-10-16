@@ -1,11 +1,11 @@
 # MIDI files for trying Import MIDI
 
-Sixteen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Fifteen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and every file comes from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The files are Mutopia's own MIDI renderings, unchanged apart from their names.
 
-Thirteen are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
+Twelve are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
 credit and that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -25,7 +25,6 @@ Every file is imported, exported and played on the emulated 6502 by
 | `greensleeves.mid` | Greensleeves | Traditional | [for Accordion](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1265) | Public Domain |
 | `moonlight-sonata.mid` | Sonata No. 14 “Moonlight” (1st Movement: Adagio sostenuto) | L. V. Beethoven (1770–1827) | [for 2 Guitars](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2101) | Public Domain |
 | `liberty-bell-march.mid` | The Liberty Bell March | J. P. Sousa (1854–1932) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=625) | Public Domain |
-| `thunder-and-lightning.mid` | Thunder and Lightning | J. Strauss Jr. (1825–1899) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=610) | Public Domain |
 | `invention-8.mid` | Invention 8 | J. S. Bach (1685–1750) | [for Harpsichord, Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=61) | Public Domain |
 | `blue-danube.mid` | The Blue Danube Waltz (main theme) | J. Strauss Jr. (1825–1899) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=519) | [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | `wedding-march.mid` | MARCHE NUPTIALE (Wedding march) | F. Mendelssohn-Bartholdy (1809–1847) | [for Organ](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2198) | [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
