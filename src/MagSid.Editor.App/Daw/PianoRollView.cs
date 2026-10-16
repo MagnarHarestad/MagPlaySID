@@ -712,9 +712,6 @@ internal sealed class PianoRollView : Control
     /// snapshot, and refreshes the tracker showing the same pattern.</summary>
     public event Action? Edited;
 
-    /// <summary>The REC button was pressed: true to start a take, false to stop it.</summary>
-    public event Action<bool>? RecordToggled;
-
     /// <summary>Sound a note, so placing one is heard rather than only seen - the same audition the
     /// tracker gives when a note is typed.</summary>
     public event Action<NoteName, int>? NotePreviewRequested;
@@ -1644,13 +1641,6 @@ internal sealed class PianoRollView : Control
             return;
         }
 
-        // REC: the host starts or stops the take, since it owns the song's playback.
-        if (_pattern is not null && e.Button == MouseButtons.Left && RecButtonBounds.Contains(e.Location))
-        {
-            RecordToggled?.Invoke(!IsRecording);
-            return;
-        }
-
         // A click anywhere but the slide lane lets go of what was selected there.
         bool inSlideLane = SlideLaneColumnAt(e.Location) is not null;
         if (_slideSelection is not null && !inSlideLane)
@@ -2084,39 +2074,9 @@ internal sealed class PianoRollView : Control
 
     private Rectangle GridToggleBounds => new(Width - _scrollY.Width - 168, 3, 156, 20);
 
-    /// <summary>Where the header's name, REC and row count end. The bar numbers share the strip
-    /// with them, and none is drawn under them.</summary>
+    /// <summary>Where the header's name and row count end. The bar numbers share the strip with
+    /// them, and none is drawn under them.</summary>
     private int _headerTextRight;
-
-    /// <summary>REC, between the pattern's name and its row count.</summary>
-    private static Rectangle RecButtonBounds => new(56, 3, 44, 18);
-
-    private static readonly Color RecRed = Color.FromArgb(0xF0, 0x3E, 0x4E);
-
-    /// <summary>Lit red while a take runs; a dim outline with a red dot while it does not.</summary>
-    private void DrawRecButton(Graphics g)
-    {
-        if (_pattern is null)
-            return;
-
-        var box = RecButtonBounds;
-        bool on = IsRecording;
-
-        using (var fill = new SolidBrush(on ? RecRed : Color.FromArgb(0x10, 0x14, 0x1E)))
-            g.FillRectangle(fill, box);
-        using (var border = new Pen(on ? RecRed : DawPalette.WithAlpha(RecRed, 110)))
-            g.DrawRectangle(border, box);
-
-        var smooth = g.SmoothingMode;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        using (var dot = new SolidBrush(on ? Color.White : RecRed))
-            g.FillEllipse(dot, box.X + 6, box.Y + 5, 8, 8);
-        g.SmoothingMode = smooth;
-
-        using var font = new Font("Segoe UI", 7f, FontStyle.Bold);
-        using var ink = new SolidBrush(on ? Color.White : DawPalette.WithAlpha(RecRed, 220));
-        g.DrawString("REC", font, ink, box.X + 17, box.Y + 3);
-    }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -2170,7 +2130,7 @@ internal sealed class PianoRollView : Control
             using var metaInk = new SolidBrush(DawPalette.TextFaint);
             string channel = _channel >= 0 ? $"CH {_channel + 1} · " : string.Empty;
             string meta = $"{channel}{pattern.Rows.Count} rows · {_notes.Count} notes";
-            int metaX = RecButtonBounds.Right + 10;
+            int metaX = 56;
             g.DrawString(meta, metaFont, metaInk, metaX, 6);
             _headerTextRight = metaX + (int)Math.Ceiling(g.MeasureString(meta, metaFont).Width);
         }
@@ -2179,7 +2139,6 @@ internal sealed class PianoRollView : Control
             _headerTextRight = 0;
         }
 
-        DrawRecButton(g);
         DrawGridToggle(g);
         DrawRulerNumbers(g);
     }

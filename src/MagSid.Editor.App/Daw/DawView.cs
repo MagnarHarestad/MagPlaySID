@@ -52,8 +52,6 @@ internal sealed class DawView : Panel
     private readonly ToggleButton _autoScroll = new("AUTOSCROLL") { Checked = true, Accent = DawPalette.Oscillator };
     private readonly ToggleButton _cycle = new("CYCLE") { Accent = DawPalette.Oscillator };
     private readonly ToggleButton _preRoll = new("PRE-ROLL") { Checked = true, Accent = DawPalette.Oscillator };
-    private readonly ToggleButton _click = new("CLICK") { Accent = DawPalette.Oscillator };
-    private readonly ToggleButton _punch = new("PUNCH") { Accent = DawPalette.Oscillator };
 
     /// <summary>Notes are written only while this is open - between the punch-in and the
     /// punch-out. Closing it lets go of a held key there.</summary>
@@ -225,9 +223,9 @@ internal sealed class DawView : Panel
 
     public bool PreRollOn => _preRoll.Checked;
 
-    public bool ClickOn => _click.Checked;
+    public bool ClickOn => _tools.ClickOn;
 
-    public bool PunchOn => _punch.Checked;
+    public bool PunchOn => _tools.PunchOn;
 
     /// <summary>Whether the take is inside its punch window right now - the host knows the
     /// frame being heard. Closing it lets go of a held key at the row reached.</summary>
@@ -279,6 +277,7 @@ internal sealed class DawView : Panel
 
         RecordingFrom = clip;
         _pianoRoll.BeginRecording();
+        _tools.Recording = true;
         return true;
     }
 
@@ -286,6 +285,7 @@ internal sealed class DawView : Panel
     {
         RecordingFrom = null;
         _pianoRoll.EndRecording();
+        _tools.Recording = false;
     }
 
     public bool RecordNote(MagSid.Core.Model.NoteName note, int instrumentNumber) =>
@@ -558,15 +558,12 @@ internal sealed class DawView : Panel
         _arrange.LocatorsChanged += () => CycleChanged?.Invoke();
         _tabs.Controls.Add(_cycle);
 
-        // How a take starts: PRE-ROLL plays the bar before the punch-in, CLICK counts it in, and
-        // PUNCH limits the writing to the locators' range.
-        foreach (var (toggle, width) in new[] { (_preRoll, 76), (_click, 58), (_punch, 62) })
-        {
-            toggle.Size = new Size(width, 26);
-            toggle.BackColor = DawPalette.PanelHeader;
-            toggle.Margin = new Padding(6, 0, 0, 0);
-            _tabs.Controls.Add(toggle);
-        }
+        // How a take starts: PRE-ROLL plays the bar before the punch-in. CLICK and PUNCH sit with
+        // REC in the roll's tool row.
+        _preRoll.Size = new Size(76, 26);
+        _preRoll.BackColor = DawPalette.PanelHeader;
+        _preRoll.Margin = new Padding(6, 0, 0, 0);
+        _tabs.Controls.Add(_preRoll);
 
         // The octave the typing keys play in, where it can be seen. A keyboard that plays two
         // octaves off and says nothing about it reads as a tuning fault.
@@ -693,7 +690,7 @@ internal sealed class DawView : Panel
 
         _pianoRoll.Dock = DockStyle.Fill;
         _pianoRoll.Edited += () => PatternEdited?.Invoke();
-        _pianoRoll.RecordToggled += on => RecordToggled?.Invoke(on);
+        _tools.RecordToggled += on => RecordToggled?.Invoke(on);
         _pianoRoll.Notice += message => Notice?.Invoke(message);
         _pianoRoll.NotePreviewRequested += (note, instrument) => NotePreviewRequested?.Invoke(note, instrument);
         _pianoRoll.NotePreviewReleased += note => NotePreviewReleased?.Invoke(note);
@@ -895,7 +892,7 @@ internal sealed class DawView : Panel
         _autoScroll.Visible = tab == DawTab.Arrange;
         _soundBank.Visible = tab == DawTab.Instrument;
         _cycle.Visible = tab == DawTab.Arrange;
-        _preRoll.Visible = _click.Visible = _punch.Visible = tab == DawTab.Arrange;
+        _preRoll.Visible = tab == DawTab.Arrange;
 
         foreach (var button in _tabButtons)
             button.Active = (DawTab)button.Tag! == tab;

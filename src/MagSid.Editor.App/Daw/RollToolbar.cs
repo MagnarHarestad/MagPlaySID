@@ -22,6 +22,9 @@ internal enum RollTool
 ///
 /// Each button names itself in a tooltip, since an icon is a reminder of something you already
 /// know and a name is how you learn it.
+///
+/// After the tools come the take's own switches: REC, red as a record button is, and CLICK and
+/// PUNCH in the view's cyan - the same shape, so they read as one group.
 /// </summary>
 internal sealed class RollToolbar : Control
 {
@@ -29,6 +32,18 @@ internal sealed class RollToolbar : Control
     private const int ButtonHeight = 24;
     private const int Gap = 3;
     private const int Left0 = 10;
+    private const int SwitchGap = 18;
+
+    private enum Switch { Rec, Click, Punch }
+
+    private static readonly (Switch Switch, string Label, int Width, string Help)[] Switches =
+    [
+        (Switch.Rec, "REC", 52, "Record into the selected clip's pattern from a MIDI or computer keyboard, while the song plays from there."),
+        (Switch.Click, "CLICK", 62, "A click on every beat while recording - over the pre-roll bar when PRE-ROLL is on, otherwise a one-bar count-in first."),
+        (Switch.Punch, "PUNCH", 66, "Record only between the locators: the left one is the punch-in, the right one the punch-out."),
+    ];
+
+    private static readonly Color RecRed = Color.FromArgb(0xF0, 0x3E, 0x4E);
 
     private static readonly (RollTool Tool, string Name, string Help)[] Tools =
     [
@@ -44,6 +59,41 @@ internal sealed class RollToolbar : Control
     private readonly ToolTip _tips = new() { InitialDelay = 400, ReshowDelay = 100 };
     private RollTool _tool = RollTool.Draw;
     private int _hovered = -1;
+    private bool _recording, _click, _punch;
+
+    /// <summary>REC pressed: true to start a take, false to stop it.</summary>
+    public event Action<bool>? RecordToggled;
+
+    /// <summary>Lit while a take runs - the host says when one starts and stops.</summary>
+    public bool Recording
+    {
+        get => _recording;
+        set
+        {
+            _recording = value;
+            Invalidate();
+        }
+    }
+
+    public bool ClickOn
+    {
+        get => _click;
+        set
+        {
+            _click = value;
+            Invalidate();
+        }
+    }
+
+    public bool PunchOn
+    {
+        get => _punch;
+        set
+        {
+            _punch = value;
+            Invalidate();
+        }
+    }
 
     public RollToolbar()
     {
@@ -74,6 +124,15 @@ internal sealed class RollToolbar : Control
     private Rectangle ButtonBounds(int index) =>
         new(Left0 + (index * (ButtonWidth + Gap)), (Height - ButtonHeight) / 2, ButtonWidth, ButtonHeight);
 
+    /// <summary>The switches after the tools: index Tools.Length and on.</summary>
+    private Rectangle SwitchBounds(int index)
+    {
+        int x = ButtonBounds(Tools.Length - 1).Right + SwitchGap;
+        for (int i = 0; i < index; i++)
+            x += Switches[i].Width + Gap + 3;
+        return new Rectangle(x, (Height - ButtonHeight) / 2, Switches[index].Width, ButtonHeight);
+    }
+
     private int ButtonAt(Point point)
     {
         for (int i = 0; i < Tools.Length; i++)
@@ -82,8 +141,21 @@ internal sealed class RollToolbar : Control
                 return i;
         }
 
+        for (int i = 0; i < Switches.Length; i++)
+        {
+            if (SwitchBounds(i).Contains(point))
+                return Tools.Length + i;
+        }
+
         return -1;
     }
+
+    private bool IsOn(Switch which) => which switch
+    {
+        Switch.Rec => _recording,
+        Switch.Click => _click,
+        _ => _punch,
+    };
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
@@ -92,7 +164,9 @@ internal sealed class RollToolbar : Control
         {
             _hovered = at;
             Invalidate();
-            _tips.SetToolTip(this, at >= 0 ? $"{Tools[at].Name}\n{Tools[at].Help}" : null);
+            _tips.SetToolTip(this, at < 0 ? null
+                : at < Tools.Length ? $"{Tools[at].Name}\n{Tools[at].Help}"
+                : $"{Switches[at - Tools.Length].Label}\n{Switches[at - Tools.Length].Help}");
         }
 
         base.OnMouseMove(e);
@@ -108,8 +182,19 @@ internal sealed class RollToolbar : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         int at = ButtonAt(e.Location);
-        if (at >= 0)
+        if (at >= 0 && at < Tools.Length)
+        {
             Tool = Tools[at].Tool;
+        }
+        else if (at >= Tools.Length && e.Button == MouseButtons.Left)
+        {
+            switch (Switches[at - Tools.Length].Switch)
+            {
+                case Switch.Rec: RecordToggled?.Invoke(!_recording); break;
+                case Switch.Click: ClickOn = !_click; break;
+                case Switch.Punch: PunchOn = !_punch; break;
+            }
+        }
 
         base.OnMouseDown(e);
     }
@@ -143,12 +228,50 @@ internal sealed class RollToolbar : Control
             DrawIcon(g, Tools[i].Tool, glyph, ink);
         }
 
-        // The chosen tool's name beside the row, so it is never a guess which one is live.
-        var current = Tools.First(t => t.Tool == _tool);
-        using var font = new Font("Segoe UI", 7.5f, FontStyle.Bold);
-        using var nameInk = new SolidBrush(DawPalette.TextDim);
-        var after = ButtonBounds(Tools.Length - 1);
-        g.DrawString(current.Name.ToUpperInvariant(), font, nameInk, after.Right + 14, (Height - 12) / 2f);
+        for (int i = 0; i < Switches.Length; i++)
+            DrawSwitch(g, i);
+    }
+
+    /// <summary>A dim outline with its mark in the accent while off; filled with the accent, the
+    /// mark and label white, while on.</summary>
+    private void DrawSwitch(Graphics g, int index)
+    {
+        var (which, label, _, _) = Switches[index];
+        var box = SwitchBounds(index);
+        bool on = IsOn(which), hover = Tools.Length + index == _hovered;
+        var accent = which == Switch.Rec ? RecRed : DawPalette.Oscillator;
+
+        using (var fill = new SolidBrush(on ? accent : hover ? Color.FromArgb(0x22, 0x2B, 0x3E) : Color.FromArgb(0x10, 0x14, 0x1E)))
+            g.FillRectangle(fill, box);
+        using (var border = new Pen(on ? accent : DawPalette.WithAlpha(accent, hover ? 200 : 110)))
+            g.DrawRectangle(border, box.X, box.Y, box.Width - 1, box.Height - 1);
+
+        var ink = on ? (which == Switch.Rec ? Color.White : DawPalette.ActiveInk) : accent;
+        float cx = box.X + 11, cy = box.Y + box.Height / 2f;
+        using (var mark = new SolidBrush(ink))
+        using (var pen = new Pen(ink, 1.5f))
+        {
+            switch (which)
+            {
+                case Switch.Rec:
+                    g.FillEllipse(mark, cx - 4, cy - 4, 8, 8);
+                    break;
+                case Switch.Click:
+                    // A metronome: its case and the arm.
+                    g.DrawPolygon(pen, new PointF[] { new(cx - 4, cy + 4.5f), new(cx - 1.5f, cy - 4.5f), new(cx + 1.5f, cy - 4.5f), new(cx + 4, cy + 4.5f) });
+                    g.DrawLine(pen, cx, cy + 2.5f, cx + 3.5f, cy - 5);
+                    break;
+                default:
+                    // Brackets round the stretch that is written.
+                    g.DrawLines(pen, new PointF[] { new(cx - 2, cy - 4.5f), new(cx - 4.5f, cy - 4.5f), new(cx - 4.5f, cy + 4.5f), new(cx - 2, cy + 4.5f) });
+                    g.DrawLines(pen, new PointF[] { new(cx + 2, cy - 4.5f), new(cx + 4.5f, cy - 4.5f), new(cx + 4.5f, cy + 4.5f), new(cx + 2, cy + 4.5f) });
+                    break;
+            }
+        }
+
+        using var font = new Font("Segoe UI", 7f, FontStyle.Bold);
+        TextRenderer.DrawText(g, label, font, new Rectangle(box.X + 19, box.Y, box.Width - 21, box.Height), ink,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
     }
 
     private static void DrawIcon(Graphics g, RollTool tool, RectangleF r, Color ink)
