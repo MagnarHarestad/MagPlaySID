@@ -19,8 +19,8 @@ for technical advice and tools.
 > 3. **The Retro view** - underway. The Windows editor's tracker grid runs unchanged: its source is
 >    linked into `src/MagSid.Editor.Views`, which compiles it against `Shim/`, a WinForms and GDI+ face
 >    over Avalonia. Around it, `MainWindow` has the song's files, undo, the instrument list and an
->    instrument editor, playback with F1/F2/F4 and the grid following, and note entry and jamming.
->    Not yet: F3 pattern preview, .sid export, Import MIDI, Optimize, a MIDI keyboard.
+>    instrument editor, playback with F1/F2/F3/F4 and the grid following, note entry and jamming, and
+>    Export to .sid (F9). Not yet: Import MIDI, Optimize, a MIDI keyboard, the sound bank.
 > 4. The DAW view - the piano roll and the arrange are owner-drawn too, so they go the grid's way.
 > 5. Signed releases.
 >

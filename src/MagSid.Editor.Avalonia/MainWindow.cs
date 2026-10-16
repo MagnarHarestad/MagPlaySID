@@ -48,6 +48,8 @@ public sealed class MainWindow : Window
     private ChipModel _chipModel = ChipModel.Mos6581;
     private SongPlaybackEngine? _engine;
     private IAudioOutput? _output;
+    private IAudioOutput? _previewOutput;
+    private SongPlaybackEngine? _previewEngine;
     private JamEngine? _jam;
     private SongSequencer.SequencerPosition? _resumeFrom;
     private (int Position, int Row)? _resumeCursor;
@@ -75,6 +77,7 @@ public sealed class MainWindow : Window
         Closed += (_, _) =>
         {
             StopPlayback();
+            StopPatternPreview();
             _jam?.Dispose();
         };
 
@@ -270,7 +273,8 @@ public sealed class MainWindow : Window
             {
                 Item("Play from the top", StartFromBeginning, "F1"),
                 Item("Play from the cursor", StartFromCurrentPosition, "F2"),
-                Item("Stop", StopTransport, "F4"),
+                Item("Loop the patterns at the cursor", PlayCurrentPattern, "F3"),
+                Item("Stop", StopAny, "F4"),
                 new Separator(),
                 Item("Edit / Jam", () => _grid.ToggleEditMode(), "F5"),
             },
@@ -297,7 +301,11 @@ public sealed class MainWindow : Window
         _grid.SelectedInstrumentNumber = () =>
             SelectedInstrument?.Number ?? _session.Song.Instruments.FirstOrDefault()?.Number ?? 1;
         _grid.AudioClockSamples = () => _output?.SamplesPlayed ?? 0;
-        _grid.ChannelMuteChanged += (channel, muted) => _engine?.SetVoiceMuted(channel, muted);
+        _grid.ChannelMuteChanged += (channel, muted) =>
+        {
+            _engine?.SetVoiceMuted(channel, muted);
+            _previewEngine?.SetVoiceMuted(channel, muted);
+        };
         UpdateEditMode();
 
         _poll.Tick += (_, _) => DrainPlaybackEvents();
@@ -317,8 +325,11 @@ public sealed class MainWindow : Window
             case Key.F2:
                 StartFromCurrentPosition();
                 break;
+            case Key.F3:
+                PlayCurrentPattern();
+                break;
             case Key.F4:
-                StopTransport();
+                StopAny();
                 break;
             case Key.F9:
                 _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this);
@@ -489,8 +500,76 @@ public sealed class MainWindow : Window
             : SongSequencer.FindPosition(_session.Song, target.Channel, target.OrderIndex, target.RowIndex);
     }
 
+    /// <summary>F4: stops whichever is running, the song or an F3 loop.</summary>
+    private void StopAny()
+    {
+        if (_previewOutput is not null)
+            StopPatternPreview();
+        else
+            StopTransport();
+    }
+
+    /// <summary>
+    /// F3: loops what is on screen - each channel's pattern at the cursor's row, from that pattern's
+    /// own start - so a sound can be worked on without playing the song up to it. A channel whose
+    /// order does not reach the row plays a silent row. As MainForm.PlayCurrentPattern.
+    /// </summary>
+    private void PlayCurrentPattern()
+    {
+        if (_session.Song.Instruments.Count == 0)
+            return;
+
+        StopTransport();
+        StopPatternPreview();
+        _jam?.Dispose();
+        _jam = null;
+
+        var patterns = _grid.CurrentPatternsAtCursor();
+        if (Array.TrueForAll(patterns, p => p is null))
+            return;
+
+        var preview = new Song { Speed = _session.Song.Speed };
+        preview.Instruments.AddRange(_session.Song.Instruments);
+        var seen = new HashSet<int>();
+        foreach (var pattern in patterns)
+        {
+            if (pattern is not null && seen.Add(pattern.Number))
+                preview.Patterns.Add(pattern);
+        }
+
+        var silent = new Pattern { Number = preview.Patterns.Max(p => p.Number) + 1 };
+        silent.Rows.Add(new HoldRow());
+        preview.Patterns.Add(silent);
+        for (int ch = 0; ch < 3; ch++)
+            preview.ChannelOrders[ch].Tokens.Add(new PatternRefToken(patterns[ch]?.Number ?? silent.Number));
+
+        try
+        {
+            var engine = new SongPlaybackEngine(preview, _chipModel);
+            for (int ch = 0; ch < 3; ch++)
+                engine.SetVoiceMuted(ch, _grid.IsChannelMuted(ch));
+            _previewEngine = engine;
+            _previewOutput = AudioOutput.Start(engine, 120);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or PortAudioSharp.PortAudioException or ArgumentException)
+        {
+            StopPatternPreview();
+            _ = MessageWindow.ShowAsync(this, "Cannot play pattern", ex.Message);
+        }
+    }
+
+    private void StopPatternPreview()
+    {
+        var output = _previewOutput;
+        _previewOutput = null;
+        _previewEngine = null;
+        output?.Stop();
+        output?.Dispose();
+    }
+
     private void StartPlaybackFrom(SongSequencer.SequencerPosition? resume)
     {
+        StopPatternPreview();
         try
         {
             _jam?.Dispose();
