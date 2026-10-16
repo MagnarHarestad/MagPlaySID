@@ -70,8 +70,10 @@ public static class ChordAnalyzer
 
     /// <summary>The chord <paramref name="weights"/> (twelve pitch classes) plays, or null when
     /// nothing sounds. Fewer than three pitch classes do not make a chord of their own, so they
-    /// keep <paramref name="previous"/> when it holds them.</summary>
-    public static Chord? Identify(double[] weights, Chord? previous, int maxNotes = 4)
+    /// keep <paramref name="previous"/> when it holds them. The seventh is judged on
+    /// <paramref name="seventhWeights"/> when given - the accompaniment alone, without a tune's
+    /// passing notes.</summary>
+    public static Chord? Identify(double[] weights, Chord? previous, int maxNotes = 4, double[]? seventhWeights = null)
     {
         double total = weights.Sum();
         if (total <= 0)
@@ -108,11 +110,13 @@ public static class ChordAnalyzer
             return best;
 
         // A seventh only when it is a real voice of the chord, not a passing note.
+        var voiced = seventhWeights ?? weights;
+        double strong = 0.35 * voiced.Max();
         var seventh = best.Quality switch
         {
-            ChordQuality.Major when weights[(best.Root + 10) % 12] >= 0.35 * weights.Max() => ChordQuality.Dominant7,
-            ChordQuality.Major when weights[(best.Root + 11) % 12] >= 0.35 * weights.Max() => ChordQuality.Major7,
-            ChordQuality.Minor when weights[(best.Root + 10) % 12] >= 0.35 * weights.Max() => ChordQuality.Minor7,
+            ChordQuality.Major when strong > 0 && voiced[(best.Root + 10) % 12] >= strong => ChordQuality.Dominant7,
+            ChordQuality.Major when strong > 0 && voiced[(best.Root + 11) % 12] >= strong => ChordQuality.Major7,
+            ChordQuality.Minor when strong > 0 && voiced[(best.Root + 10) % 12] >= strong => ChordQuality.Minor7,
             _ => (ChordQuality?)null,
         };
         return seventh is { } q ? best with { Quality = q } : best;

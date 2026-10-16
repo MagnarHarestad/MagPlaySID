@@ -584,7 +584,7 @@ public class MidiImportTests
     }
 
     [Fact]
-    public void More_chords_than_instruments_play_their_nearest_kept_chord()
+    public void More_chords_than_instruments_are_picked_note_by_note_in_the_pattern()
     {
         // Twenty different major and minor chords, one a bar, the first ones longest.
         var smf = new Smf().Track("Tune");
@@ -604,10 +604,72 @@ public class MidiImportTests
         var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody),
                             new VoiceImport(midi.Sources()[1], VoiceRole.Chords));
 
-        Assert.Equal(20, result.Report.ChordsFound);
-        Assert.Equal(15, result.Report.ChordsKept);       // 16 less the melody's instrument
+        // 16 less the melody's instrument and the one the rest are picked on.
+        Assert.Equal((20, 14, 6), (result.Report.ChordsFound, result.Report.ChordsKept, result.Report.ChordsPicked));
         Assert.Equal(16, result.Song.Instruments.Count);
         Assert.Empty(SongValidator.Validate(result.Song));
+
+        // The last bar, G minor, has no instrument of its own: its notes in turn, a 16th each.
+        Assert.EndsWith(string.Join(" ", Enumerable.Repeat("G-3:Chord notes A#3:Chord notes D-4:Chord notes", 5))
+                        + " G-3:Chord notes", Named(result.Song, 1));
+    }
+
+    [Fact]
+    public void A_waltz_is_read_a_bar_at_a_time_after_its_pickup()
+    {
+        // 3/4 with a one-beat pickup. The left hand plays the root alone, then two notes on each
+        // beat after - D, then F-G: no beat of it is G7 on its own, the bar is.
+        var smf = new Smf().Track("Conductor").Meta(0, 0x58, [3, 2, 24, 8]).Track("Tune").Note(0, Tpq, 67);
+        int[] tune = [72, 76, 71, 74, 72];
+        for (int bar = 0; bar < tune.Length; bar++)
+            smf.Note((1 + bar * 3) * Tpq, 3 * Tpq, tune[bar]);
+        smf.Track("Piano");
+        (int Root, int[] Pah)[] bars = [(48, [64, 67]), (48, [64, 67]), (50, [65, 67]), (50, [65, 67]), (48, [64, 67])];
+        for (int bar = 0; bar < bars.Length; bar++)
+        {
+            long at = (1 + bar * 3) * Tpq;
+            smf.Note(at, Tpq, bars[bar].Root);
+            foreach (int beat in new[] { 1, 2 })
+                foreach (int key in bars[bar].Pah)
+                    smf.Note(at + beat * Tpq, Tpq, key);
+        }
+        var midi = Read(smf);
+        var (melody, piano) = (midi.Sources()[0], midi.Sources()[1]);
+
+        var result = Import(midi, new VoiceImport(piano, VoiceRole.Bass), new VoiceImport(piano, VoiceRole.Chords),
+                            new VoiceImport(melody, VoiceRole.Melody));
+
+        Assert.Equal(8, result.Report.PickupRows);         // two beats of rest, then the pickup
+        Assert.StartsWith(". . . . . . . . G-4", Rows(result.Song, 2));
+        Assert.Equal(["Chord C", "Chord G7"], result.Song.Instruments.Where(i => i.Name.StartsWith("Chord")).Select(i => i.Name));
+    }
+
+    [Fact]
+    public void A_bar_of_four_beats_holds_two_chords_when_its_halves_clearly_do()
+    {
+        var smf = new Smf().Track("Tune").Note(0, Tpq, 84).Track("Piano");
+        foreach (int key in new[] { 60, 64, 67 })
+            smf.Note(0, 2 * Tpq, key);
+        foreach (int key in new[] { 55, 59, 62 })
+            smf.Note(2 * Tpq, 2 * Tpq, key);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords));
+
+        Assert.Equal("C-4:Chord C . . . . . . . G-3:Chord G . . . . . . .", Named(result.Song, 1));
+    }
+
+    [Fact]
+    public void A_seventh_only_the_tune_plays_does_not_make_a_seventh_chord()
+    {
+        var smf = new Smf().Track("Tune").Note(0, 4 * Tpq, 70).Track("Piano");
+        foreach (int key in new[] { 60, 64, 67 })
+            smf.Note(0, 4 * Tpq, key);
+        var midi = Read(smf);
+
+        var result = Import(midi, new VoiceImport(midi.Sources()[0], VoiceRole.Melody), new VoiceImport(midi.Sources()[1], VoiceRole.Chords));
+
+        Assert.Equal("Chord C", result.Song.Instruments.Single(i => i.Name.StartsWith("Chord")).Name);
     }
 
     [Fact]

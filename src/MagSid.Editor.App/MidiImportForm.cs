@@ -338,11 +338,13 @@ public sealed class MidiImportForm : Form
             bent.Add($"{report.NotesShifted} moved by octaves into C-0..B-7");
         if (bent.Count > 0)
             lines.Add(string.Join("; ", bent) + ".");
+        if (report.PickupRows > 0)
+            lines.Add($"The file starts on an upbeat: {report.PickupRows} rows of rest go in front, so its bars line up.");
         if (report.ChordsFound > 0)
-            lines.Add(report.ChordsKept == report.ChordsFound
+            lines.Add(report.ChordsPicked == 0
                 ? $"{report.ChordsFound} chords, one arpeggio instrument each."
-                : $"{report.ChordsFound} chords; the {report.ChordsKept} most played became instruments " +
-                  "and the rest play the nearest of them - instruments run out at 16.");
+                : $"{report.ChordsFound} chords; the {report.ChordsKept} most played became arpeggio instruments, and the other " +
+                  $"{report.ChordsPicked} are picked note by note in the pattern on one instrument - instruments run out at 16.");
         if (report.ChordsFound > 0 && _chordGateOffs.Checked)
             lines.Add("Each chord's gate goes off 3 rows after it is struck, 4 rows - with a longer release, " +
                       "$B or $C - for chords that usually ring longer than 8; in the chord's wavetable, so it costs no pattern bytes.");

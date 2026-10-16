@@ -22,9 +22,9 @@ public enum VoiceRole
 
     /// <summary>
     /// The harmony as arpeggio instruments, one per chord, the way the demo songs' ARP_ instruments
-    /// work: the chord of each beat is found from the part, the same chord in any inversion is one
-    /// instrument, and when there are more chords than instruments left the rare ones play their
-    /// nearest kept chord.
+    /// work: the chord of each bar is found from the part, the same chord in any inversion is one
+    /// instrument, and when there are more chords than instruments left the rare ones are picked
+    /// note by note in the pattern instead.
     /// </summary>
     Chords,
 }
@@ -78,7 +78,9 @@ public sealed record MidiImportReport(
     int DrumHits = 0,
     int DrumsLeftOut = 0,
     int ChordsFound = 0,
-    int ChordsKept = 0);
+    int ChordsKept = 0,
+    int ChordsPicked = 0,
+    int PickupRows = 0);
 
 public sealed record MidiImportResult(Song Song, MidiImportReport Report);
 
@@ -129,14 +131,67 @@ public static class MidiImporter
         return rows > 0 && midi.BeatsPerBar * 4 * rowsPerBeat % midi.BeatUnit == 0 ? rows : 4 * rowsPerBeat;
     }
 
-    /// <summary>How many whole bars the chosen parts cover.</summary>
+    /// <summary>How many whole bars the chosen parts cover, a pickup's bar included.</summary>
     public static int BarsIn(MidiSong midi, IEnumerable<MidiSource?> sources, int rowsPerBeat)
     {
+        var parts = sources.ToList();
         double ticksPerRow = midi.TicksPerQuarter / (double)rowsPerBeat;
-        long last = sources.Where(s => s is not null).SelectMany(s => s!.Notes)
+        long last = parts.Where(s => s is not null).SelectMany(s => s!.Notes)
             .Select(n => (long)Math.Round(n.End / ticksPerRow)).DefaultIfEmpty(0).Max();
         int rowsPerBar = RowsPerBar(midi, rowsPerBeat);
-        return (int)((last + rowsPerBar - 1) / rowsPerBar);
+        return (int)((last + PickupRows(midi, parts, rowsPerBeat) + rowsPerBar - 1) / rowsPerBar);
+    }
+
+    /// <summary>
+    /// Rows of rest put in front of the song when the file starts on a pickup - an upbeat - so its
+    /// bar lines fall where the music has them. Files written out from notation often start that
+    /// way, with the first full bar a beat or two in, which shifts every bar after it: a waltz's
+    /// bass note lands on the second beat, and bars that repeat no longer look alike.
+    ///
+    /// A bar line is where the lowest note of the bar starts. Each offset of whole beats is counted
+    /// over the song, and one wins over no pickup only by clearly more bars.
+    /// </summary>
+    public static int PickupRows(MidiSong midi, IEnumerable<MidiSource?> sources, int rowsPerBeat)
+    {
+        var notes = sources.Where(s => s is not null).Distinct().SelectMany(s => s!.Notes).OrderBy(n => n.Start).ToList();
+        if (notes.Count == 0)
+            return 0;
+
+        int rowsPerBar = RowsPerBar(midi, rowsPerBeat);
+        int step = midi.BeatsPerBar > 0 && rowsPerBar % midi.BeatsPerBar == 0 ? rowsPerBar / midi.BeatsPerBar : rowsPerBeat;
+        double ticksPerRow = midi.TicksPerQuarter / (double)rowsPerBeat, barTicks = rowsPerBar * ticksPerRow;
+        long last = notes.Max(n => n.End);
+        long longest = notes.Max(n => n.End - n.Start);
+
+        int Bars(int offset)
+        {
+            int bars = 0, first = 0;
+            for (double start = offset * ticksPerRow; start < last; start += barTicks)
+            {
+                double end = start + barTicks;
+                while (first < notes.Count && notes[first].Start + longest <= start)
+                    first++;
+                MidiNote? lowest = null;
+                for (int i = first; i < notes.Count && notes[i].Start < end; i++)
+                {
+                    var note = notes[i];
+                    if (note.End > start && (lowest is null || note.Key < lowest.Key))
+                        lowest = note;
+                }
+                if (lowest is not null && Math.Abs(lowest.Start - start) < ticksPerRow / 2)
+                    bars++;
+            }
+            return bars;
+        }
+
+        int none = Bars(0), best = 0, bestBars = none;
+        for (int offset = step; offset < rowsPerBar; offset += step)
+        {
+            int bars = Bars(offset);
+            if (bars > bestBars)
+                (best, bestBars) = (offset, bars);
+        }
+        return best > 0 && bestBars >= 2 * none && bestBars - none >= 4 ? rowsPerBar - best : 0;
     }
 
     /// <summary>
@@ -189,7 +244,8 @@ public static class MidiImporter
         int totalBars = BarsIn(midi, options.Voices.SelectMany(PartsOf), options.RowsPerBeat);
         int firstBar = Math.Clamp(options.FirstBar, 0, Math.Max(0, totalBars - 1));
         int bars = Math.Clamp(options.BarCount ?? totalBars - firstBar, 1, Math.Max(1, totalBars - firstBar));
-        var range = new Range(midi.TicksPerQuarter / (double)options.RowsPerBeat, firstBar * rowsPerBar,
+        int pickup = PickupRows(midi, options.Voices.SelectMany(PartsOf), options.RowsPerBeat);
+        var range = new Range(midi.TicksPerQuarter / (double)options.RowsPerBeat, firstBar * rowsPerBar - pickup,
                               bars * rowsPerBar, options.RowsPerBeat, rowsPerBar);
 
         // Instruments are numbered as they are first used, so a sound nothing plays - a snare in
@@ -245,7 +301,7 @@ public static class MidiImporter
                     bars, rowsPerBar, barsPerPattern, song.Patterns.Count, size,
                     stats.Placed, stats.Dropped, stats.Moved, stats.Shifted,
                     midi.Bpm, SongBpm(options.Speed, options.RowsPerBeat), midi.TempoChanges,
-                    stats.DrumHits, stats.DrumsLeftOut, stats.ChordsFound, stats.ChordsKept));
+                    stats.DrumHits, stats.DrumsLeftOut, stats.ChordsFound, stats.ChordsKept, stats.ChordsPicked, pickup));
             }
         }
 
@@ -255,7 +311,7 @@ public static class MidiImporter
 
     private sealed class Stats
     {
-        public int Placed, Dropped, Moved, Shifted, DrumHits, DrumsLeftOut, ChordsFound, ChordsKept;
+        public int Placed, Dropped, Moved, Shifted, DrumHits, DrumsLeftOut, ChordsFound, ChordsKept, ChordsPicked;
     }
 
     /// <summary>The imported stretch of the file, in rows.</summary>
@@ -484,11 +540,16 @@ public static class MidiImporter
     }
 
     /// <summary>
-    /// The chord of every beat, as arpeggio instruments. Each pitch class counts for the rows it
-    /// sounds in the beat, and the lowest note sounding gets a little more, since it is usually
-    /// the root. Consecutive beats of one chord are one note held. With more chords than
-    /// <paramref name="budget"/> instruments, the most-played are kept and every other chord plays
-    /// the kept one it shares most notes with.
+    /// The chords, read a bar at a time - or half a bar, in a bar of four or more beats whose
+    /// halves clearly hold two chords. A bar is read whole because an accompaniment spreads its
+    /// chord over it: a waltz plays the root alone and two notes of the chord on each beat after,
+    /// and no beat of it on its own is the chord. The bass under it counts in full, and the tune
+    /// over it at half weight, since its notes often decide which chord it is.
+    ///
+    /// The most-played chords get an arpeggio instrument each, plain major and minor before the
+    /// rest: a seventh needs twice the beats to be kept before one. With more chords than
+    /// <paramref name="budget"/> instruments, the rest are picked out note by note in the pattern
+    /// on one plain instrument, as far as they get before the next chord.
     /// </summary>
     private static PatternRow[] Chords(VoiceImport voice, MidiImportOptions options, Range range, Stats stats,
                                        int budget, Func<string, Func<Instrument>, int> number)
@@ -499,56 +560,91 @@ public static class MidiImporter
 
         int count = range.RowCount, beatRows = range.RowsPerBeat;
         int beats = (count + beatRows - 1) / beatRows;
-        var weights = Enumerable.Range(0, beats).Select(_ => new double[12]).ToArray();
+        int beatsPerBar = Math.Max(1, range.RowsPerBar / beatRows);
+
+        var own = BeatWeights(voice.Source!, range, beats);
+        var others = options.Voices
+            .Where(v => v != voice && v.Role != VoiceRole.Chords && v.Source is not null && v.Source != voice.Source)
+            .Select(v => (Weights: BeatWeights(v.Source!, range, beats), Factor: v.Role == VoiceRole.Melody ? 0.5 : 1.0))
+            .ToList();
+
+        // The lowest note of the chord part and the bass, per beat: at the start of a bar it is
+        // usually the root, and gets a beat's weight more.
         var lowest = new int[beats];
         var struck = new bool[beats];
         Array.Fill(lowest, int.MaxValue);
-        foreach (var note in voice.Source!.Notes)
+        var low = options.Voices.Where(v => v.Role is VoiceRole.Bass or VoiceRole.DrumsAndBass && v.Source is not null)
+            .Select(v => v.Source!).Append(voice.Source!).Distinct();
+        foreach (var source in low)
         {
-            if (range.Rows(note, null) is not { } at)
-                continue;
-            if (at.Start >= 0)
-                struck[at.Start / beatRows] = true;
-            for (int row = Math.Max(0, at.Start); row < at.End; row++)
+            foreach (var note in source.Notes)
             {
-                weights[row / beatRows][note.Key % 12]++;
-                lowest[row / beatRows] = Math.Min(lowest[row / beatRows], note.Key);
+                if (range.Rows(note, null) is not { } at)
+                    continue;
+                if (source == voice.Source && at.Start >= 0)
+                    struck[at.Start / beatRows] = true;
+                for (int beat = Math.Max(0, at.Start) / beatRows; beat * beatRows < at.End; beat++)
+                    lowest[beat] = Math.Min(lowest[beat], note.Key);
             }
         }
 
+        // The tune helps name the chord, but its passing notes would make sevenths of half the
+        // bars: a seventh has to be in the accompaniment - the chord part and the bass.
+        double[] Window(int from, int to, bool withTune = true)
+        {
+            var weights = new double[12];
+            for (int beat = from; beat < to; beat++)
+            {
+                for (int pc = 0; pc < 12; pc++)
+                    weights[pc] += own[beat][pc] + others.Where(o => withTune || o.Factor == 1.0).Sum(o => o.Factor * o.Weights[beat][pc]);
+            }
+            if (lowest[from] != int.MaxValue)
+                weights[lowest[from] % 12] += beatRows;
+            return weights;
+        }
+
+        Chord? Name(int from, int to, Chord? before) =>
+            ChordAnalyzer.Identify(Window(from, to), before, seventhWeights: Window(from, to, withTune: false));
+
+        bool Sounds(int beat) => own[beat].Any(w => w > 0);
+
         var chords = new Chord?[beats];
         Chord? previous = null;
-        for (int beat = 0; beat < beats; beat++)
+        for (int from = 0; from < beats; from += beatsPerBar)
         {
-            if (lowest[beat] != int.MaxValue)
-                weights[beat][lowest[beat] % 12] += beatRows / 2.0;
-            chords[beat] = ChordAnalyzer.Identify(weights[beat], previous);
-            previous = chords[beat] ?? previous;
+            int to = Math.Min(beats, from + beatsPerBar);
+            if (!Enumerable.Range(from, to - from).Any(Sounds))
+                continue;
+
+            var whole = Name(from, to, previous);
+            var spans = new List<(int From, int To, Chord? Chord)> { (from, to, whole) };
+            if (whole is not null && beatsPerBar >= 4 && beatsPerBar % 2 == 0 && to - from == beatsPerBar)
+            {
+                int middle = from + beatsPerBar / 2;
+                var (first, second) = (Window(from, middle), Window(middle, to));
+                var one = Name(from, middle, previous);
+                var two = Name(middle, to, one ?? previous);
+                if (one is not null && two is not null && one != two
+                    && Explained(first, one) + Explained(second, two)
+                       - Explained(first, whole) - Explained(second, whole) >= SplitMargin)
+                    spans = [(from, middle, one), (middle, to, two)];
+            }
+
+            foreach (var (spanFrom, spanTo, chord) in spans)
+                for (int beat = spanFrom; beat < spanTo; beat++)
+                    chords[beat] = Sounds(beat) ? chord : null;
+            previous = spans[^1].Chord ?? previous;
         }
 
-        // A chord of a single beat inside the bar that shares two notes with the one before is a
-        // passing harmony, not a change: it keeps the chord before. Harmony moves on the downbeat.
-        int beatsPerBar = Math.Max(1, range.RowsPerBar / beatRows);
-        for (int beat = 1; beat < beats; beat++)
-        {
-            if (chords[beat] is { } passing && chords[beat - 1] is { } before && passing != before
-                && beat % beatsPerBar != 0
-                && (beat + 1 >= beats || chords[beat + 1] != passing)
-                && passing.PitchClasses.Intersect(before.PitchClasses).Count() >= 2)
-                chords[beat] = before;
-        }
-
-        // The most-played chords keep an instrument; ties go to the one heard first.
         var played = chords.Select((c, beat) => (c, beat)).Where(x => x.c is not null)
             .GroupBy(x => x.c!).Select(g => (Chord: g.Key, Beats: g.Count(), First: g.Min(x => x.beat)))
-            .OrderByDescending(g => g.Beats).ThenBy(g => g.First).ToList();
-        var kept = played.Take(budget).Select(g => g.Chord).ToList();
-        var nearest = played.ToDictionary(g => g.Chord, g => kept.Contains(g.Chord) ? g.Chord
-            : kept.OrderByDescending(k => k.PitchClasses.Intersect(g.Chord.PitchClasses).Count())
-                  .ThenByDescending(k => k.Root == g.Chord.Root)
-                  .First());
+            .OrderByDescending(g => g.Beats * (g.Chord.Intervals.Count == 3 ? 1.0 : 0.5)).ThenBy(g => g.First)
+            .ToList();
+        int instruments = played.Count <= budget ? played.Count : budget - 1;
+        var kept = played.Take(instruments).Select(g => g.Chord).ToHashSet();
         stats.ChordsFound += played.Count;
         stats.ChordsKept += kept.Count;
+        stats.ChordsPicked += played.Count - kept.Count;
 
         // Where a chord is struck: when it changes, and again on a beat where the part plays new
         // notes - the accompaniment's own rhythm - and where the harmony stops.
@@ -556,7 +652,7 @@ public static class MidiImporter
         Chord? sounding = null;
         for (int beat = 0; beat < beats; beat++)
         {
-            var chord = chords[beat] is { } c ? nearest[c] : null;
+            var chord = chords[beat];
             if (chord != sounding || (chord is not null && struck[beat]))
                 strikes.Add((beat * beatRows, chord));
             sounding = chord;
@@ -564,12 +660,12 @@ public static class MidiImporter
 
         // How long each chord rings before the next thing happens, in 16th rows.
         int unit = Math.Max(1, beatRows / 4);
-        var spans = strikes.Select((s, i) => (s.Row, s.Chord, Span: (i + 1 < strikes.Count ? strikes[i + 1].Row : count) - s.Row))
+        var lengths = strikes.Select((s, i) => (s.Row, s.Chord, Span: (i + 1 < strikes.Count ? strikes[i + 1].Row : count) - s.Row))
             .Where(s => s.Chord is not null).ToList();
-        var release = spans.GroupBy(s => s.Chord!).ToDictionary(g => g.Key, g =>
+        var release = lengths.GroupBy(s => s.Chord!).ToDictionary(g => g.Key, g =>
         {
-            var lengths = g.Select(s => s.Span).Order().ToList();
-            int median = lengths[lengths.Count / 2];
+            var spans = g.Select(s => s.Span).Order().ToList();
+            int median = spans[spans.Count / 2];
             return median > 16 * unit ? 0x0C : median > 8 * unit ? 0x0B : 0x0A;
         });
 
@@ -584,15 +680,72 @@ public static class MidiImporter
             : null;
 
         var rows = Enumerable.Repeat<PatternRow>(new HoldRow(), count).ToArray();
-        foreach (var (row, chord) in strikes)
+        for (int i = 0; i < strikes.Count; i++)
         {
-            rows[row] = chord is null
-                ? new NoteOffRow()
-                : new NoteRow(chord.Notes[0], number("chord " + chord.Name,
+            var (row, chord) = strikes[i];
+            if (chord is null)
+            {
+                rows[row] = new NoteOffRow();
+            }
+            else if (kept.Contains(chord))
+            {
+                rows[row] = new NoteRow(chord.Notes[0], number("chord " + chord.Name,
                     () => ChordInstrument(chord, voice.Instrument, voice.Instrument is null ? release[chord] : null, GateFrames(chord))));
+            }
+            else
+            {
+                // No instrument of its own: its notes in turn, a 16th each, up to the next strike.
+                int picked = number("picked chords", () => PickedChordInstrument(voice.Instrument));
+                int next = i + 1 < strikes.Count ? strikes[i + 1].Row : count;
+                for (int at = row, n = 0; at < next; at += unit, n++)
+                    rows[at] = new NoteRow(chord.Notes[n % chord.Notes.Count], picked);
+            }
         }
 
         return rows;
+    }
+
+    /// <summary>How much better the halves of a bar must fit chords of their own - the shares of
+    /// each half's weight they play, summed - before the bar is read as two chords.</summary>
+    private const double SplitMargin = 0.25;
+
+    /// <summary>The share of <paramref name="weights"/> that <paramref name="chord"/> plays.</summary>
+    private static double Explained(double[] weights, Chord chord)
+    {
+        double total = weights.Sum();
+        return total <= 0 ? 0 : chord.PitchClasses.Sum(pc => weights[pc]) / total;
+    }
+
+    /// <summary>Rows each pitch class sounds in every beat of <paramref name="source"/>.</summary>
+    private static double[][] BeatWeights(MidiSource source, Range range, int beats)
+    {
+        var weights = Enumerable.Range(0, beats).Select(_ => new double[12]).ToArray();
+        foreach (var note in source.Notes)
+        {
+            if (range.Rows(note, null) is not { } at)
+                continue;
+            for (int row = Math.Max(0, at.Start); row < at.End; row++)
+                weights[row / range.RowsPerBeat][note.Key % 12]++;
+        }
+        return weights;
+    }
+
+    /// <summary>The sound a chord without an instrument of its own is picked on, a note at a time
+    /// in the pattern: <paramref name="template"/>, or the demo songs' pulse arpeggio, with no
+    /// note program and no gate-off - the pattern's next note is what stops it.</summary>
+    public static Instrument PickedChordInstrument(Instrument? template = null)
+    {
+        var instrument = template is not null ? Clone(template) : new Instrument
+        {
+            Waveform = 0x41, AttackDecay = 0x00, SustainRelease = 0x8A, PulseWidth = 2, PulseSweep = 22,
+        };
+        if (template is null)
+            instrument.Wavetable.AddRange([0x09, 0x41]);
+        instrument.Name = "Chord notes";
+        instrument.Arpeggio.Clear();
+        instrument.ArpeggioEnding = ArpeggioEnding.Root;
+        instrument.ArpeggioLoopPoint = 0;
+        return instrument;
     }
 
     /// <summary>An arpeggio of <paramref name="chord"/>, one note a frame round and round, on the
