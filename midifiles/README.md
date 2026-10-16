@@ -1,11 +1,11 @@
 # MIDI files for trying Import MIDI
 
-Twenty-five well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Twenty-four well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and every file comes from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The files are Mutopia's own MIDI renderings, unchanged apart from their names.
 
-Twenty are dedicated to the public domain. Five are under Creative Commons licences that ask for credit -
+Nineteen are dedicated to the public domain. Five are under Creative Commons licences that ask for credit -
 and, for ShareAlike, that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -28,7 +28,6 @@ Every file is imported, exported and played on the emulated 6502 by
 | `ode-to-joy.mid` | Ode to Joy | L. V. Beethoven (1770–1827) | [for Voice (SATB)](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=528) | Public Domain |
 | `greensleeves.mid` | Greensleeves | Traditional | [for Accordion](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1265) | Public Domain |
 | `air-on-the-g-string.mid` | Air ('on the G string') | J. S. Bach (1685–1750) | [for Flute and Guitar](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1534) | Public Domain |
-| `ave-maria-schubert.mid` | Ave Maria (Ellens dritter Gesang) | F. Schubert (1797–1828) | [for Voice and Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1054) | Public Domain |
 | `moonlight-sonata.mid` | Sonata No. 14 “Moonlight” (1st Movement: Adagio sostenuto) | L. V. Beethoven (1770–1827) | [for 2 Guitars](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2101) | Public Domain |
 | `liberty-bell-march.mid` | The Liberty Bell March | J. P. Sousa (1854–1932) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=625) | Public Domain |
 | `thunder-and-lightning.mid` | Thunder and Lightning | J. Strauss Jr. (1825–1899) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=610) | Public Domain |
