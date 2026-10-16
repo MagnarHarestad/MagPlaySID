@@ -108,6 +108,10 @@ public static class MidiImporter
     /// chords - fewer is a few passing moments, not an accompaniment.</summary>
     private const int MinChordBeats = 8;
 
+    /// <summary>General MIDI's Acoustic Bass, program 33 - the bass a bass line gets when its own
+    /// program is something else.</summary>
+    private const int AcousticBass = 32;
+
     /// <summary>MIDI C3 - a lone part pitched lower on average is taken for a bass.</summary>
     private const int LowestLeadKey = 48;
 
@@ -199,18 +203,21 @@ public static class MidiImporter
     /// voice 1 - with the drums when there are any, since a bass's filter settings suit channel 1 -
     /// the highest part, the lead, on voice 3, and voice 2 between them: the chords as arpeggios
     /// when a part carries them, else the next highest part. A part with under a fifth of the
-    /// busiest one's notes is an intro or an effect, not a line to build on.
+    /// busiest one's notes is an intro or an effect, not a line to build on - unless it sits in the
+    /// bass, where a line of whole bars has few notes and is still the bass. A part named for the
+    /// lead or the melody is the lead, wherever it lies: the highest part of a band can be a pad.
     /// </summary>
     public static IReadOnlyList<VoiceImport> SuggestVoices(MidiSong midi)
     {
         var sources = midi.Sources();
         var parts = sources.Where(s => !s.LooksLikeDrums).ToList();
         int busiest = parts.Select(s => s.NoteCount).DefaultIfEmpty(0).Max();
-        var melodic = parts.Where(s => s.NoteCount * 5 >= busiest).OrderByDescending(s => s.AverageKey).ToList();
+        var melodic = parts.Where(s => s.NoteCount * 5 >= busiest || s.AverageKey < LowestLeadKey)
+            .OrderByDescending(s => s.AverageKey).ToList();
         var drums = sources.Where(s => s.LooksLikeDrums).OrderByDescending(s => s.NoteCount).FirstOrDefault();
-        var highest = melodic.ElementAtOrDefault(0);
-        var next = melodic.Count > 2 ? melodic[1] : null;
-        var lowest = melodic.Count > 1 ? melodic[^1] : null;
+        var highest = melodic.FirstOrDefault(s => NamedLead(s.Name)) ?? melodic.ElementAtOrDefault(0);
+        var lowest = melodic.Count > 1 ? melodic.Last(s => s != highest) : null;
+        var next = melodic.FirstOrDefault(s => s != highest && s != lowest);
 
         // A single part that sits below C-3 is a bass line with nothing over it, not a lead.
         if (melodic.Count == 1 && melodic[0].AverageKey < LowestLeadKey)
@@ -228,6 +235,10 @@ public static class MidiImporter
             : new VoiceImport(next, VoiceRole.Melody);
         return [bass, middle, new(highest, VoiceRole.Melody)];
     }
+
+    private static bool NamedLead(string name) =>
+        name.Contains("lead", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("melod", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Every part a voice reads, for <see cref="BarsIn"/>.</summary>
     public static IEnumerable<MidiSource?> PartsOf(VoiceImport voice) =>
@@ -880,6 +891,12 @@ public static class MidiImporter
         // General MIDI plays a channel that never names a program as program 1, the grand piano;
         // a bass part keeps the bass, which suits it better than a piano would.
         int? program = voice.Source?.Program ?? (voice.Role == VoiceRole.Melody ? 0 : null);
+
+        // A bass line keeps a bass sound whatever its part was written for: strings or a left
+        // hand playing the bass are the bass here, and the bank's pad or piano would not carry it.
+        if (voice.Role is VoiceRole.Bass or VoiceRole.DrumsAndBass && program is { } written
+            && GmBank.KeyFor(written) is not ("Bass" or "SynthBass"))
+            program = AcousticBass;
         if (voice.Role is VoiceRole.Melody or VoiceRole.Bass or VoiceRole.DrumsAndBass
             && options.Sounds?.For(program) is { } sound)
         {

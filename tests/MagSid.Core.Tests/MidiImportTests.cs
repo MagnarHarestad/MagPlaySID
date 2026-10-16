@@ -694,6 +694,50 @@ public class MidiImportTests
     }
 
     [Fact]
+    public void A_bass_of_few_notes_still_goes_to_voice_1()
+    {
+        // Sixteen tune notes a bar against one bass note: under a fifth, but in the bass.
+        var smf = new Smf().Track("Tune");
+        for (int i = 0; i < 64; i++)
+            smf.Note(i * Tpq / 4, Tpq / 4, 72 + i % 5);
+        smf.Track("Bass");
+        for (int bar = 0; bar < 4; bar++)
+            smf.Note(bar * 4 * Tpq, 4 * Tpq, 36);
+
+        var voices = MidiImporter.SuggestVoices(Read(smf));
+
+        Assert.Equal((VoiceRole.Bass, "Bass"), (voices[0].Role, voices[0].Source!.Name));
+        Assert.Equal((VoiceRole.Melody, "Tune"), (voices[2].Role, voices[2].Source!.Name));
+    }
+
+    [Fact]
+    public void A_part_named_for_the_lead_is_the_lead_though_another_lies_higher()
+    {
+        var smf = new Smf().Track("Lead Guitar");
+        for (int i = 0; i < 16; i++)
+            smf.Note(i * Tpq, Tpq, 64 + i % 3);
+        smf.Track("Synth");
+        for (int i = 0; i < 16; i++)
+            smf.Note(i * Tpq, Tpq, 84);
+        smf.Track("Bass");
+        for (int i = 0; i < 16; i++)
+            smf.Note(i * Tpq, Tpq, 36);
+
+        var voices = MidiImporter.SuggestVoices(Read(smf));
+
+        Assert.Equal("Lead Guitar", voices[2].Source!.Name);
+        Assert.Equal("Bass", voices[0].Source!.Name);
+    }
+
+    [Fact]
+    public void A_bass_line_keeps_a_bass_sound_whatever_its_program()
+    {
+        var result = ImportWithProgram(48, VoiceRole.Bass, 0);     // String Ensemble 1
+
+        Assert.Equal(GmBank.BuiltIn.For(32)!.Instrument.Name, Assert.Single(result.Song.Instruments).Name);
+    }
+
+    [Fact]
     public void A_lone_tune_is_the_lead_on_voice_3()
     {
         var voices = MidiImporter.SuggestVoices(Read(new Smf().Track("Tune").Note(0, Tpq, 72).Note(Tpq, Tpq, 76)));
