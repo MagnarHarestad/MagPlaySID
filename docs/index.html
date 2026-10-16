@@ -15,7 +15,7 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagSID logo">
-    <h1>MagSID</h1>
+    <h1>MagSID Editor <span id="version">v1.4</span></h1>
     <p>A Windows tracker for Commodore 64 music. Write in a classic tracker grid or a DAW-style piano roll,
       hear it through reSID, and export a <code>.sid</code> that plays exactly the same on the real machine.</p>
     <div class="download">
@@ -134,6 +134,15 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagSID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagSID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagSID/issues">Report a problem</a></div></footer>
 <script>
+// The version under the logo follows the latest release; v1.4 stands until GitHub answers, or if it
+// does not.
+fetch('https://api.github.com/repos/MagnarHarestad/MagSID/releases/latest')
+  .then(response => response.ok ? response.json() : null)
+  .then(release => {
+    if (release && /^v\d/.test(release.tag_name)) document.getElementById('version').textContent = release.tag_name;
+  })
+  .catch(() => {});
+
 // GitHub serves a .s file as text, which a browser shows instead of saving; fetch it and save it
 // under its own name. If that fails the link still opens the text.
 document.querySelectorAll('a[data-file]').forEach(link => link.addEventListener('click', async event => {
