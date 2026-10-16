@@ -26,10 +26,14 @@ for technical advice and tools.
 >    WinForms layout (Dock, Anchor, flow and table panels), text boxes, list boxes, menus and popups.
 >    The arrange tools, the roll, REC/CLICK/PUNCH/PRE-ROLL, Cycle and the piano keys are wired as in the
 >    Windows editor, and the playheads follow playback.
-> 5. Signed releases.
+> 5. **Releases** - in place. A tag `xplatform-v0.2` makes `.github/workflows/release.yml` build the Mac
+>    app for Apple Silicon and Intel, Windows and Linux packages (one self-contained executable each)
+>    and SHA-256 checksums, and open a draft release with them to publish by hand. The Mac app is
+>    signed with a Developer ID and notarised when the repository has the secrets the workflow lists;
+>    until then it is signed ad hoc, and opens with right-click, **Open** the first time. Windows
+>    builds are not code-signed.
 >
-> GitHub Actions tests the engine on Windows, macOS and Linux and builds the Mac app on every push. The
-> app is not notarised: on first launch, right-click it and choose **Open**.
+> GitHub Actions tests the engine on Windows, macOS and Linux and builds the Mac app on every push.
 
 ## What this is
 

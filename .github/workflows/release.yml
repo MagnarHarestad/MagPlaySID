@@ -1,0 +1,192 @@
+name: release
+
+# A tag xplatform-v0.2 builds every package - the Mac app for Apple Silicon and Intel, Windows and
+# Linux - signs what there are keys for, and opens a DRAFT release with them, to be looked over and
+# published by hand. Run by hand from the Actions tab it builds the same packages as artifacts
+# only, with no release, to try the packaging out.
+#
+# Signing on the Mac uses these repository secrets when they are there, and ad hoc signing when
+# they are not (the app then opens with right-click, Open the first time):
+#   MACOS_CERTIFICATE_P12        a "Developer ID Application" certificate with its key, base64
+#   MACOS_CERTIFICATE_PASSWORD   the .p12's password
+#   APPLE_API_KEY_P8             an App Store Connect API key (.p8), base64 - for notarising
+#   APPLE_API_KEY_ID             its key id
+#   APPLE_API_ISSUER             its issuer id
+on:
+  push:
+    tags: ['xplatform-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp on a trial build (no release is made)
+        default: 0.0-trial
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        env:
+          TRIAL: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#xplatform-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$TRIAL" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Test the engine
+        run: |
+          for project in tests/MagSid.Sid.Tests tests/MagSid.Core.Tests tests/MagSid.Assembler.Tests tests/MagSid.Playback.Tests; do
+            dotnet test "$project" -c Release --logger "console;verbosity=minimal" || exit 1
+          done
+
+  macos:
+    needs: [version, test]
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    env:
+      HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      HAS_API_KEY: ${{ secrets.APPLE_API_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Put the Developer ID certificate in a keychain of its own
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          if [ -z "$identity" ]; then
+            echo "The certificate holds no Developer ID Application identity." >&2
+            exit 1
+          fi
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+      - name: Put the notarisation key in place
+        if: env.HAS_CERTIFICATE == 'true' && env.HAS_API_KEY == 'true'
+        env:
+          API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          echo "$API_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          {
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/notary.p8"
+            echo "APPLE_API_KEY_ID=$API_KEY_ID"
+            echo "APPLE_API_ISSUER=$API_ISSUER"
+          } >> "$GITHUB_ENV"
+      - name: Package MagSID.app
+        run: bash packaging/macos/package.sh ${{ matrix.rid }} ${{ needs.version.outputs.version }}
+      - name: Remove the keychain and the key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/MagSID-*.zip
+          if-no-files-found: error
+
+  portable:
+    needs: [version, test]
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Package
+        shell: bash
+        run: bash packaging/portable/package.sh ${{ matrix.rid }} ${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: |
+            out/${{ matrix.rid }}/MagSID-*.zip
+            out/${{ matrix.rid }}/MagSID-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, macos, portable]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SIGNED: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      NOTARISED: ${{ secrets.MACOS_CERTIFICATE_P12 != '' && secrets.APPLE_API_KEY_P8 != '' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: (cd dist && sha256sum MagSID-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Open a draft release
+        run: |
+          if [ "$NOTARISED" = true ]; then
+            mac="Signed with a Developer ID and notarised by Apple: it opens with a double-click."
+          elif [ "$SIGNED" = true ]; then
+            mac="Signed with a Developer ID but not notarised: the first time, right-click the app and choose **Open**."
+          else
+            mac="Not signed with a Developer ID: the first time, right-click the app and choose **Open**, then **Open** again."
+          fi
+          cat > notes.md <<NOTES
+          MagSID Editor $VERSION for macOS, Windows and Linux - the Avalonia port.
+
+          | Download | For |
+          |---|---|
+          | \`MagSID-$VERSION-macos-arm64.zip\` | Macs with Apple Silicon (M1 and later) |
+          | \`MagSID-$VERSION-macos-x64.zip\` | Macs with an Intel processor |
+          | \`MagSID-$VERSION-windows-x64.zip\` | Windows 10 and 11 |
+          | \`MagSID-$VERSION-linux-x64.tar.gz\` | Linux on x64 |
+
+          Nothing to install: .NET is inside each package.
+
+          **macOS:** unzip and move MagSID to Applications. $mac
+
+          **Windows:** unzip and run MagSID.exe. It is not code-signed, so SmartScreen may ask the first time: **More info**, then **Run anyway**.
+
+          **Linux:** unpack and run \`./MagSID\`; README.txt says how to add it to the menu.
+
+          SHA-256 checksums are in SHA256SUMS.txt.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --prerelease \
+            --title "MagSID Xplatform $VERSION" --notes-file notes.md

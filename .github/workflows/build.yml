@@ -68,4 +68,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MagSID-macos-${{ matrix.rid }}
-          path: out/${{ matrix.rid }}/MagSID-macos-*.zip
+          path: out/${{ matrix.rid }}/MagSID-*.zip
