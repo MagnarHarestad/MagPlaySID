@@ -8,6 +8,10 @@ namespace MagSid.Midi;
 /// macOS: CoreMIDI, called directly. One client and one input port for the life of the program;
 /// opening a keyboard connects the port to that source. Packets arrive on CoreMIDI's own thread
 /// as raw bytes and go through <see cref="MidiStreamParser"/>.
+///
+/// The client is made on a thread of its own that runs a CFRunLoop: CoreMIDI tells a client about
+/// sources coming and going through the run loop it was made on, and without one the list of
+/// sources never changes - a keyboard plugged in later would never appear.
 /// </summary>
 [SupportedOSPlatform("macos")]
 internal sealed unsafe class CoreMidiBackend : IMidiBackend
@@ -18,26 +22,59 @@ internal sealed unsafe class CoreMidiBackend : IMidiBackend
 
     private static MidiStreamParser? _parser;
 
-    private readonly uint _client;
-    private readonly uint _port;
+    private uint _client;
+    private uint _port;
     private readonly IntPtr _displayName;
     private uint _connected;
 
     public CoreMidiBackend()
     {
         _displayName = *(IntPtr*)NativeLibrary.GetExport(NativeLibrary.Load(CoreMidi), "kMIDIPropertyDisplayName");
+        IntPtr defaultMode = *(IntPtr*)NativeLibrary.GetExport(NativeLibrary.Load(CoreFoundation), "kCFRunLoopDefaultMode");
 
-        IntPtr name = CreateString("MagSID");
-        try
+        int status = 0;
+        using var ready = new ManualResetEventSlim();
+        var thread = new Thread(() =>
         {
-            Check(MIDIClientCreate(name, IntPtr.Zero, IntPtr.Zero, out _client), "MIDIClientCreate");
-            var read = (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnPackets;
-            Check(MIDIInputPortCreate(_client, name, read, IntPtr.Zero, out _port), "MIDIInputPortCreate");
-        }
-        finally
+            IntPtr name = CreateString("MagSID");
+            try
+            {
+                var notify = (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, void>)&OnNotification;
+                status = MIDIClientCreate(name, notify, IntPtr.Zero, out _client);
+                if (status == 0)
+                {
+                    var read = (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnPackets;
+                    status = MIDIInputPortCreate(_client, name, read, IntPtr.Zero, out _port);
+                }
+            }
+            finally
+            {
+                CFRelease(name);
+                ready.Set();
+            }
+
+            // A second at a time; a run loop with nothing in it returns at once, so then it rests.
+            while (status == 0)
+            {
+                if (CFRunLoopRunInMode(defaultMode, 1.0, 0) == RunLoopFinished)
+                    Thread.Sleep(100);
+            }
+        })
         {
-            CFRelease(name);
-        }
+            IsBackground = true,
+            Name = "CoreMIDI",
+        };
+        thread.Start();
+        ready.Wait();
+        Check(status, "MIDIClientCreate");
+    }
+
+    private const int RunLoopFinished = 1;
+
+    /// <summary>Setup changes; the client only needs them delivered for its list to stay current.</summary>
+    [UnmanagedCallersOnly]
+    private static void OnNotification(IntPtr message, IntPtr refCon)
+    {
     }
 
     public IReadOnlyList<string> Sources()
@@ -218,4 +255,7 @@ internal sealed unsafe class CoreMidiBackend : IMidiBackend
 
     [DllImport(CoreFoundation)]
     private static extern void CFRelease(IntPtr value);
+
+    [DllImport(CoreFoundation)]
+    private static extern int CFRunLoopRunInMode(IntPtr mode, double seconds, byte returnAfterSourceHandled);
 }
