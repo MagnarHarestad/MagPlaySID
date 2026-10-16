@@ -1,11 +1,11 @@
 # MIDI files for trying Import MIDI
 
-Twenty-one well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Twenty well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and every file comes from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The files are Mutopia's own MIDI renderings, unchanged apart from their names.
 
-Seventeen are dedicated to the public domain. Four are under Creative Commons ShareAlike licences, which ask for
+Sixteen are dedicated to the public domain. Four are under Creative Commons ShareAlike licences, which ask for
 credit and that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -18,7 +18,6 @@ Every file is imported, exported and played on the emulated 6502 by
 | `rondo-alla-turca.mid` | Sonate Opus KV 331 - Rondo Alla Turca | W. A. Mozart (1756–1791) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=108) | Public Domain |
 | `eine-kleine-nachtmusik.mid` | Eine kleine Nachtmusik (1st movement) | W. A. Mozart (1756–1791) | [for String Quartet: Violins, Viola, Cello or Double Bass](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=900) | Public Domain |
 | `the-entertainer.mid` | The Entertainer | S. Joplin (1868–1917) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=263) | Public Domain |
-| `maple-leaf-rag.mid` | Maple Leaf Rag | S. Joplin (1868–1917) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=23) | Public Domain |
 | `hall-of-the-mountain-king.mid` | In the Hall of the Mountain King | E. Grieg (1843–1907) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1888) | Public Domain |
 | `toccata-and-fugue-in-d-minor.mid` | Toccata and Fugue in D Minor | J. S. Bach (1685–1750) | [for Organ](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1780) | Public Domain |
 | `prelude-in-c-wtc1.mid` | Das Wohltemperierte Clavier I, Praeludium I | J. S. Bach (1685–1750) | [for Harpsichord, Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=5) | Public Domain |
