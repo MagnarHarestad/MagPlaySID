@@ -282,7 +282,10 @@ public sealed class MidiImportForm : Form
         {
             bool kit = Role(v) == VoiceRole.DrumsAndBass;
             _drums[v].Enabled = kit;
-            _hiHat[v].Enabled = kit;
+            // Dimmed by hand rather than disabled: Windows draws a disabled check box's text in
+            // its own grey, which on this dark form can hardly be read.
+            _hiHat[v].AutoCheck = _hiHat[v].TabStop = kit;
+            _hiHat[v].ForeColor = kit ? EditorPalette.Body : EditorPalette.Subtitle;
             bool chords = Role(v) == VoiceRole.Chords;
             string sound = chords
                 ? _instrument[v] is { } loaded ? (loaded.Name.Length > 0 ? loaded.Name : "(loaded)") : "pulse (default)"
