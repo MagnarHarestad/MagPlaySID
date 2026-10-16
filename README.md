@@ -53,6 +53,9 @@ Settings — MIDI device, knob bindings, view preferences — are kept in
 - **Menu → Import MIDI** makes a new song from a `.mid` file: bass and drums on channel 1, the
   chords as arpeggio instruments on channel 2, the lead on channel 3, and each part's General MIDI
   sound mapped to an instrument from the demo songs. `midifiles/` has 25 free tunes to try it on.
+- The **sound bank** holds 25 sounds from the demo songs - instruments, drums and arpeggios at
+  three speeds. In the DAW, **SOUNDBANK** on the instrument page shows them as cards: click one to
+  hear it, double-click or **+** to add it. In Retro it is under the instrument list's **▾** menu.
 
 **Menu → About** lists every key and control, view by view.
 
