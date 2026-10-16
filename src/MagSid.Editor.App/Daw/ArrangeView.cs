@@ -129,6 +129,7 @@ internal sealed class ArrangeView : Control
             _dragFrom = null;
             _dropAt = null;
             _splitAt = null;
+            SetGluePreview(null);
             Invalidate();
         }
     }
@@ -149,6 +150,13 @@ internal sealed class ArrangeView : Control
     /// <summary>Where the split tool would cut, under the mouse: the x of the row edge.</summary>
     private (int Channel, int X)? _splitAt;
 
+    /// <summary>The clips Glue would join if the mouse were clicked here - shown pulsing slowly,
+    /// so the result is seen before it is made. Fits says whether they make one pattern.</summary>
+    private (int Channel, int From, int To, bool Fits)? _gluePreview;
+
+    /// <summary>Drives the preview's pulse; runs only while there is one.</summary>
+    private readonly System.Windows.Forms.Timer _pulse = new() { Interval = 40 };
+
     /// <summary>A short message for the status bar - mostly why an edit was not made.</summary>
     public event Action<string>? Notice;
 
@@ -168,6 +176,11 @@ internal sealed class ArrangeView : Control
 
         _scroll.Scroll += (_, _) => Invalidate();
         Controls.Add(_scroll);
+        _pulse.Tick += (_, _) =>
+        {
+            if (_gluePreview is { } glue)
+                Invalidate(new Rectangle(GutterWidth, LaneTop(glue.Channel), Width - GutterWidth, LaneHeight));
+        };
 
         _restartEntry.KeyDown += (_, e) =>
         {
@@ -782,6 +795,16 @@ internal sealed class ArrangeView : Control
             return;
         }
 
+        // The size is only worked out again when the mouse moves onto another run of clips.
+        if (_tool == RollTool.Glue)
+        {
+            var range = ClipAt(e.Location) is { } over ? GlueRange(over) : null;
+            if (range is null)
+                SetGluePreview(null);
+            else if (_gluePreview is not { } shown || (shown.Channel, shown.From, shown.To) != range.Value)
+                SetGluePreview((range.Value.Channel, range.Value.From, range.Value.To, GlueBytes(range.Value) <= 255));
+        }
+
         if (_tool == RollTool.Split)
         {
             (int Channel, int X)? cut = ClipAt(e.Location) is { } clip && SplitPoint(clip, e.X) is { } row
@@ -815,6 +838,7 @@ internal sealed class ArrangeView : Control
         _hovered = (-1, -1);
         _hoveredRestart = -1;
         _splitAt = null;
+        SetGluePreview(null);
         Invalidate();
         base.OnMouseLeave(e);
     }
@@ -875,7 +899,10 @@ internal sealed class ArrangeView : Control
 
         if (ClipAt(e.Location) is { } at)
         {
-            if (e.Button == MouseButtons.Left && UseTool(at, e.X))
+            // Shift+click marks a run with Glue in hand too, so it is marked and joined without
+            // going back to the selection tool.
+            bool marking = ModifierKeys.HasFlag(Keys.Shift) && _tool is RollTool.Select or RollTool.Glue;
+            if (e.Button == MouseButtons.Left && !marking && UseTool(at, e.X))
             {
                 base.OnMouseDown(e);
                 return;
@@ -887,6 +914,7 @@ internal sealed class ArrangeView : Control
                 && at.Channel == _selectedChannel && !_onRestart && _selectedIndex >= 0)
             {
                 _markEnd = at.Index == _selectedIndex ? -1 : at.Index;
+                SetGluePreview(null);
                 Invalidate();
                 base.OnMouseDown(e);
                 return;
@@ -896,7 +924,7 @@ internal sealed class ArrangeView : Control
             _selectedIndex = at.Index;
             _onRestart = false;
             _markEnd = -1;
-            if (e.Button == MouseButtons.Left)
+            if (e.Button == MouseButtons.Left && _tool == RollTool.Select)
             {
                 _dragFrom = at;
                 _dragPress = e.Location;
@@ -1036,31 +1064,19 @@ internal sealed class ArrangeView : Control
     {
         var song = _song!;
         var order = song.ChannelOrders[at.Channel];
-        int from = at.Index, to = at.Index + 1;
-        if (_markEnd >= 0 && IsMarked(at.Channel, at.Index))
-            (from, to) = (Math.Min(_selectedIndex, _markEnd), Math.Max(_selectedIndex, _markEnd));
-
-        if (to >= order.Tokens.Count)
+        if (GlueRange(at) is not { } range)
         {
             Notice?.Invoke("Glue joins a clip to the one after it - this is the lane's last.");
             return;
         }
 
+        int from = range.From, to = range.To;
         var patterns = Enumerable.Range(from, to - from + 1).Select(i => PatternAt((at.Channel, i))).ToList();
         if (patterns.Any(p => p is null))
             return;
 
         var rows = patterns.SelectMany(p => p!.Rows).ToList();
-        int bytes;
-        try
-        {
-            bytes = SongSizeCalculator.EncodedPatternLength(rows);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            bytes = int.MaxValue;
-        }
-
+        int bytes = GlueBytes(range);
         if (bytes > 255)
         {
             Notice?.Invoke(bytes == int.MaxValue
@@ -1097,11 +1113,53 @@ internal sealed class ArrangeView : Control
         _selectedIndex = from;
         _onRestart = false;
         _markEnd = -1;
+        SetGluePreview(null);
         Edited();
         if (own)
             PatternLengthChanged?.Invoke();
         AnnounceSelection();
         Notice?.Invoke($"{to - from + 1} clips glued into PAT{glued.Number:00}.");
+    }
+
+    /// <summary>The clips a Glue click on <paramref name="at"/> joins: the run marked with
+    /// Shift+click when the click is on it, otherwise the clip and the one after it - or null for
+    /// a lane's last clip, which has nothing to join.</summary>
+    private (int Channel, int From, int To)? GlueRange((int Channel, int Index) at)
+    {
+        int from = at.Index, to = at.Index + 1;
+        if (_markEnd >= 0 && IsMarked(at.Channel, at.Index))
+            (from, to) = (Math.Min(_selectedIndex, _markEnd), Math.Max(_selectedIndex, _markEnd));
+
+        return to < _song!.ChannelOrders[at.Channel].Tokens.Count ? (at.Channel, from, to) : null;
+    }
+
+    /// <summary>The note data the joined pattern would take, or int.MaxValue when the rows cannot
+    /// be one pattern at all.</summary>
+    private int GlueBytes((int Channel, int From, int To) range)
+    {
+        var patterns = Enumerable.Range(range.From, range.To - range.From + 1)
+            .Select(i => PatternAt((range.Channel, i))).ToList();
+        if (patterns.Any(p => p is null))
+            return int.MaxValue;
+
+        try
+        {
+            return SongSizeCalculator.EncodedPatternLength(patterns.SelectMany(p => p!.Rows).ToList());
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return int.MaxValue;
+        }
+    }
+
+    private void SetGluePreview((int Channel, int From, int To, bool Fits)? preview)
+    {
+        if (preview == _gluePreview)
+            return;
+
+        _gluePreview = preview;
+        _pulse.Enabled = preview is not null;
+        Invalidate();
     }
 
     /// <summary>Where a dragged clip would land: the lane under the mouse and the place in its
@@ -1158,6 +1216,14 @@ internal sealed class ArrangeView : Control
         _markEnd = -1;
         Edited();
         AnnounceSelection();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _pulse.Dispose();
+
+        base.Dispose(disposing);
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -1647,12 +1713,51 @@ internal sealed class ArrangeView : Control
             g.FillPolygon(bar, new Point[] { new(x - 5, top + 2), new(x + 6, top + 2), new(x, top + 8) });
         }
 
+        if (_tool == RollTool.Glue && _gluePreview is { } glue)
+            DrawGluePreview(g, song, glue);
+
         if (_tool == RollTool.Split && _splitAt is { } cut)
         {
             int top = LaneTop(cut.Channel);
             using var line = new Pen(Color.White, 1.5f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
             g.DrawLine(line, cut.X, top + 4, cut.X, top + LaneHeight - 6);
         }
+    }
+
+    /// <summary>
+    /// The clips Glue would join, breathing in and out about once a second and a half: each lit
+    /// softly, and one outline round all of them - the single clip they would become. In red when
+    /// the join would not fit in one pattern, so a click that would be refused looks it.
+    /// </summary>
+    private void DrawGluePreview(Graphics g, Song song, (int Channel, int From, int To, bool Fits) glue)
+    {
+        var order = song.ChannelOrders[glue.Channel];
+        if (glue.To >= order.Tokens.Count)
+            return;
+
+        double phase = (Environment.TickCount64 % 1500) / 1500.0;
+        double breath = 0.5 - (0.5 * Math.Cos(phase * 2 * Math.PI));
+        var accent = glue.Fits ? DawPalette.Oscillator : Color.FromArgb(0xF0, 0x4A, 0x6E);
+        int top = LaneTop(glue.Channel) + 6, height = LaneHeight - 14;
+
+        int left = GutterWidth + OffsetOf(order, glue.From) - _scroll.Value;
+        int right = left;
+        using (var wash = new SolidBrush(DawPalette.WithAlpha(accent, 22 + (int)(58 * breath))))
+        {
+            for (int i = glue.From; i <= glue.To; i++)
+            {
+                if (order.Tokens[i] is not PatternRefToken token)
+                    continue;
+
+                int start = GutterWidth + OffsetOf(order, i) - _scroll.Value;
+                int width = Math.Max(PixelsPerRow * 2, RowsOf(token.PatternNumber) * PixelsPerRow);
+                g.FillRectangle(wash, start, top, width - 2, height);
+                right = start + width - 2;
+            }
+        }
+
+        using var outline = new Pen(DawPalette.WithAlpha(accent, 120 + (int)(120 * breath)), 2f);
+        g.DrawRectangle(outline, left - 1, top - 1, right - left + 2, height + 2);
     }
 
     /// <summary>Each lane's playhead: the red of the piano roll's, across that lane only.</summary>
