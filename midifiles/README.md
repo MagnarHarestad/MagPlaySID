@@ -1,11 +1,11 @@
 # MIDI files for trying Import MIDI
 
-Twenty-two well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Twenty-one well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and every file comes from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The files are Mutopia's own MIDI renderings, unchanged apart from their names.
 
-Eighteen are dedicated to the public domain. Four are under Creative Commons ShareAlike licences, which ask for
+Seventeen are dedicated to the public domain. Four are under Creative Commons ShareAlike licences, which ask for
 credit and that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -22,7 +22,6 @@ Every file is imported, exported and played on the emulated 6502 by
 | `hall-of-the-mountain-king.mid` | In the Hall of the Mountain King | E. Grieg (1843–1907) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1888) | Public Domain |
 | `toccata-and-fugue-in-d-minor.mid` | Toccata and Fugue in D Minor | J. S. Bach (1685–1750) | [for Organ](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1780) | Public Domain |
 | `prelude-in-c-wtc1.mid` | Das Wohltemperierte Clavier I, Praeludium I | J. S. Bach (1685–1750) | [for Harpsichord, Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=5) | Public Domain |
-| `clair-de-lune.mid` | Suite Bergamasque: Clair de Lune | C. Debussy (1862–1918) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1778) | Public Domain |
 | `premiere-arabesque.mid` | Première Arabesque | C. Debussy (1862–1918) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1777) | Public Domain |
 | `minute-waltz.mid` | Valse Op. 64, No. 1 ('Minute Waltz') | F. F. Chopin (1810–1849) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=483) | Public Domain |
 | `ode-to-joy.mid` | Ode to Joy | L. V. Beethoven (1770–1827) | [for Voice (SATB)](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=528) | Public Domain |
