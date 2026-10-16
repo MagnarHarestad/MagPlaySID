@@ -21,3 +21,4 @@ desktop.ini
 # Publish output from a build to an explicit folder, used when the running editor holds the
 # default one.
 publish-latest/
+/out/

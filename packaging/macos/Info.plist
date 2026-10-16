@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>MagSID</string>
+  <key>CFBundleDisplayName</key>
+  <string>MagSID</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.magnarharestad.magsid</string>
+  <key>CFBundleExecutable</key>
+  <string>MagSID</string>
+  <key>CFBundleIconFile</key>
+  <string>MagSID.icns</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>VERSION</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.music</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>© 2026 Magnar Harestad · Censor Design. GPL v2 or later.</string>
+</dict>
+</plist>

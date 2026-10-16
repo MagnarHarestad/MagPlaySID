@@ -26,8 +26,10 @@ jobs:
           for project in tests/MagSid.Sid.Tests tests/MagSid.Core.Tests tests/MagSid.Assembler.Tests tests/MagSid.Playback.Tests; do
             dotnet test "$project" -c Release --logger "console;verbosity=minimal" || exit 1
           done
-      - name: Build the terminal SID player
-        run: dotnet build tools/MagSid.SidPlay -c Release
+      - name: Build the terminal SID player and the Avalonia app
+        run: |
+          dotnet build tools/MagSid.SidPlay -c Release
+          dotnet build src/MagSid.Editor.Avalonia -c Release
       - name: Build the Windows editor
         if: runner.os == 'Windows'
         run: dotnet build src/MagSid.Editor.App -c Release
@@ -49,3 +51,21 @@ jobs:
         with:
           name: magsid-sidplay-${{ matrix.rid }}
           path: out/${{ matrix.rid }}
+
+  macos-app:
+    needs: test
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Package MagSID.app
+        run: bash packaging/macos/package.sh ${{ matrix.rid }} 0.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MagSID-macos-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/MagSID-macos-*.zip

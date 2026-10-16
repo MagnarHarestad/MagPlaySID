@@ -7,6 +7,20 @@ for technical advice and tools.
 
 **Website and download: [magnarharestad.github.io/MagSID](https://magnarharestad.github.io/MagSID/)**
 
+> **MagSID Xplatform.** This repository is the port to macOS and Linux, in [Avalonia](https://avaloniaui.net).
+> Work in progress, done in steps that each run:
+>
+> 1. **The engine on any system** - done. The playback engines play through `IAudioOutput`: waveOut in
+>    the Windows editor, PortAudio (Core Audio, ALSA) everywhere else (`src/MagSid.Audio.PortAudio`).
+>    `tools/MagSid.SidPlay` plays a `.sid` from a terminal. MP3/FLAC export is Windows-only for now; WAV
+>    works everywhere.
+> 2. **The SID player as an Avalonia app** - done: `src/MagSid.Editor.Avalonia`, packaged as
+>    `MagSID.app` for Apple Silicon and Intel by `packaging/macos/package.sh`.
+> 3. The Retro view. 4. The DAW view. 5. Signed releases.
+>
+> GitHub Actions tests the engine on Windows, macOS and Linux and builds the Mac app on every push. The
+> app is not notarised: on first launch, right-click it and choose **Open**.
+
 ## What this is
 
 A tracker that edits songs as plain text and exports them as `.sid` files, reproducing the C64 player
