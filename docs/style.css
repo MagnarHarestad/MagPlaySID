@@ -15,7 +15,7 @@ header nav a:hover { color:#fff; }
 .hero { text-align:center; padding:64px 0 28px; }
 .hero > img { width:128px; height:128px; image-rendering:pixelated; border-radius:10px; }
 .hero h1 { font-size:40px; margin:18px 0 8px; color:#fff; }
-.hero p.released { font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); margin:-4px auto 16px; }
+.hero p.released { font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); margin:-4px auto 32px; }
 .hero p.released time { color:var(--accent); font-family:Consolas, "SFMono-Regular", Menlo, monospace; letter-spacing:.02em; }
 .hero p { color:var(--dim); font-size:19px; max-width:680px; margin:0 auto; }
 .download { display:flex; flex-direction:column; align-items:center; gap:10px; margin:28px 0 8px; }
