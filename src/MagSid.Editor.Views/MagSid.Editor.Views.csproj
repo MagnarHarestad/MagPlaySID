@@ -33,6 +33,7 @@
     <Compile Include="..\MagSid.Editor.App\PianoKeyMap.cs" Link="Linked\PianoKeyMap.cs" />
     <Compile Include="..\MagSid.Editor.App\Controls\TrackerGridControl.cs" Link="Linked\Controls\TrackerGridControl.cs" />
     <Compile Include="..\MagSid.Editor.App\Daw\*.cs" Link="Linked\Daw\%(Filename)%(Extension)" />
+    <Compile Include="..\MagSid.Editor.App\Midi\MidiKnobBindings.cs" Link="Linked\Midi\MidiKnobBindings.cs" />
   </ItemGroup>
 
 </Project>

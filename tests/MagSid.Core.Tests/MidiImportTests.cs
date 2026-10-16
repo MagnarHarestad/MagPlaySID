@@ -683,6 +683,24 @@ public class MidiImportTests
     }
 
     [Fact]
+    public void A_suggested_source_is_found_in_a_fresh_list_of_sources()
+    {
+        // The import dialogs list Sources() and look the suggestions up in it.
+        var midi = ChordsAndTune();
+        var voices = MidiImporter.SuggestVoices(midi);
+        var sources = midi.Sources();
+
+        foreach (var voice in voices)
+        {
+            int index = midi.IndexOf(voice.Source);
+            Assert.True(index >= 0);
+            Assert.Equal((voice.Source!.Track, voice.Source.Channel), (sources[index].Track, sources[index].Channel));
+        }
+
+        Assert.Equal(-1, midi.IndexOf(null));
+    }
+
+    [Fact]
     public void Drums_and_a_lone_bass_line_go_to_voice_1()
     {
         var voices = MidiImporter.SuggestVoices(DraxBar());

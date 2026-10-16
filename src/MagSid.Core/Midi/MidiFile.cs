@@ -30,6 +30,14 @@ public sealed record MidiSong(
                 .OrderBy(group => group.Key)
                 .Select(group => MidiSource.From(track, group.Key, group.ToList())))
             .ToList();
+
+    /// <summary>
+    /// Where a source stands in <see cref="Sources"/>, or -1 for none. By track and channel, not by
+    /// equality: each call to Sources builds new note lists, so a source from one call never equals
+    /// its twin from another - and a list found nothing, leaving every suggested voice silent.
+    /// </summary>
+    public int IndexOf(MidiSource? source) =>
+        source is null ? -1 : Sources().ToList().FindIndex(s => s.Track == source.Track && s.Channel == source.Channel);
 }
 
 /// <summary>One channel of one track, summarised so it can be recognised in a list.</summary>

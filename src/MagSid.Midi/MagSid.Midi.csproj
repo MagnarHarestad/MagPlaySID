@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- MIDI input on every system, with no native package to ship: each backend calls what the
+       system already has - WinMM on Windows, CoreMIDI on macOS, the ALSA sequencer on Linux. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MagSid.Midi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
+  </ItemGroup>
+
+</Project>

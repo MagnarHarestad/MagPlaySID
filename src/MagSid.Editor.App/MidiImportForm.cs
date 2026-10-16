@@ -11,12 +11,6 @@ namespace MagSid.Editor.App;
 /// </summary>
 public sealed class MidiImportForm : Form
 {
-    private static readonly string[] GmFamilies =
-    [
-        "Piano", "Chromatic perc.", "Organ", "Guitar", "Bass", "Strings", "Ensemble", "Brass",
-        "Reed", "Pipe", "Synth lead", "Synth pad", "Synth FX", "Ethnic", "Percussive", "Sound FX",
-    ];
-
     private readonly MidiSong _midi;
     private readonly IReadOnlyList<MidiSource> _sources;
     private readonly ComboBox[] _source = new ComboBox[Song.ChannelCount];
@@ -26,7 +20,7 @@ public sealed class MidiImportForm : Form
     private readonly CheckBox[] _hiHat = new CheckBox[Song.ChannelCount];
     private readonly Label[] _instrumentName = new Label[Song.ChannelCount];
     private readonly Instrument?[] _instrument = new Instrument?[Song.ChannelCount];
-    private readonly ComboBox _grid = Combo("16th notes - 4 rows a beat", "32nd notes - 8 rows a beat");
+    private readonly ComboBox _grid = Combo(MidiImportText.Grids);
     private readonly NumericUpDown _speed = Number(0, 255);
     private readonly Label _speedBpm = new() { AutoSize = true, Margin = new Padding(6, 8, 18, 3), ForeColor = EditorPalette.Subtitle };
     private readonly NumericUpDown _fromBar = Number(1, 1);
@@ -65,27 +59,14 @@ public sealed class MidiImportForm : Form
         ForeColor = EditorPalette.Body;
 
         var root = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1 };
-        root.Controls.Add(Heading(
-            $"{fileName}  -  {midi.Bpm:0.#} BPM, {midi.BeatsPerBar}/{midi.BeatUnit}, " +
-            $"{midi.Tracks.Count} track{(midi.Tracks.Count == 1 ? "" : "s")}"));
+        root.Controls.Add(Heading(MidiImportText.Heading(midi, fileName)));
         root.Controls.Add(BuildSourceList());
         root.Controls.Add(Heading("The three SID voices"));
         root.Controls.Add(BuildVoices());
         root.Controls.Add(Heading("Timing"));
         root.Controls.Add(BuildTiming());
         root.Controls.Add(_report);
-        root.Controls.Add(Hint(
-            "Each voice plays one note at a time: Melody keeps the highest note of a chord, Bass the " +
-            "lowest. Drums + bass puts the rhythm section on one voice the C64 way - kick and snare " +
-            "from the drum part, the bass line between them, the kick settling on the bass note. " +
-            "Notes snap to the grid, and a bar that repeats is stored once. With GM sound bank on, " +
-            "each part's General MIDI sound becomes a demo-song instrument - a piano Lead2, a synth " +
-            "lead Lightforce's Lead1 - replaceable by files of your own in " + EditorSettings.BankDirectory +
-            ". Load your own .json " +
-            "instruments here (for Drums + bass, the bass; for Chords, the sound every chord is " +
-            "played on), pick one from the Soundbank, or edit them afterwards. Chords reads the chord of " +
-            "each bar; an inversion is the same chord, so C-E-G and E-G-C share one instrument, a chord " +
-            "has at most 4 notes, and chords beyond the 16 instruments are picked note by note in the pattern."));
+        root.Controls.Add(Hint(MidiImportText.Hint(EditorSettings.BankDirectory)));
         root.Controls.Add(BuildButtons());
         Controls.Add(root);
 
@@ -128,8 +109,8 @@ public sealed class MidiImportForm : Form
 
         foreach (var source in _sources)
         {
-            grid.Rows.Add(Describe(source), source.Name, Sound(source), source.NoteCount,
-                $"{KeyName(source.LowestKey)} - {KeyName(source.HighestKey)}", source.MostAtOnce);
+            grid.Rows.Add(MidiImportText.Source(source), source.Name, MidiImportText.Sound(source), source.NoteCount,
+                MidiImportText.Range(source), source.MostAtOnce);
         }
 
         return grid;
@@ -138,7 +119,7 @@ public sealed class MidiImportForm : Form
     private Control BuildVoices()
     {
         var table = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 8 };
-        string[] sources = ["(silent)", .. _sources.Select(s => $"{Describe(s)}  {s.Name}".TrimEnd())];
+        string[] sources = ["(silent)", .. _sources.Select(s => $"{MidiImportText.Source(s)}  {s.Name}".TrimEnd())];
         string[] drumSources = ["(no drums)", .. sources[1..]];
 
         for (int voice = 0; voice < Song.ChannelCount; voice++)
@@ -146,13 +127,13 @@ public sealed class MidiImportForm : Form
             int v = voice;
             _source[v] = Combo(sources);
             _source[v].Width = 220;
-            _role[v] = Combo("Melody - highest note", "Bass - lowest note", "Drums + bass", "Chords - arpeggios");
+            _role[v] = Combo(MidiImportText.Roles);
             _role[v].Width = 160;
             _drums[v] = Combo(drumSources);
             _drums[v].Width = 190;
             _drums[v].SelectedIndex = 0;
             _hiHat[v] = new CheckBox { Text = "Hi-hat", AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
-            _octave[v] = Combo("-3 oct", "-2 oct", "-1 oct", "0 oct", "+1 oct", "+2 oct", "+3 oct");
+            _octave[v] = Combo(MidiImportText.Octaves);
             _octave[v].Width = 70;
             _octave[v].SelectedIndex = 3;
             _instrumentName[v] = new Label { AutoSize = true, Margin = new Padding(8, 8, 3, 3), MinimumSize = new Size(110, 0) };
@@ -231,7 +212,7 @@ public sealed class MidiImportForm : Form
     /// boxes.</summary>
     private void ChooseDefaults()
     {
-        int Index(MidiSource? s) => s is null ? 0 : _sources.ToList().IndexOf(s) + 1;
+        int Index(MidiSource? s) => _midi.IndexOf(s) + 1;
 
         var suggested = MidiImporter.SuggestVoices(_midi);
         for (int v = 0; v < Song.ChannelCount; v++)
@@ -294,11 +275,7 @@ public sealed class MidiImportForm : Form
             // its own grey, which on this dark form can hardly be read.
             _hiHat[v].AutoCheck = _hiHat[v].TabStop = kit;
             _hiHat[v].ForeColor = kit ? EditorPalette.Body : EditorPalette.Subtitle;
-            bool chords = Role(v) == VoiceRole.Chords;
-            string sound = chords
-                ? _instrument[v] is { } loaded ? (loaded.Name.Length > 0 ? loaded.Name : "(loaded)") : "pulse (default)"
-                : MidiImporter.SoundFor(VoiceOf(v), v, Options([])).Description;
-            _instrumentName[v].Text = !VoiceOf(v).Plays ? "" : kit ? $"Kit + {sound}" : chords ? $"Chords on {sound}" : sound;
+            _instrumentName[v].Text = MidiImportText.VoiceSound(VoiceOf(v), v, _instrument[v]?.Name, Options([]));
         }
 
         _speedBpm.Text = $"= {MidiImporter.SongBpm((int)_speed.Value, RowsPerBeat):0.#} BPM";
@@ -306,7 +283,7 @@ public sealed class MidiImportForm : Form
         try
         {
             Result = MidiImporter.Import(_midi, Options(Enumerable.Range(0, Song.ChannelCount).Select(VoiceOf).ToList()));
-            _report.Text = Describe(Result.Report);
+            _report.Text = MidiImportText.Report(Result.Report, _chordGateOffs.Checked);
             _report.ForeColor = EditorPalette.Body;
             _import.Enabled = true;
         }
@@ -330,47 +307,6 @@ public sealed class MidiImportForm : Form
         3 => VoiceRole.Chords,
         _ => VoiceRole.Melody,
     };
-
-    private string Describe(MidiImportReport report)
-    {
-        var lines = new List<string>
-        {
-            $"{report.Bars} bars in {report.Patterns} patterns of {report.BarsPerPattern} bar{(report.BarsPerPattern == 1 ? "" : "s")} " +
-            $"({report.RowsPerBar * report.BarsPerPattern} rows) - {report.TotalBytes} bytes with the player.",
-            $"{report.NotesPlaced} notes placed.",
-        };
-
-        var bent = new List<string>();
-        if (report.NotesDropped > 0)
-            bent.Add($"{report.NotesDropped} dropped where a voice had more than one note at once");
-        if (report.NotesMoved > 0)
-            bent.Add($"{report.NotesMoved} moved onto the grid");
-        if (report.NotesShifted > 0)
-            bent.Add($"{report.NotesShifted} moved by octaves into C-0..B-7");
-        if (bent.Count > 0)
-            lines.Add(string.Join("; ", bent) + ".");
-        if (report.PickupRows > 0)
-            lines.Add($"The file starts on an upbeat: {report.PickupRows} rows of rest go in front, so its bars line up.");
-        if (report.ChordsFound > 0)
-            lines.Add(report.ChordsPicked == 0
-                ? $"{report.ChordsFound} chords, one arpeggio instrument each."
-                : $"{report.ChordsFound} chords; the {report.ChordsKept} most played became arpeggio instruments, and the other " +
-                  $"{report.ChordsPicked} are picked note by note in the pattern on one instrument - instruments run out at 16.");
-        if (report.ChordsFound > 0 && _chordGateOffs.Checked)
-            lines.Add("Each chord's gate goes off 3 rows after it is struck, 4 rows - with a longer release, " +
-                      "$B or $C - for chords that usually ring longer than 8; in the chord's wavetable, so it costs no pattern bytes.");
-        if (report.DrumHits + report.DrumsLeftOut > 0)
-            lines.Add($"{report.DrumHits} drum hits placed, {report.DrumsLeftOut} left out - hi-hats when off, " +
-                      "toms and cymbals, flams, and hits a kick or snare already had.");
-
-        double off = (report.SongBpm / report.SourceBpm - 1) * 100;
-        if (Math.Abs(off) >= 0.5)
-            lines.Add($"Plays at {report.SongBpm:0.#} BPM, {Math.Abs(off):0}% {(off > 0 ? "faster" : "slower")} than the file.");
-        if (report.TempoChanges > 0)
-            lines.Add($"The file changes tempo {report.TempoChanges} time{(report.TempoChanges == 1 ? "" : "s")}; the song keeps one speed.");
-
-        return string.Join(Environment.NewLine, lines);
-    }
 
     /// <summary>The sound bank's cards, dropped under the voice's button: a click plays a sound, a
     /// double-click or its + makes it the voice's instrument - as Load does with a file.</summary>
@@ -431,15 +367,6 @@ public sealed class MidiImportForm : Form
             MessageBox.Show(this, ex.Message, "Cannot load instrument", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
-
-    private static string Describe(MidiSource source) =>
-        $"T{source.Track + 1} ch{source.Channel + 1}";
-
-    private static string Sound(MidiSource source) =>
-        source.LooksLikeDrums ? "Drums" : source.Program is { } p ? $"{GmFamilies[p / 8]} ({p + 1})" : "";
-
-    private static string KeyName(int key) =>
-        $"{"C C#D D#E F F#G G#A A#B "[(key % 12 * 2)..(key % 12 * 2 + 2)].Trim()}{key / 12 - 1}";
 
     private static ComboBox Combo(params string[] items)
     {

@@ -14,7 +14,9 @@ using MagSid.Core.Validation;
 using MagSid.Editor.App;
 using MagSid.Editor.App.Controls;
 using MagSid.Editor.App.Daw;
+using MagSid.Editor.App.Midi;
 using MagSid.Editor.Avalonia.Player;
+using MagSid.Midi;
 using MagSid.Playback;
 using MagSid.Sid;
 using AvColor = Avalonia.Media.Color;
@@ -63,6 +65,9 @@ public sealed class MainWindow : Window
     private Control _retroView = null!;
     private MenuItem _viewToggle = null!;
     private bool _dawShowing;
+    private MenuItem _midiMenu = null!;
+    private MidiInput? _midi;
+    private MidiKnobBindings? _midiBindings;
 
     /// <summary>The piano keys held down in the DAW, so a key's repeat does not retrigger it and its
     /// release finds the note it started.</summary>
@@ -99,10 +104,12 @@ public sealed class MainWindow : Window
             StopPlayback();
             StopPatternPreview();
             _jam?.Dispose();
+            _midi?.Dispose();
         };
 
         Opened += (_, _) =>
         {
+            ReopenMidi();
             if (songPath is not null)
                 Open(songPath);
             _grid.Focus();
@@ -282,6 +289,7 @@ public sealed class MainWindow : Window
             {
                 Item("New", () => _ = NewAsync(), $"{command}+N"),
                 Item("Open...", () => _ = OpenAsync(), $"{command}+O"),
+                Item("Import MIDI...", () => _ = ImportMidiAsync()),
                 Item("Save", () => _ = SaveAsync(saveAs: false), $"{command}+S"),
                 Item("Save As...", () => _ = SaveAsync(saveAs: true), $"{command}+Shift+S"),
                 new Separator(),
@@ -299,6 +307,8 @@ public sealed class MainWindow : Window
             {
                 Item("Undo", () => StepHistory(undo: true), $"{command}+Z"),
                 Item("Redo", () => StepHistory(undo: false), $"{command}+Y"),
+                new Separator(),
+                Item("Optimize...", () => _ = OptimizeAsync()),
             },
         };
 
@@ -319,7 +329,12 @@ public sealed class MainWindow : Window
         _viewToggle = new MenuItem { Header = "_DAW" };
         _viewToggle.Click += (_, _) => ToggleView();
 
-        return new Menu { ItemsSource = new[] { file, edit, play, _viewToggle } };
+        // Listed afresh each time it opens, so a keyboard plugged in mid-session shows up.
+        _midiMenu = new MenuItem { Header = "_MIDI" };
+        _midiMenu.Items.Add(new MenuItem { Header = "No MIDI inputs found", IsEnabled = false });
+        _midiMenu.SubmenuOpened += (_, _) => BuildMidiMenu();
+
+        return new Menu { ItemsSource = new[] { file, edit, play, _midiMenu, _viewToggle } };
     }
 
     // ------------------------------------------------------------------------------------ wiring
@@ -1134,6 +1149,216 @@ public sealed class MainWindow : Window
         }
     }
 
+    // ------------------------------------------------------------------------------------ MIDI
+
+    private void BuildMidiMenu()
+    {
+        _midiMenu.Items.Clear();
+        var devices = MidiInput.Devices();
+        if (devices.Count == 0)
+            _midiMenu.Items.Add(new MenuItem { Header = "No MIDI inputs found", IsEnabled = false });
+
+        for (int i = 0; i < devices.Count; i++)
+        {
+            int index = i;
+            var item = new MenuItem
+            {
+                Header = devices[i],
+                ToggleType = MenuItemToggleType.CheckBox,
+                IsChecked = _midi?.DeviceName == devices[i],
+            };
+            item.Click += (_, _) => OpenMidi(index, quiet: false);
+            _midiMenu.Items.Add(item);
+        }
+
+        _midiMenu.Items.Add(new Separator());
+        var close = new MenuItem { Header = "Close MIDI", IsEnabled = _midi?.IsOpen == true };
+        close.Click += (_, _) => CloseMidi();
+        _midiMenu.Items.Add(close);
+
+        var forget = new MenuItem { Header = "Forget all knob bindings" };
+        forget.Click += (_, _) =>
+        {
+            EditorSettings.MidiKnobBindings = string.Empty;
+            _ = MessageWindow.ShowAsync(this, "MIDI", "Knob bindings cleared. They take effect next time MagSID starts.");
+        };
+        _midiMenu.Items.Add(forget);
+    }
+
+    /// <summary>Opens whatever was used last, by name - an input's place in the list moves when
+    /// another is plugged in.</summary>
+    private void ReopenMidi()
+    {
+        if (EditorSettings.MidiDevice is not { Length: > 0 } wanted)
+            return;
+
+        int index = MidiInput.Devices().ToList().FindIndex(name => name == wanted);
+        if (index >= 0)
+            OpenMidi(index, quiet: true);
+    }
+
+    private void OpenMidi(int index, bool quiet)
+    {
+        CloseMidi();
+
+        var midi = new MidiInput(action => Dispatcher.UIThread.Post(action));
+        if (!midi.Open(index))
+        {
+            midi.Dispose();
+            if (!quiet)
+                _ = MessageWindow.ShowAsync(this, "MIDI", "That MIDI input could not be opened. Another program usually has it.");
+            return;
+        }
+
+        _midi = midi;
+        EditorSettings.MidiDevice = midi.DeviceName ?? string.Empty;
+
+        if (_midiBindings is null)
+        {
+            _midiBindings = new MidiKnobBindings(EditorSettings.MidiKnobBindings);
+            _midiBindings.Changed += () => EditorSettings.MidiKnobBindings = _midiBindings.Save();
+            foreach (var knob in _daw.Knobs())
+                _midiBindings.Register(knob);
+        }
+
+        midi.ControlChanged += (controller, value) => _midiBindings.HandleControlChange(controller, value);
+        midi.NotePressed += (note, _) => OnMidiNote(note);
+        midi.NoteReleased += ReleaseDawNote;
+        ShowNotice($"MIDI: {midi.DeviceName}");
+    }
+
+    private void CloseMidi()
+    {
+        _midi?.Dispose();
+        _midi = null;
+    }
+
+    /// <summary>A key on the MIDI keyboard. It always sounds, and is written down only in Edit
+    /// mode, in whichever view is on screen - see MainForm.OnMidiNote.</summary>
+    private void OnMidiNote(NoteName note)
+    {
+        if (_dawShowing)
+        {
+            PlayDawNote(note);
+            return;
+        }
+
+        // The tracker's own entry path decides whether Edit mode writes the note, and raises
+        // NoteEntered, which already sounds it.
+        _grid.EnterNote(note);
+    }
+
+    // ------------------------------------------------------------------------------------ optimize
+
+    /// <summary>What every instrument's programs reach over one full pass of the song, played
+    /// silently here - see MainForm.BuildInstrumentUsage.</summary>
+    private Dictionary<int, MagSid.Core.InstrumentUsage> BuildInstrumentUsage()
+    {
+        var analyzed = SongCoverageAnalyzer.Run(_session.Song);
+        var usage = new Dictionary<int, MagSid.Core.InstrumentUsage>();
+        foreach (var instrument in _session.Song.Instruments)
+        {
+            if (instrument.Number < 0 || instrument.Number >= analyzed.Count)
+                continue;
+
+            var coverage = analyzed[instrument.Number];
+            usage[instrument.Number] = new MagSid.Core.InstrumentUsage(
+                HighestSet(coverage.Wavetable), HighestSet(coverage.Arpeggio), HighestSet(coverage.Filter));
+        }
+
+        return usage;
+
+        static int HighestSet(bool[] reached) => Array.LastIndexOf(reached, true);
+    }
+
+    /// <summary>Shrinks the pattern data without changing what the song plays (SongOptimizer).
+    /// Reports first and applies only on a yes; it lands on the undo stack like any edit.</summary>
+    private async Task OptimizeAsync()
+    {
+        var usage = BuildInstrumentUsage();
+        var result = MagSid.Core.SongOptimizer.Analyze(_session.Song, usage);
+        string blank = Environment.NewLine + Environment.NewLine;
+
+        if (!result.FoundAnything)
+        {
+            await MessageWindow.ShowAsync(this, "Optimize",
+                "Nothing to change - the pattern data is already as small as loops can make it." + Environment.NewLine +
+                "Every instrument's programs are fully used." + blank +
+                $"Song length ${result.Before.EndAddress - 0x1000:X3}, patterns {result.Before.PatternBytes} bytes.");
+            return;
+        }
+
+        var lines = result.Findings
+            .Take(20)
+            .Select(f => $"  PAT{f.PatternNumber:D2}  {f.Description}" + (f.BytesSaved > 0 ? $"  (-{f.BytesSaved} bytes)" : ""))
+            .ToList();
+        if (result.Findings.Count > lines.Count)
+            lines.Add($"  ...and {result.Findings.Count - lines.Count} more");
+
+        string summary = result.BytesSaved > 0
+            ? $"Saves {result.BytesSaved} bytes: ${result.Before.EndAddress - 0x1000:X3} to ${result.After.EndAddress - 0x1000:X3}."
+            : "Saves no bytes - a dead LS marker emits nothing - but the loops read as what they are.";
+        const string caveat =
+            "Program trims come from playing the whole song through silently, so they cover every " +
+            "row of every pattern - no need to have listened to it first.";
+        string undo = OperatingSystem.IsMacOS() ? "Cmd+Z" : "Ctrl+Z";
+
+        if (!await ConfirmAsync("Optimize", summary, string.Join(Environment.NewLine, lines), caveat + blank + $"Apply? {undo} undoes it."))
+            return;
+
+        StopTransport();
+        StopPatternPreview();
+        MagSid.Core.SongOptimizer.Apply(_session.Song, usage);
+        _session.NotifyStructureChanged();
+    }
+
+    /// <summary>A question with a monospaced list in the middle; true for Apply.</summary>
+    private async Task<bool> ConfirmAsync(string title, string above, string list, string below)
+    {
+        bool answer = false;
+        var window = new Window
+        {
+            Title = title,
+            Width = 640,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        var apply = new Button { Content = "Apply", MinWidth = 90, IsDefault = true };
+        apply.Click += (_, _) =>
+        {
+            answer = true;
+            window.Close();
+        };
+        var cancel = new Button { Content = "Cancel", MinWidth = 90, IsCancel = true };
+        cancel.Click += (_, _) => window.Close();
+
+        window.Content = new StackPanel
+        {
+            Margin = new Thickness(18),
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock { Text = above, TextWrapping = TextWrapping.Wrap },
+                new ScrollViewer
+                {
+                    MaxHeight = 360,
+                    Content = new TextBlock { Text = list, FontFamily = Mono, Foreground = Body },
+                },
+                new TextBlock { Text = below, TextWrapping = TextWrapping.Wrap, Foreground = Dim },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { apply, cancel },
+                },
+            },
+        };
+        await window.ShowDialog(this);
+        return answer;
+    }
+
     // ------------------------------------------------------------------------------------ files
 
     private static readonly FilePickerFileType SongFiles = new("MagSID songs") { Patterns = ["*.s"] };
@@ -1147,6 +1372,58 @@ public sealed class MainWindow : Window
         if (result is null)
             return false;
         return result == false || await SaveAsync(saveAs: false);
+    }
+
+    /// <summary>Makes a new song from a MIDI file - see MidiImportWindow for the choices and
+    /// MidiImporter for how the notes are fitted to three voices.</summary>
+    private async Task ImportMidiAsync()
+    {
+        if (!await ConfirmDiscardAsync())
+            return;
+
+        var options = new FilePickerOpenOptions
+        {
+            Title = "Import MIDI",
+            FileTypeFilter = [new FilePickerFileType("MIDI files") { Patterns = ["*.mid", "*.midi"] }, FilePickerFileTypes.All],
+        };
+        if (EditorSettings.MidiImportDirectory is { Length: > 0 } remembered)
+            options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(remembered);
+
+        var files = await StorageProvider.OpenFilePickerAsync(options);
+        if (files.Count == 0 || files[0].TryGetLocalPath() is not { } path)
+            return;
+
+        EditorSettings.MidiImportDirectory = Path.GetDirectoryName(path) ?? "";
+
+        MidiSong midi;
+        try
+        {
+            midi = MidiFileReader.Read(File.ReadAllBytes(path));
+        }
+        catch (Exception ex) when (ex is MidiFileException or IOException or UnauthorizedAccessException)
+        {
+            await MessageWindow.ShowAsync(this, "Cannot read MIDI file", ex.Message);
+            return;
+        }
+
+        if (midi.Sources().Count == 0)
+        {
+            await MessageWindow.ShowAsync(this, "Import MIDI", "The MIDI file has no notes.");
+            return;
+        }
+
+        var result = await new MidiImportWindow(midi, Path.GetFileName(path), AuditionSound).ShowDialog<MidiImportResult?>(this);
+        if (result is null)
+            return;
+
+        // The engines hold the old song; they stop before it is replaced.
+        StopTransport();
+        StopPatternPreview();
+        _jam?.SilenceAll();
+        _daw.ClearSoundingNotes();
+        _session.LoadImported(result.Song, Path.GetFileNameWithoutExtension(path));
+        _grid.SetSongPosition(0);
+        ShowNotice($"Imported {Path.GetFileName(path)}: {result.Report.Bars} bars, {result.Report.TotalBytes} bytes");
     }
 
     private async Task NewAsync()

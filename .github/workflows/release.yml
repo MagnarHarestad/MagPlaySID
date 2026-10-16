@@ -49,7 +49,7 @@ jobs:
           dotnet-version: 8.0.x
       - name: Test the engine
         run: |
-          for project in tests/MagSid.Sid.Tests tests/MagSid.Core.Tests tests/MagSid.Assembler.Tests tests/MagSid.Playback.Tests; do
+          for project in tests/MagSid.Sid.Tests tests/MagSid.Core.Tests tests/MagSid.Assembler.Tests tests/MagSid.Playback.Tests tests/MagSid.Midi.Tests; do
             dotnet test "$project" -c Release --logger "console;verbosity=minimal" || exit 1
           done
 
