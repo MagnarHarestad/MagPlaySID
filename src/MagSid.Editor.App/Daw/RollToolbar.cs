@@ -25,6 +25,8 @@ internal enum RollTool
 ///
 /// After the tools come the take's own switches: REC, red as a record button is, and CLICK,
 /// PUNCH and PRE-ROLL in the view's cyan - the same shape, so they read as one group.
+///
+/// The arrange uses the same row for its own four tools, without the switches.
 /// </summary>
 internal sealed class RollToolbar : Control
 {
@@ -46,7 +48,7 @@ internal sealed class RollToolbar : Control
 
     private static readonly Color RecRed = Color.FromArgb(0xF0, 0x3E, 0x4E);
 
-    private static readonly (RollTool Tool, string Name, string Help)[] Tools =
+    private static readonly (RollTool Tool, string Name, string Help)[] RollTools =
     [
         (RollTool.Select, "Object Selection", "Click a note to select it, Ctrl+click to add, drag a box to select several. Drag them to move, drag an end to resize. Ctrl+X cuts, Ctrl+C copies, Ctrl+V pastes at the row picked in the beat bar."),
         (RollTool.Draw, "Draw", "Click to write a note, drag to give it a length. Drag a note's right edge to resize it."),
@@ -57,8 +59,10 @@ internal sealed class RollToolbar : Control
         (RollTool.Line, "Line", "Drag from one note to another to draw a run of notes between them."),
     ];
 
+    private readonly (RollTool Tool, string Name, string Help)[] Tools;
+    private readonly bool _switches;
     private readonly ToolTip _tips = new() { InitialDelay = 400, ReshowDelay = 100 };
-    private RollTool _tool = RollTool.Draw;
+    private RollTool _tool;
     private int _hovered = -1;
     private bool _recording, _click, _punch, _preRoll = true;
 
@@ -107,12 +111,25 @@ internal sealed class RollToolbar : Control
     }
 
     public RollToolbar()
+        : this(RollTools, switches: true)
+    {
+    }
+
+    /// <summary>A row of <paramref name="tools"/> - Draw chosen when it is one of them, else the
+    /// first - with the take's switches after them when <paramref name="switches"/> is set. Without
+    /// them it is only as wide and tall as its icons, to sit in a row of other buttons.</summary>
+    public RollToolbar((RollTool Tool, string Name, string Help)[] tools, bool switches)
     {
         SetStyle(
             ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
             ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Tools = tools;
+        _switches = switches;
+        _tool = tools.Any(t => t.Tool == RollTool.Draw) ? RollTool.Draw : tools[0].Tool;
         BackColor = DawPalette.PanelHeader;
-        Height = ButtonHeight + 8;
+        Height = ButtonHeight + (switches ? 8 : 2);
+        if (!switches)
+            Width = ButtonBounds(tools.Length - 1).Right + 2;
         Cursor = Cursors.Hand;
     }
 
@@ -152,7 +169,7 @@ internal sealed class RollToolbar : Control
                 return i;
         }
 
-        for (int i = 0; i < Switches.Length; i++)
+        for (int i = 0; _switches && i < Switches.Length; i++)
         {
             if (SwitchBounds(i).Contains(point))
                 return Tools.Length + i;
@@ -217,8 +234,11 @@ internal sealed class RollToolbar : Control
         var g = e.Graphics;
         g.Clear(BackColor);
 
-        using (var line = new Pen(DawPalette.Border))
+        if (_switches)
+        {
+            using var line = new Pen(DawPalette.Border);
             g.DrawLine(line, 0, Height - 1, Width, Height - 1);
+        }
 
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
@@ -241,7 +261,7 @@ internal sealed class RollToolbar : Control
             DrawIcon(g, Tools[i].Tool, glyph, ink);
         }
 
-        for (int i = 0; i < Switches.Length; i++)
+        for (int i = 0; _switches && i < Switches.Length; i++)
             DrawSwitch(g, i);
     }
 

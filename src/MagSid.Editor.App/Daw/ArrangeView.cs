@@ -1,4 +1,5 @@
-﻿using MagSid.Core.Model;
+﻿using MagSid.Core;
+using MagSid.Core.Model;
 
 namespace MagSid.Editor.App.Daw;
 
@@ -117,6 +118,45 @@ internal sealed class ArrangeView : Control
 
     private int _restartEntryChannel = -1;
 
+    /// <summary>What a click on a clip does: select and drag it, erase it, split it in two, or
+    /// glue it to what follows - the piano roll's icons, for clips.</summary>
+    public RollTool Tool
+    {
+        get => _tool;
+        set
+        {
+            _tool = value;
+            _dragFrom = null;
+            _dropAt = null;
+            _splitAt = null;
+            Invalidate();
+        }
+    }
+
+    private RollTool _tool = RollTool.Select;
+
+    /// <summary>The other end of a run of clips marked with Shift+click in the selected lane - what
+    /// Glue joins - or -1 when only the selected clip is marked.</summary>
+    private int _markEnd = -1;
+
+    /// <summary>A clip pressed with the selection tool, until it is known whether it is a click or
+    /// a drag; then where the drag would put it - a lane and the place in its order.</summary>
+    private (int Channel, int Index)? _dragFrom;
+    private Point _dragPress;
+    private bool _dragging;
+    private (int Channel, int Index)? _dropAt;
+
+    /// <summary>Where the split tool would cut, under the mouse: the x of the row edge.</summary>
+    private (int Channel, int X)? _splitAt;
+
+    /// <summary>A short message for the status bar - mostly why an edit was not made.</summary>
+    public event Action<string>? Notice;
+
+    private bool IsMarked(int channel, int index) =>
+        channel == _selectedChannel && !_onRestart && _selectedIndex >= 0
+        && (index == _selectedIndex
+            || (_markEnd >= 0 && index >= Math.Min(_selectedIndex, _markEnd) && index <= Math.Max(_selectedIndex, _markEnd)));
+
     public ArrangeView()
     {
         SetStyle(
@@ -164,6 +204,7 @@ internal sealed class ArrangeView : Control
         int index = _selectedIndex;
 
         _song = song;
+        _markEnd = -1;
         _selectedChannel = Math.Clamp(channel, 0, Song.ChannelCount - 1);
 
         int count = song.ChannelOrders[_selectedChannel].Tokens.Count;
@@ -725,7 +766,35 @@ internal sealed class ArrangeView : Control
             return;
         }
 
-        Cursor = EndHandleAt(e.Location) is not null ? Cursors.SizeWE : Cursors.Default;
+        if (_dragFrom is not null)
+        {
+            if (!_dragging && (Math.Abs(e.X - _dragPress.X) > 4 || Math.Abs(e.Y - _dragPress.Y) > 4))
+                _dragging = true;
+
+            if (_dragging)
+            {
+                _dropAt = DropAt(e.Location);
+                Cursor = _dropAt is null ? Cursors.No : Cursors.SizeAll;
+                Invalidate();
+            }
+
+            base.OnMouseMove(e);
+            return;
+        }
+
+        if (_tool == RollTool.Split)
+        {
+            (int Channel, int X)? cut = ClipAt(e.Location) is { } clip && SplitPoint(clip, e.X) is { } row
+                ? (clip.Channel, ClipLeft(clip) + (row * PixelsPerRow))
+                : null;
+            if (cut != _splitAt)
+            {
+                _splitAt = cut;
+                Invalidate();
+            }
+        }
+
+        Cursor = _tool == RollTool.Select && EndHandleAt(e.Location) is not null ? Cursors.SizeWE : Cursors.Default;
 
         var at = ClipAt(e.Location) ?? (-1, -1);
         int restart = RestartAt(e.Location);
@@ -733,7 +802,8 @@ internal sealed class ArrangeView : Control
         {
             _hovered = at;
             _hoveredRestart = restart;
-            Cursor = at.Item2 >= 0 || restart >= 0 ? Cursors.Hand : Cursors.Default;
+            Cursor = at.Item2 >= 0 && _tool == RollTool.Split ? Cursors.VSplit
+                : at.Item2 >= 0 || restart >= 0 ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
 
@@ -744,6 +814,7 @@ internal sealed class ArrangeView : Control
     {
         _hovered = (-1, -1);
         _hoveredRestart = -1;
+        _splitAt = null;
         Invalidate();
         base.OnMouseLeave(e);
     }
@@ -781,7 +852,7 @@ internal sealed class ArrangeView : Control
             return;
         }
 
-        if (e.Button == MouseButtons.Left && EndHandleAt(e.Location) is { } handle)
+        if (e.Button == MouseButtons.Left && _tool == RollTool.Select && EndHandleAt(e.Location) is { } handle)
         {
             _resizing = handle;
             _resizeChanged = false;
@@ -804,9 +875,35 @@ internal sealed class ArrangeView : Control
 
         if (ClipAt(e.Location) is { } at)
         {
+            if (e.Button == MouseButtons.Left && UseTool(at, e.X))
+            {
+                base.OnMouseDown(e);
+                return;
+            }
+
+            // Shift+click marks the run from the selected clip to this one, in its lane - what
+            // Glue joins.
+            if (e.Button == MouseButtons.Left && ModifierKeys.HasFlag(Keys.Shift)
+                && at.Channel == _selectedChannel && !_onRestart && _selectedIndex >= 0)
+            {
+                _markEnd = at.Index == _selectedIndex ? -1 : at.Index;
+                Invalidate();
+                base.OnMouseDown(e);
+                return;
+            }
+
             _selectedChannel = at.Channel;
             _selectedIndex = at.Index;
             _onRestart = false;
+            _markEnd = -1;
+            if (e.Button == MouseButtons.Left)
+            {
+                _dragFrom = at;
+                _dragPress = e.Location;
+                _dragging = false;
+                Capture = true;
+            }
+
             Invalidate();
             AnnounceSelection();
         }
@@ -816,6 +913,251 @@ internal sealed class ArrangeView : Control
         }
 
         base.OnMouseDown(e);
+    }
+
+    /// <summary>A left click on a clip with a tool other than the selection: true when the tool
+    /// took it.</summary>
+    private bool UseTool((int Channel, int Index) at, int x)
+    {
+        switch (_tool)
+        {
+            case RollTool.Erase:
+                if (_song!.ChannelOrders[at.Channel].Tokens.Count <= 1)
+                    Notice?.Invoke("A lane keeps at least one clip - the channel has to play something.");
+                else
+                    DeleteClip(at.Channel, at.Index);
+                _markEnd = -1;
+                return true;
+
+            case RollTool.Split:
+                if (SplitPoint(at, x) is { } row)
+                    SplitClip(at, row);
+                else if (PatternAt(at) is { } pattern && pattern.Rows.Any(r => r is LoopStartRow or LoopEndRow))
+                    Notice?.Invoke($"PAT{pattern.Number:00} has a loop - its passes have no one row to cut at. Split it in the tracker.");
+                return true;
+
+            case RollTool.Glue:
+                GlueAt(at);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private Pattern? PatternAt((int Channel, int Index) at) =>
+        _song is { } song && at.Index >= 0 && at.Index < song.ChannelOrders[at.Channel].Tokens.Count
+        && song.ChannelOrders[at.Channel].Tokens[at.Index] is PatternRefToken token
+            ? song.Patterns.FirstOrDefault(p => p.Number == token.PatternNumber)
+            : null;
+
+    private int ClipLeft((int Channel, int Index) at) =>
+        GutterWidth + OffsetOf(_song!.ChannelOrders[at.Channel], at.Index) - _scroll.Value;
+
+    /// <summary>How many clips play a pattern, in all three lanes.</summary>
+    private static int Uses(Song song, int patternNumber) =>
+        song.ChannelOrders.Sum(o => o.Tokens.Count(t => t is PatternRefToken p && p.PatternNumber == patternNumber));
+
+    /// <summary>A new pattern at the end of the list, the next number - the only one that keeps the
+    /// numbers 1..N the assembler wants.</summary>
+    private static Pattern AddPattern(Song song, IEnumerable<PatternRow> rows)
+    {
+        var pattern = new Pattern { Number = song.Patterns.Count + 1 };
+        pattern.Rows.AddRange(rows);
+        song.Patterns.Add(pattern);
+        return pattern;
+    }
+
+    /// <summary>The row a split at <paramref name="x"/> cuts before - the nearest row edge - or
+    /// null where the clip cannot be cut: at its very ends, or anywhere in a pattern with a loop,
+    /// whose passes have no single row to cut at.</summary>
+    private int? SplitPoint((int Channel, int Index) at, int x)
+    {
+        if (PatternAt(at) is not { } pattern || pattern.Rows.Any(r => r is LoopStartRow or LoopEndRow))
+            return null;
+
+        int row = (int)Math.Round((x - ClipLeft(at)) / (double)PixelsPerRow);
+        return row > 0 && row < pattern.Rows.Count ? row : null;
+    }
+
+    /// <summary>
+    /// Cuts a clip in two at <paramref name="row"/>: the rows before it and the rows from it on,
+    /// each its own pattern, one clip after the other. A pattern played only here is cut in place
+    /// and the second half becomes the next pattern; one other clips also play is left as it is,
+    /// for them, and both halves are new.
+    /// </summary>
+    private void SplitClip((int Channel, int Index) at, int row)
+    {
+        var song = _song!;
+        var source = PatternAt(at)!;
+        bool own = Uses(song, source.Number) == 1;
+        if (song.Patterns.Count + (own ? 1 : 2) > MaxPatterns)
+        {
+            Notice?.Invoke($"A song holds at most {MaxPatterns} patterns.");
+            return;
+        }
+
+        var order = song.ChannelOrders[at.Channel];
+        var rest = source.Rows.Skip(row).ToList();
+        Pattern first;
+        if (own)
+        {
+            source.Rows.RemoveRange(row, source.Rows.Count - row);
+            first = source;
+        }
+        else
+        {
+            first = AddPattern(song, source.Rows.Take(row));
+        }
+
+        var second = AddPattern(song, rest);
+        order.Tokens[at.Index] = new PatternRefToken(first.Number);
+        order.InsertEntry(at.Index + 1, second.Number);
+
+        _selectedChannel = at.Channel;
+        _selectedIndex = at.Index;
+        _onRestart = false;
+        _markEnd = -1;
+        _splitAt = null;
+        Edited();
+        if (own)
+            PatternLengthChanged?.Invoke();
+        AnnounceSelection();
+        Notice?.Invoke($"PAT{source.Number:00} split at row {row}: PAT{first.Number:00} and PAT{second.Number:00}.");
+    }
+
+    /// <summary>
+    /// Joins clips into one: the run marked with Shift+click when the click is on it, otherwise
+    /// the clip clicked and the one after it. Their rows follow one another in a single pattern -
+    /// the first clip's own, when nothing else plays it, otherwise a new one. A pattern holds 255
+    /// bytes of note data, so a join that would not fit is refused.
+    /// </summary>
+    private void GlueAt((int Channel, int Index) at)
+    {
+        var song = _song!;
+        var order = song.ChannelOrders[at.Channel];
+        int from = at.Index, to = at.Index + 1;
+        if (_markEnd >= 0 && IsMarked(at.Channel, at.Index))
+            (from, to) = (Math.Min(_selectedIndex, _markEnd), Math.Max(_selectedIndex, _markEnd));
+
+        if (to >= order.Tokens.Count)
+        {
+            Notice?.Invoke("Glue joins a clip to the one after it - this is the lane's last.");
+            return;
+        }
+
+        var patterns = Enumerable.Range(from, to - from + 1).Select(i => PatternAt((at.Channel, i))).ToList();
+        if (patterns.Any(p => p is null))
+            return;
+
+        var rows = patterns.SelectMany(p => p!.Rows).ToList();
+        int bytes;
+        try
+        {
+            bytes = SongSizeCalculator.EncodedPatternLength(rows);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            bytes = int.MaxValue;
+        }
+
+        if (bytes > 255)
+        {
+            Notice?.Invoke(bytes == int.MaxValue
+                ? "Those clips cannot be one pattern."
+                : $"Glued, the pattern would be {bytes} bytes - a pattern holds 255.");
+            return;
+        }
+
+        var first = patterns[0]!;
+        bool own = Uses(song, first.Number) == 1;
+        if (!own && song.Patterns.Count >= MaxPatterns)
+        {
+            Notice?.Invoke($"A song holds at most {MaxPatterns} patterns.");
+            return;
+        }
+
+        Pattern glued;
+        if (own)
+        {
+            first.Rows.Clear();
+            first.Rows.AddRange(rows);
+            glued = first;
+        }
+        else
+        {
+            glued = AddPattern(song, rows);
+        }
+
+        for (int i = to; i > from; i--)
+            order.RemoveEntryAt(i);
+        order.Tokens[from] = new PatternRefToken(glued.Number);
+
+        _selectedChannel = at.Channel;
+        _selectedIndex = from;
+        _onRestart = false;
+        _markEnd = -1;
+        Edited();
+        if (own)
+            PatternLengthChanged?.Invoke();
+        AnnounceSelection();
+        Notice?.Invoke($"{to - from + 1} clips glued into PAT{glued.Number:00}.");
+    }
+
+    /// <summary>Where a dragged clip would land: the lane under the mouse and the place in its
+    /// order, before the first clip whose middle is right of the mouse. Null off the lanes, or out
+    /// of a lane that would be left empty.</summary>
+    private (int Channel, int Index)? DropAt(Point point)
+    {
+        int lane = LaneAt(point);
+        if (_song is not { } song || _dragFrom is not { } from || lane < 0)
+            return null;
+
+        if (lane != from.Channel && song.ChannelOrders[from.Channel].Tokens.Count <= 1)
+            return null;
+
+        var order = song.ChannelOrders[lane];
+        int x = point.X - GutterWidth + _scroll.Value;
+        for (int i = 0; i < order.Tokens.Count; i++)
+        {
+            if (order.Tokens[i] is not PatternRefToken token)
+                continue;
+
+            int width = Math.Max(PixelsPerRow * 2, RowsOf(token.PatternNumber) * PixelsPerRow);
+            if (x < OffsetOf(order, i) + (width / 2))
+                return (lane, i);
+        }
+
+        return (lane, order.Tokens.Count);
+    }
+
+    /// <summary>Moves a clip to another place in its lane, or into another lane.</summary>
+    private void MoveClip((int Channel, int Index) from, (int Channel, int Index) drop)
+    {
+        var song = _song!;
+        var source = song.ChannelOrders[from.Channel];
+        var target = song.ChannelOrders[drop.Channel];
+        int index = drop.Index;
+        if (from.Channel == drop.Channel)
+        {
+            if (index == from.Index || index == from.Index + 1)
+                return;
+            if (index > from.Index)
+                index--;
+        }
+
+        if (source.Tokens[from.Index] is not PatternRefToken token)
+            return;
+
+        source.RemoveEntryAt(from.Index);
+        target.InsertEntry(index, token.PatternNumber);
+
+        _selectedChannel = drop.Channel;
+        _selectedIndex = index;
+        _onRestart = false;
+        _markEnd = -1;
+        Edited();
+        AnnounceSelection();
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -841,6 +1183,8 @@ internal sealed class ArrangeView : Control
         }
 
         var order = song.ChannelOrders[_selectedChannel];
+        if (e.KeyCode is not (Keys.ShiftKey or Keys.ControlKey or Keys.Menu))
+            _markEnd = -1;
 
         if (_onRestart)
         {
@@ -1163,6 +1507,20 @@ internal sealed class ArrangeView : Control
             return;
         }
 
+        if (_dragFrom is { } dragged)
+        {
+            _dragFrom = null;
+            Capture = false;
+            if (_dragging && _dropAt is { } drop)
+                MoveClip(dragged, drop);
+
+            _dragging = false;
+            _dropAt = null;
+            Invalidate();
+            base.OnMouseUp(e);
+            return;
+        }
+
         // One edit for the drag rather than one per pixel - the song is marked dirty and every
         // view rebuilt on each of them.
         if (_resizing is not null)
@@ -1239,6 +1597,7 @@ internal sealed class ArrangeView : Control
         DrawLocators(g);
         DrawPlayFrom(g);
         DrawLanePlayheads(g);
+        DrawToolMarks(g, song);
 
     }
 
@@ -1271,6 +1630,29 @@ internal sealed class ArrangeView : Control
             g.DrawString("L", font, ink, x0 - 1, RulerHeight - 17);
         if (x1 <= Width)
             g.DrawString("R", font, ink, x1 - 8, RulerHeight - 17);
+    }
+
+    /// <summary>Where a dragged clip would land - a bar between clips - and where the split tool
+    /// would cut.</summary>
+    private void DrawToolMarks(Graphics g, Song song)
+    {
+        if (_dragging && _dropAt is { } drop)
+        {
+            var order = song.ChannelOrders[drop.Channel];
+            int x = GutterWidth - _scroll.Value
+                    + (drop.Index < order.Tokens.Count ? OffsetOf(order, drop.Index) : LaneLength(order)) - 1;
+            int top = LaneTop(drop.Channel);
+            using var bar = new SolidBrush(DawPalette.Oscillator);
+            g.FillRectangle(bar, x - 1, top + 3, 3, LaneHeight - 8);
+            g.FillPolygon(bar, new Point[] { new(x - 5, top + 2), new(x + 6, top + 2), new(x, top + 8) });
+        }
+
+        if (_tool == RollTool.Split && _splitAt is { } cut)
+        {
+            int top = LaneTop(cut.Channel);
+            using var line = new Pen(Color.White, 1.5f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
+            g.DrawLine(line, cut.X, top + 4, cut.X, top + LaneHeight - 6);
+        }
     }
 
     /// <summary>Each lane's playhead: the red of the piano roll's, across that lane only.</summary>
@@ -1399,7 +1781,7 @@ internal sealed class ArrangeView : Control
                 continue;
 
             DrawClip(g, token.PatternNumber, new Rectangle(start, top + 6, width - 2, LaneHeight - 14),
-                selected: channel == _selectedChannel && i == _selectedIndex && !_onRestart,
+                selected: IsMarked(channel, i),
                 hovered: _hovered == (channel, i),
                 playing: _playheads[channel] == i,
                 // Where the RST block points, picked out while it is pointed at - hovered or

@@ -25,6 +25,15 @@ internal sealed class DawView : Panel
     private readonly Label _octaveLabel = new();
     private readonly RollToolbar _tools = new() { Dock = DockStyle.Top };
 
+    /// <summary>The arrange's own tools, in the top row between the tabs and AUTOSCROLL.</summary>
+    private readonly RollToolbar _arrangeTools = new(
+    [
+        (RollTool.Select, "Object Selection", "Click a clip to select it and show its pattern below. Drag it to another place in its lane, or into another lane. Shift+click marks a run of clips for Glue; drag a clip's end to change its pattern's length."),
+        (RollTool.Erase, "Erase", "Click a clip to take it out of its lane. The pattern itself stays in the song."),
+        (RollTool.Split, "Split", "Click inside a clip to cut it in two there - two patterns, one after the other."),
+        (RollTool.Glue, "Glue", "Click a clip to join it to the next one - or click a run marked with Shift+click to join all of it - into one pattern."),
+    ], switches: false) { Margin = new Padding(24, 1, 0, 0) };
+
     /// <summary>Sits over the list while a name is being typed. One box, moved to whichever parent
     /// the list currently has - it changes homes between the two tabs.</summary>
     /// <summary>The instrument the open editor belongs to, caught at the start: the list's
@@ -538,6 +547,8 @@ internal sealed class DawView : Panel
         _soundBank.Margin = new Padding(24, 0, 0, 0);
         _soundBank.Click += (_, _) => ShowSoundBank();
         _tabs.Controls.Add(_soundBank);
+        _arrangeTools.ToolChanged += tool => _arrange.Tool = tool;
+        _tabs.Controls.Add(_arrangeTools);
 
         _autoScroll.Size = new Size(96, 26);
         _autoScroll.BackColor = DawPalette.PanelHeader;
@@ -662,6 +673,7 @@ internal sealed class DawView : Panel
 
         _arrange.Dock = DockStyle.Fill;
         _arrange.OrderEdited += () => OrderEdited?.Invoke();
+        _arrange.Notice += message => Notice?.Invoke(message);
         _arrange.MuteToggled += channel => MuteToggleRequested?.Invoke(channel);
 
         // The roll may be showing the very pattern that just changed length, so it reloads before
@@ -882,6 +894,7 @@ internal sealed class DawView : Panel
 
         // Autoscroll steers the lanes and the roll, which only the arrangement shows.
         _autoScroll.Visible = tab == DawTab.Arrange;
+        _arrangeTools.Visible = tab == DawTab.Arrange;
         _soundBank.Visible = tab == DawTab.Instrument;
         _cycle.Visible = tab == DawTab.Arrange;
 
