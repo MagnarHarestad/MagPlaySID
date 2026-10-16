@@ -1702,6 +1702,16 @@ internal sealed class ArrangeView : Control
     /// would cut.</summary>
     private void DrawToolMarks(Graphics g, Song song)
     {
+        // Clips scrolled half out of view still start left of the lanes; nothing of the marks
+        // goes over the channel names.
+        var state = g.Save();
+        g.SetClip(new Rectangle(GutterWidth, 0, Math.Max(0, Width - GutterWidth), Height));
+        DrawToolMarksInLanes(g, song);
+        g.Restore(state);
+    }
+
+    private void DrawToolMarksInLanes(Graphics g, Song song)
+    {
         if (_dragging && _dropAt is { } drop)
         {
             var order = song.ChannelOrders[drop.Channel];
