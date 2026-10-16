@@ -12,7 +12,7 @@ namespace MagSid.Editor.App;
 /// Holds the rows themselves, not a reference to the pattern they came from, so editing or deleting
 /// that pattern afterwards cannot change what is about to be pasted.
 /// </summary>
-internal static class PatternClipboard
+public static class PatternClipboard
 {
     private static List<PatternRow> _rows = [];
     private static List<CopiedNote> _notes = [];
@@ -72,13 +72,13 @@ internal static class PatternClipboard
 
 /// <summary>One note on the clipboard: how many beats after the first copied note it starts, and
 /// what it is.</summary>
-internal sealed record CopiedNote(int BeatOffset, NoteName Note, int Instrument, int Length);
+public sealed record CopiedNote(int BeatOffset, NoteName Note, int Instrument, int Length);
 
 /// <summary>One row of the slide lane on the clipboard: how many columns after the first copied
 /// one it sits, and the rate in force there.</summary>
-internal sealed record CopiedSlide(int ColumnOffset, int Rate);
+public sealed record CopiedSlide(int ColumnOffset, int Rate);
 
-internal enum ClipboardKind
+public enum ClipboardKind
 {
     Notes,
     Slides,

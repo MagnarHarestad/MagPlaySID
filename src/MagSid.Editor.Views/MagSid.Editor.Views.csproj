@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The editor's owner-drawn views, shared with the Windows editor source for source: the files
+       are linked from MagSid.Editor.App unchanged and compile here against Shim/, a WinForms and
+       GDI+ face over Avalonia. What one editor gains, the other has. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MagSid.Editor.App</RootNamespace>
+    <NoWarn>$(NoWarn);CS0108;CS0114</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Drawing" />
+    <Using Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
+    <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+    <ProjectReference Include="..\MagSid.Editor.Common\MagSid.Editor.Common.csproj" />
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\MagSid.Editor.App\EditorPalette.cs" Link="Linked\EditorPalette.cs" />
+    <Compile Include="..\MagSid.Editor.App\PianoKeyMap.cs" Link="Linked\PianoKeyMap.cs" />
+    <Compile Include="..\MagSid.Editor.App\Controls\TrackerGridControl.cs" Link="Linked\Controls\TrackerGridControl.cs" />
+  </ItemGroup>
+
+</Project>

@@ -16,7 +16,13 @@ for technical advice and tools.
 >    works everywhere.
 > 2. **The SID player as an Avalonia app** - done: `src/MagSid.Editor.Avalonia`, packaged as
 >    `MagSID.app` for Apple Silicon and Intel by `packaging/macos/package.sh`.
-> 3. The Retro view. 4. The DAW view. 5. Signed releases.
+> 3. **The Retro view** - underway. The Windows editor's tracker grid runs unchanged: its source is
+>    linked into `src/MagSid.Editor.Views`, which compiles it against `Shim/`, a WinForms and GDI+ face
+>    over Avalonia. Around it, `MainWindow` has the song's files, undo, the instrument list and an
+>    instrument editor, playback with F1/F2/F4 and the grid following, and note entry and jamming.
+>    Not yet: F3 pattern preview, .sid export, Import MIDI, Optimize, a MIDI keyboard.
+> 4. The DAW view - the piano roll and the arrange are owner-drawn too, so they go the grid's way.
+> 5. Signed releases.
 >
 > GitHub Actions tests the engine on Windows, macOS and Linux and builds the Mac app on every push. The
 > app is not notarised: on first launch, right-click it and choose **Open**.

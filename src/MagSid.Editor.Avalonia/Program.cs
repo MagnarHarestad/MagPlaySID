@@ -9,8 +9,8 @@ using MagSid.Playback;
 namespace MagSid.Editor.Avalonia;
 
 /// <summary>
-/// MagSID for Windows, macOS and Linux. For now the SID player; the editor's views follow one by
-/// one. The engines play through PortAudio - Core Audio on a Mac - so nothing is Windows-only here.
+/// MagSID for Windows, macOS and Linux: the Retro view's editor and the SID player; the DAW view
+/// follows. The engines play through PortAudio - Core Audio on a Mac - so nothing is Windows-only here.
 /// </summary>
 internal static class Program
 {
@@ -42,8 +42,11 @@ internal sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // A .sid opens in the player, anything else as a song.
             string? path = desktop.Args?.FirstOrDefault(arg => File.Exists(arg));
-            desktop.MainWindow = new SidPlayerWindow(path);
+            desktop.MainWindow = path is not null && path.EndsWith(".sid", StringComparison.OrdinalIgnoreCase)
+                ? new SidPlayerWindow(path)
+                : new MainWindow(path);
         }
 
         base.OnFrameworkInitializationCompleted();

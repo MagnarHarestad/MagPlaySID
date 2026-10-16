@@ -44,6 +44,10 @@ internal static class PianoKeyMap
     {
         get
         {
+            // Off Windows there is no layout to ask; the key under ' on a US keyboard stands in.
+            if (!OperatingSystem.IsWindows())
+                return Keys.OemQuotes;
+
             short result = VkKeyScanEx('\'', GetKeyboardLayout(0));
             return result == -1 ? Keys.Oem7 : (Keys)(result & 0xFF);
         }

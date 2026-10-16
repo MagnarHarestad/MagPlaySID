@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
@@ -11,6 +11,7 @@
     <PackageReference Include="NAudio.Midi" Version="2.2.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+    <ProjectReference Include="..\MagSid.Editor.Common\MagSid.Editor.Common.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
