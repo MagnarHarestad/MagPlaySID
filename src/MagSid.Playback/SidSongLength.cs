@@ -34,13 +34,17 @@ public static class SidSongLength
     /// call the length.</param>
     /// <param name="LoopStartFrame">Where the repeating part begins. Greater than zero when the
     /// tune has an intro it never returns to.</param>
-    public sealed record Result(int TotalFrames, int LoopStartFrame)
+    /// <param name="CallsPerSecond">How often play is called - 50 on the vertical blank, the
+    /// timer's own rate for a tune on CIA 1. A "frame" here is one play call.</param>
+    public sealed record Result(int TotalFrames, int LoopStartFrame, double CallsPerSecond = 50.0)
     {
         public int LoopFrames => TotalFrames - LoopStartFrame;
 
-        public TimeSpan Total => TimeSpan.FromSeconds(TotalFrames / 50.0);
+        public TimeSpan Total => TimeSpan.FromSeconds(TotalFrames / CallsPerSecond);
 
-        public TimeSpan LoopStart => TimeSpan.FromSeconds(LoopStartFrame / 50.0);
+        public TimeSpan LoopStart => TimeSpan.FromSeconds(LoopStartFrame / CallsPerSecond);
+
+        public TimeSpan Loop => TimeSpan.FromSeconds(LoopFrames / CallsPerSecond);
     }
 
     /// <summary>Null when the tune shows no repeating state inside <paramref name="maxFrames"/>.</summary>
@@ -52,7 +56,8 @@ public static class SidSongLength
         var memory = new byte[0x10000];
         file.Data.CopyTo(memory, file.LoadAddress);
 
-        var cpu = new Mos6502(memory);
+        bool timerSet = false;
+        var cpu = new Mos6502(memory, (address, _) => timerSet |= PlayRate.IsTimerLatch(address));
         cpu.A = Math.Max(0, file.StartSong - 1);
 
         try
@@ -63,6 +68,10 @@ public static class SidSongLength
         {
             return null;
         }
+
+        // The rate init left the timer at; a tune that changes it while playing is measured at this
+        // one, which is the tempo it starts with.
+        double callsPerSecond = PlayRate.PalClock / PlayRate.CyclesPerCall(file, file.StartSong, memory, timerSet);
 
         int from = file.LoadAddress;
         int to = Math.Min(0xFFFF, file.LoadAddress + file.Data.Length - 1);
@@ -84,7 +93,7 @@ public static class SidSongLength
 
             ulong hash = Hash(memory, from, to);
             if (seen.TryGetValue(hash, out int first))
-                return new Result(frame, first);
+                return new Result(frame, first, callsPerSecond);
 
             seen[hash] = frame;
         }

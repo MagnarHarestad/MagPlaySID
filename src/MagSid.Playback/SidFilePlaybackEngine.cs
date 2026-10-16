@@ -18,8 +18,7 @@ namespace MagSid.Playback;
 /// </summary>
 public sealed class SidFilePlaybackEngine : IWaveProvider
 {
-    private const double ClockFrequency = 985248.0;     // PAL C64
-    private const double FrameRate = 50.0;              // PAL frames/second
+    private const double ClockFrequency = PlayRate.PalClock;
 
     public const int SampleRate = 44100;
 
@@ -31,7 +30,13 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
     private readonly SidChip _sid = new();
     private readonly Mos6502 _cpu;
     private readonly int _playAddress;
-    private readonly double _cyclesPerFrame = ClockFrequency / FrameRate;
+
+    /// <summary>The tune has set CIA 1's timer latch - see PlayRate.</summary>
+    private bool _timerSet;
+
+    /// <summary>How many times play has been called - one a frame, or one a timer period for a
+    /// tune on CIA 1.</summary>
+    public long PlayCalls { get; private set; }
 
     private double _totalCyclesClocked;
     private double _nextFrameBoundaryCycles;
@@ -119,6 +124,8 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
         {
             if (address >= SidBase && address <= SidTop)
                 _sid.Write(address & 0x1F, value);
+            else if (PlayRate.IsTimerLatch(address))
+                _timerSet = true;
         });
 
         Song = Math.Clamp(song ?? file.StartSong, 1, file.Songs);
@@ -180,7 +187,10 @@ public sealed class SidFilePlaybackEngine : IWaveProvider
             if (cyclesToNextFrame < 1.0)
             {
                 _cpu.Call(_playAddress);
-                _nextFrameBoundaryCycles += _cyclesPerFrame;
+                PlayCalls++;
+
+                // Read after the call: a tune on the CIA timer may change its tempo from play.
+                _nextFrameBoundaryCycles += PlayRate.CyclesPerCall(File, Song, _cpu.Memory, _timerSet);
                 continue;
             }
 

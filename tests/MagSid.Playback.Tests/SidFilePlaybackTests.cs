@@ -304,6 +304,48 @@ public class SidFilePlaybackTests
         Assert.Contains("RSID", SidFile.Parse(bytes).UnsupportedReason());
     }
 
+    /// <summary>
+    /// A tune on CIA 1's timer is called at the timer's rate. The tune here sets the latch to
+    /// $3000 in init, so a second of audio holds 985248 / $3001 play calls, about 80, rather than
+    /// the 50 a frame-driven tune gets - and its length is counted at that rate too.
+    /// </summary>
+    [Theory]
+    [InlineData(true, 985248.0 / 0x3001)]
+    [InlineData(false, 985248.0 / 0x4026)]      // latch left alone: the KERNAL's 60Hz
+    public void A_tune_on_the_CIA_timer_is_played_at_the_timers_rate(bool setsTimer, double perSecond)
+    {
+        // init: [lda #$00 ; sta $dc04 ; lda #$30 ; sta $dc05] rts
+        // play: rts
+        byte[] init = setsTimer ? [0xA9, 0x00, 0x8D, 0x04, 0xDC, 0xA9, 0x30, 0x8D, 0x05, 0xDC, 0x60] : [0x60];
+        byte[] play = [0x60];
+        byte[] code = [.. init, .. play];
+
+        const int headerSize = 0x7C, load = 0x1000;
+        var bytes = new byte[headerSize + code.Length];
+        "PSID"u8.CopyTo(bytes);
+        Be16(bytes, 0x04, 2);
+        Be16(bytes, 0x06, headerSize);
+        Be16(bytes, 0x08, load);
+        Be16(bytes, 0x0A, load);
+        Be16(bytes, 0x0C, load + init.Length);
+        Be16(bytes, 0x0E, 1);
+        Be16(bytes, 0x10, 1);
+        bytes[0x15] = 1;                            // song 1 on the CIA timer
+        code.CopyTo(bytes, headerSize);
+
+        var file = SidFile.Parse(bytes);
+        Assert.Null(file.UnsupportedReason());
+        var engine = new SidFilePlaybackEngine(file);
+        Render(engine, SidFilePlaybackEngine.SampleRate);
+
+        long calls = engine.PlayCalls;
+        Assert.InRange(calls, perSecond - 3, perSecond + 3);
+
+        // A tune that never changes its memory repeats at once: one play call, at the timer's rate.
+        var length = SidSongLength.Measure(file, maxFrames: 10);
+        Assert.Equal(perSecond, length!.CallsPerSecond, 3);
+    }
+
     /// <summary>Wraps the image the way SidExporter does. Duplicated here rather than called, because
     /// SidExporter lives in the WinForms project and a test project should not have to drag that
     /// in - the header is 12 fields and the shape is pinned by the round-trip test above.</summary>

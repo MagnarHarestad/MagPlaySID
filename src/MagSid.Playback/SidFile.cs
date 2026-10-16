@@ -38,10 +38,13 @@ public sealed class SidFile
 
     public int StartSong { get; private init; }
 
-    /// <summary>One bit per song, low bit first: 0 means play once per vertical blank, 1 means the
-    /// tune drives itself from a CIA timer. Anything but 0 needs a timer this player does not
-    /// emulate.</summary>
+    /// <summary>One bit per song, low bit first: 0 means play once per vertical blank, 1 means
+    /// play is driven by CIA 1's timer instead - see PlayRate.</summary>
     public uint Speed { get; private init; }
+
+    /// <summary>Whether <paramref name="song"/> (counting from 1) is played on the CIA timer. Songs
+    /// past the 32nd share the last bit, as the format has it.</summary>
+    public bool UsesCiaTimer(int song) => ((Speed >> (Math.Clamp(song, 1, 32) - 1)) & 1) != 0;
 
     /// <summary>The tune's own bytes, to be placed at <see cref="LoadAddress"/>.</summary>
     public byte[] Data { get; private init; } = [];
@@ -114,13 +117,6 @@ public sealed class SidFile
         {
             return "The tune has no play address, so it installs its own interrupt handler. This " +
                    "player calls play() once per frame instead and cannot drive it.";
-        }
-
-        // Bit 0 governs the first song; the rest matter only for tunes with several.
-        if ((Speed & 1) != 0)
-        {
-            return "The tune asks to be driven by a CIA timer rather than once per frame, which this " +
-                   "player does not emulate.";
         }
 
         if (LoadAddress + Data.Length - 1 > 0xFFFF)

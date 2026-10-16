@@ -418,7 +418,7 @@ public sealed class SidPlayerForm : Form
         if (_length is not { } length || length.LoopFrames <= 0 || elapsed <= length.Total)
             return elapsed;
 
-        double intoLoop = (elapsed - length.LoopStart).TotalSeconds % (length.LoopFrames / 50.0);
+        double intoLoop = (elapsed - length.LoopStart).TotalSeconds % length.Loop.TotalSeconds;
         return length.LoopStart + TimeSpan.FromSeconds(intoLoop);
     }
 
