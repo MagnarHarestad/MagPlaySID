@@ -24,6 +24,11 @@ public sealed class EditorSession
 {
     public Song Song { get; private set; } = CreateNewSong();
     public string? FilePath { get; private set; }
+
+    /// <summary>What the song is called before it has a file: the MIDI file it was imported from.
+    /// Its file's name once it has one.</summary>
+    public string? Name => FilePath is { } path ? Path.GetFileNameWithoutExtension(path) : _importedName;
+    private string? _importedName;
     public bool IsDirty { get; private set; }
 
     public event Action? StructureChanged;
@@ -67,6 +72,7 @@ public sealed class EditorSession
     {
         Song = CreateNewSong();
         FilePath = null;
+        _importedName = null;
         IsDirty = false;
         _history.Reset(Song);
         HistoryChanged?.Invoke();
@@ -85,10 +91,11 @@ public sealed class EditorSession
 
     /// <summary>A song made in the editor rather than read from a file - an import. It has no
     /// path yet and is unsaved, so closing asks before it is lost.</summary>
-    public void LoadImported(Song song)
+    public void LoadImported(Song song, string? name = null)
     {
         Song = song;
         FilePath = null;
+        _importedName = name;
         IsDirty = true;
         _history.Reset(Song);
         HistoryChanged?.Invoke();

@@ -1817,7 +1817,7 @@ public sealed class MainForm : Form
 
         _pathLabel.Text = _session.FilePath ?? "(unsaved)";
         _dirtyLabel.Text = _session.IsDirty ? "Modified" : "Saved";
-        Text = $"MagSID Editor {EditorVersion} - {Path.GetFileName(_session.FilePath) ?? "New Song"}{(_session.IsDirty ? " *" : "")}";
+        Text = $"MagSID Editor {EditorVersion} - {Path.GetFileName(_session.FilePath) ?? _session.Name ?? "New Song"}{(_session.IsDirty ? " *" : "")}";
     }
 
     private void DoNew()
@@ -1903,7 +1903,7 @@ public sealed class MainForm : Form
             return;
 
         StopSongForSwap();
-        _session.LoadImported(result.Song);
+        _session.LoadImported(result.Song, Path.GetFileNameWithoutExtension(open.FileName));
         ShowNotice($"Imported {Path.GetFileName(open.FileName)}: {result.Report.Bars} bars, {result.Report.TotalBytes} bytes");
     }
 
@@ -1920,7 +1920,11 @@ public sealed class MainForm : Form
 
     private void DoSaveAs()
     {
-        using var dialog = new SaveFileDialog { Filter = "Patterns.s files (*.s)|*.s|All files (*.*)|*.*" };
+        using var dialog = new SaveFileDialog
+        {
+            Filter = "Patterns.s files (*.s)|*.s|All files (*.*)|*.*",
+            FileName = _session.Name is { } name ? name + ".s" : "",
+        };
         if (dialog.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -2074,7 +2078,7 @@ public sealed class MainForm : Form
 
     private void DoExportSid()
     {
-        string defaultName = _session.FilePath is { } path ? Path.GetFileNameWithoutExtension(path) : "Untitled";
+        string defaultName = _session.Name ?? "Untitled";
 
         // The dialog needs the finished size to tell a usable load address from one that would run
         // the tune into I/O, and it must be the size of what actually gets exported - dead
