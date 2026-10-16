@@ -30,9 +30,10 @@ internal sealed unsafe class CoreMidiBackend : IMidiBackend
 
     public CoreMidiBackend()
     {
-        IntPtr coreMidi = NativeLibrary.Load(CoreMidi);
-        _displayName = *(IntPtr*)NativeLibrary.GetExport(coreMidi, "kMIDIPropertyDisplayName");
-        _plainName = *(IntPtr*)NativeLibrary.GetExport(coreMidi, "kMIDIPropertyName");
+        // The keys' own values, kMIDIPropertyDisplayName and kMIDIPropertyName: the exported
+        // constants read as null from here, and CoreMIDI then turns every query down (paramErr).
+        _displayName = CreateString("displayName");
+        _plainName = CreateString("name");
         IntPtr defaultMode = *(IntPtr*)NativeLibrary.GetExport(NativeLibrary.Load(CoreFoundation), "kCFRunLoopDefaultMode");
 
         int status = 0;
