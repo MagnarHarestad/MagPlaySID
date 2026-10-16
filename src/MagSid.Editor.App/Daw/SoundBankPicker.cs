@@ -41,6 +41,9 @@ internal sealed class SoundBankPicker : Control
     /// <summary>A double-click or the card's +: add it to the song.</summary>
     public event Action<GmBank.Sound>? Picked;
 
+    /// <summary>The line under the title: what a click and a pick do where the sheet is opened.</summary>
+    public string Hint { get; init; } = "Click to hear  ·  double-click or + to add to the song";
+
     public event Action? LoadRequested;
     public event Action? FolderRequested;
 
@@ -175,7 +178,7 @@ internal sealed class SoundBankPicker : Control
             g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
 
         TextRenderer.DrawText(g, "SOUND BANK", TitleFont, new Point(Margin_ - 2, 10), DawPalette.Text);
-        TextRenderer.DrawText(g, "Click to hear  ·  double-click or + to add to the song", HintFont,
+        TextRenderer.DrawText(g, Hint, HintFont,
             new Point(Margin_ - 1, 27), DawPalette.TextDim);
 
         foreach (var (title, top) in _sections)

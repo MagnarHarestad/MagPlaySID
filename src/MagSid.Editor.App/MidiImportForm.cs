@@ -42,9 +42,13 @@ public sealed class MidiImportForm : Form
     /// <summary>The song as the report describes it - set while the choices make one.</summary>
     public MidiImportResult? Result { get; private set; }
 
-    public MidiImportForm(MidiSong midi, string fileName)
+    /// <summary>Plays a sound of the bank before it is chosen - the editor's own audition.</summary>
+    private readonly Action<Instrument, NoteName>? _audition;
+
+    public MidiImportForm(MidiSong midi, string fileName, Action<Instrument, NoteName>? audition = null)
     {
         _midi = midi;
+        _audition = audition;
         _sources = midi.Sources();
 
         Text = "Import MIDI";
@@ -79,8 +83,9 @@ public sealed class MidiImportForm : Form
             "lead Lightforce's Lead1 - replaceable by files of your own in " + EditorSettings.BankDirectory +
             ". Load your own .json " +
             "instruments here (for Drums + bass, the bass; for Chords, the sound every chord is " +
-            "played on) or edit them afterwards. Chords reads the chord of each beat; an inversion " +
-            "is the same chord, so C-E-G and E-G-C share one instrument, and a chord has at most 4 notes."));
+            "played on), pick one from the Soundbank, or edit them afterwards. Chords reads the chord of " +
+            "each bar; an inversion is the same chord, so C-E-G and E-G-C share one instrument, a chord " +
+            "has at most 4 notes, and chords beyond the 16 instruments are picked note by note in the pattern."));
         root.Controls.Add(BuildButtons());
         Controls.Add(root);
 
@@ -152,6 +157,8 @@ public sealed class MidiImportForm : Form
             _octave[v].SelectedIndex = 3;
             _instrumentName[v] = new Label { AutoSize = true, Margin = new Padding(8, 8, 3, 3), MinimumSize = new Size(110, 0) };
 
+            var bank = SmallButton("Soundbank...");
+            bank.Click += (_, _) => ShowSoundBank(v, bank);
             var load = SmallButton("Load...");
             load.Click += (_, _) => LoadInstrument(v);
             var reset = SmallButton("Default");
@@ -169,6 +176,7 @@ public sealed class MidiImportForm : Form
             table.Controls.Add(_octave[v], 5, v);
             table.Controls.Add(_instrumentName[v], 6, v);
             var buttons = new FlowLayoutPanel { AutoSize = true, Margin = Padding.Empty };
+            buttons.Controls.Add(bank);
             buttons.Controls.Add(load);
             buttons.Controls.Add(reset);
             table.Controls.Add(buttons, 7, v);
@@ -362,6 +370,42 @@ public sealed class MidiImportForm : Form
             lines.Add($"The file changes tempo {report.TempoChanges} time{(report.TempoChanges == 1 ? "" : "s")}; the song keeps one speed.");
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>The sound bank's cards, dropped under the voice's button: a click plays a sound, a
+    /// double-click or its + makes it the voice's instrument - as Load does with a file.</summary>
+    private void ShowSoundBank(int voice, Control button)
+    {
+        var picker = new Daw.SoundBankPicker(GmBank.Load(EditorSettings.BankDirectory).All.ToList())
+        {
+            Hint = $"Click to hear  ·  double-click or + to play voice {voice + 1} on it",
+        };
+        var host = new ToolStripControlHost(picker) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = picker.Size };
+        var drop = new ToolStripDropDown { Padding = Padding.Empty, BackColor = Daw.DawPalette.Panel };
+        drop.Items.Add(host);
+        drop.Closed += (_, _) => BeginInvoke(drop.Dispose);
+
+        bool low = Role(voice) is VoiceRole.Bass or VoiceRole.DrumsAndBass;
+        picker.Auditioned += sound => _audition?.Invoke(sound.Instrument,
+            NoteName.Parse(low || sound.Key is "Bass" or "SynthBass" or "KickBass" ? "C-2" : "C-4"));
+        picker.Picked += sound =>
+        {
+            drop.Close();
+            _instrument[voice] = sound.Instrument;
+            Recalculate(sourcesChanged: false);
+        };
+        picker.LoadRequested += () =>
+        {
+            drop.Close();
+            BeginInvoke(() => LoadInstrument(voice));
+        };
+        picker.FolderRequested += () =>
+        {
+            drop.Close();
+            MagSid.Editor.App.Controls.InstrumentListHeader.OpenBankFolder();
+        };
+
+        drop.Show(button, new Point(0, button.Height + 2));
     }
 
     private void LoadInstrument(int voice)

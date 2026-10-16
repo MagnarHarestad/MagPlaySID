@@ -1898,7 +1898,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        using var dialog = new MidiImportForm(midi, Path.GetFileName(open.FileName));
+        using var dialog = new MidiImportForm(midi, Path.GetFileName(open.FileName), AuditionSound);
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Result is not { } result)
             return;
 
