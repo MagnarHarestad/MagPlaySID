@@ -53,7 +53,7 @@ public sealed class JamEngine : IWaveProvider, IDisposable
     private double _totalCyclesClocked;
     private double _nextFrameBoundaryCycles;
 
-    private WaveOutEvent? _output;
+    private IAudioOutput? _output;
     private bool _disposed;
 
     public WaveFormat WaveFormat { get; } = new(SampleRate, 16, 1);
@@ -222,9 +222,7 @@ public sealed class JamEngine : IWaveProvider, IDisposable
             return;
         }
 
-        _output = new WaveOutEvent { DesiredLatency = 100, NumberOfBuffers = 3 };
-        _output.Init(this);
-        _output.Play();
+        _output = AudioOutput.Start(this, latencyMs: 100);
     }
 
     /// <summary>One frame of automation for every voice, then the filter - same order

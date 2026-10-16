@@ -1,0 +1,51 @@
+name: build
+
+# The engine and its tests on all three systems, and the terminal SID player built for each.
+# The WinForms editor is Windows-only and is left to the Windows job.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Test the engine
+        shell: bash
+        run: |
+          for project in tests/MagSid.Sid.Tests tests/MagSid.Core.Tests tests/MagSid.Assembler.Tests tests/MagSid.Playback.Tests; do
+            dotnet test "$project" -c Release --logger "console;verbosity=minimal" || exit 1
+          done
+      - name: Build the terminal SID player
+        run: dotnet build tools/MagSid.SidPlay -c Release
+      - name: Build the Windows editor
+        if: runner.os == 'Windows'
+        run: dotnet build src/MagSid.Editor.App -c Release
+
+  sidplay:
+    needs: test
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Publish
+        run: dotnet publish tools/MagSid.SidPlay -c Release -r ${{ matrix.rid }} --self-contained true -o out/${{ matrix.rid }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magsid-sidplay-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}

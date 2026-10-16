@@ -9,6 +9,7 @@
     <!-- MIDI input for the DAW's knobs and step entry. Same package family as the audio, so
          nothing new travels with the single-file build. -->
     <PackageReference Include="NAudio.Midi" Version="2.2.1" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
     <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
   </ItemGroup>
 

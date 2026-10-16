@@ -25,7 +25,12 @@ static class Program
     // in before the resolver above is in place.
     [System.Runtime.CompilerServices.MethodImpl(
         System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static void Run() => Application.Run(new MainForm());
+    private static void Run()
+    {
+        // The engines in MagSid.Playback play through whatever the host gives them; here, waveOut.
+        MagSid.Playback.AudioOutput.Open = WaveOutAudioOutput.Open;
+        Application.Run(new MainForm());
+    }
 
     private static Assembly? ResolveFromAddons(AssemblyLoadContext context, AssemblyName name)
     {

@@ -32,6 +32,10 @@ public static class SidAudioExport
         if (format == Format.Wav)
             return true;
 
+        // Media Foundation is Windows'; on a Mac or Linux only WAV is written for now.
+        if (!OperatingSystem.IsWindows())
+            return false;
+
         try
         {
             MediaFoundationApi.Startup();

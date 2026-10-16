@@ -39,7 +39,7 @@ public sealed class NotePreviewPlayer : IWaveProvider, IDisposable
     private readonly object _chip = new();
     private readonly SidChip _sid = new();
 
-    private WaveOutEvent? _output;
+    private IAudioOutput? _output;
     private int _samplesUntilGateOff = -1; // -1 = nothing sounding
     private int _gateOffRegister;
     private bool _disposed;
@@ -111,9 +111,7 @@ public sealed class NotePreviewPlayer : IWaveProvider, IDisposable
 
         // Small buffers: this is a keystroke response, so latency matters more than the safety
         // margin a music player would want.
-        _output = new WaveOutEvent { DesiredLatency = 100, NumberOfBuffers = 3 };
-        _output.Init(this);
-        _output.Play();
+        _output = AudioOutput.Start(this, latencyMs: 100);
     }
 
     public int Read(byte[] buffer, int offset, int count)
