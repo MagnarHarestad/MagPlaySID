@@ -647,7 +647,7 @@ public class MidiImportTests
     {
         var sounds = GmBank.BuiltIn.All.ToList();
 
-        Assert.Equal(14, sounds.Count);
+        Assert.Equal(25, sounds.Count);
         Assert.All(sounds, s => Assert.Empty(SongValidator.ValidateInstrument(s.Instrument, s.Key)));
     }
 

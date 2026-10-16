@@ -8,11 +8,13 @@ namespace MagSid.Editor.App.Daw;
 /// sound, its family in colour over the instrument's name and the demo song it comes from, and
 /// small tags for what it carries. A click plays it, so a sound is heard before it is taken; a
 /// double-click, or the + that appears on the card under the mouse, adds it to the song. Loading
-/// a file and opening the bank folder sit along the bottom.
+/// a file and opening the bank folder sit along the bottom. Grouped as the bank groups them:
+/// instruments, drums, arpeggios.
 /// </summary>
 internal sealed class SoundBankPicker : Control
 {
-    private const int Columns = 2;
+    private const int Columns = 3;
+    private const int SectionHeight = 24;
     private const int CardWidth = 236;
     private const int CardHeight = 56;
     private const int Gap = 8;
@@ -27,6 +29,8 @@ internal sealed class SoundBankPicker : Control
     private static readonly Font HintFont = new("Segoe UI", 8f);
 
     private readonly IReadOnlyList<GmBank.Sound> _sounds;
+    private readonly Rectangle[] _cards;
+    private readonly List<(string Title, int Top)> _sections = [];
     private int _hovered = -1;
     private int _hoveredLink = -1;
     private int _playing = -1;
@@ -46,27 +50,43 @@ internal sealed class SoundBankPicker : Control
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                  ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         BackColor = DawPalette.Panel;
-        int rows = (sounds.Count + Columns - 1) / Columns;
+
+        // Each section starts a fresh row under its own title.
+        _cards = new Rectangle[sounds.Count];
+        int y = HeaderHeight, column = 0;
+        GmBank.BankSection? section = null;
+        for (int i = 0; i < sounds.Count; i++)
+        {
+            if (sounds[i].Section != section)
+            {
+                if (section is not null)
+                    y += CardHeight + Gap;
+                section = sounds[i].Section;
+                _sections.Add((section.ToString()!.ToUpperInvariant(), y));
+                y += SectionHeight;
+                column = 0;
+            }
+            else if (column == Columns)
+            {
+                y += CardHeight + Gap;
+                column = 0;
+            }
+
+            _cards[i] = new Rectangle(Margin_ + column * (CardWidth + Gap), y, CardWidth, CardHeight);
+            column++;
+        }
+
         Size = new Size(Margin_ * 2 + Columns * CardWidth + (Columns - 1) * Gap,
-                        HeaderHeight + rows * (CardHeight + Gap) - Gap + Margin_ + FooterHeight);
+                        y + CardHeight + Margin_ + FooterHeight);
     }
 
-    /// <summary>The family a sound stands for, as the card names it.</summary>
-    private static string Family(string key) => key switch
-    {
-        "SynthBass" => "SYNTH BASS",
-        "SynthLead" => "SYNTH LEAD",
-        "SynthPad" => "SYNTH PAD",
-        "SynthFx" => "SYNTH FX",
-        _ => key.ToUpperInvariant(),
-    };
+    /// <summary>What a sound is, as the card's top line names it.</summary>
+    private static string Family(string key) =>
+        MagSid.Editor.App.Controls.InstrumentListHeader.SoundLabel(key).ToUpperInvariant();
 
     private static Color Accent(int index) => DawPalette.ForInstrument(index + 1);
 
-    private Rectangle CardBounds(int index) => new(
-        Margin_ + index % Columns * (CardWidth + Gap),
-        HeaderHeight + index / Columns * (CardHeight + Gap),
-        CardWidth, CardHeight);
+    private Rectangle CardBounds(int index) => _cards[index];
 
     private Rectangle AddBounds(int index)
     {
@@ -157,6 +177,15 @@ internal sealed class SoundBankPicker : Control
         TextRenderer.DrawText(g, "SOUND BANK", TitleFont, new Point(Margin_ - 2, 10), DawPalette.Text);
         TextRenderer.DrawText(g, "Click to hear  ·  double-click or + to add to the song", HintFont,
             new Point(Margin_ - 1, 27), DawPalette.TextDim);
+
+        foreach (var (title, top) in _sections)
+        {
+            var size = TextRenderer.MeasureText(g, title, SmallFont, Size.Empty, TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, title, SmallFont, new Point(Margin_, top + 4), DawPalette.TextDim, TextFormatFlags.NoPadding);
+            using var rule = new Pen(DawPalette.BorderSoft);
+            int middle = top + 4 + size.Height / 2;
+            g.DrawLine(rule, Margin_ + size.Width + 8, middle, Width - Margin_, middle);
+        }
 
         for (int i = 0; i < _sounds.Count; i++)
             DrawCard(g, i);

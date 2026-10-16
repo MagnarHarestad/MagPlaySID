@@ -1,0 +1,37 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Arp F fast",
+  "waveform": "$21",
+  "attackDecay": "$00",
+  "sustainRelease": "$8A",
+  "pulse": {
+    "width": 2,
+    "sweep": 22,
+    "continuous": true
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$41",
+    "$41",
+    "$20"
+  ],
+  "noteProgram": {
+    "steps": [
+      "A-4",
+      "C-5",
+      "F-4"
+    ],
+    "ending": "loop",
+    "loopPoint": 0
+  },
+  "filterProgram": []
+}

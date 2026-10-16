@@ -126,20 +126,36 @@ public sealed class InstrumentListHeader : Panel
     /// user's own files over them - for this header's menu and the DAW's SOUNDBANK button alike.</summary>
     public static void AddBankItems(ToolStripItemCollection items, Action<GmBank.Sound> picked)
     {
+        GmBank.BankSection? section = null;
         foreach (var sound in GmBank.Load(EditorSettings.BankDirectory).All)
         {
-            var item = new ToolStripMenuItem($"{Pretty(sound.Key)}  -  {sound.Instrument.Name} ({sound.Origin})");
+            if (section is not null && sound.Section != section)
+                items.Add(new ToolStripSeparator());
+            section = sound.Section;
+
+            var item = new ToolStripMenuItem($"{SoundLabel(sound.Key)}  -  {sound.Instrument.Name} ({sound.Origin})");
             item.Click += (_, _) => picked(sound);
             items.Add(item);
         }
     }
 
-    private static string Pretty(string key) => key switch
+    /// <summary>What a sound of the bank is, by its key - the menu's words and the sound bank
+    /// cards' family line.</summary>
+    public static string SoundLabel(string key) => key switch
     {
         "SynthBass" => "Synth bass",
         "SynthLead" => "Synth lead",
         "SynthPad" => "Synth pad",
         "SynthFx" => "Synth FX",
+        "KickBass" => "Kick bass",
+        "Snare2" or "Snare3" => "Snare",
+        "Noise" => "Hi-hat",
+        "ArpMinor" => "Arp minor, 1 frame",
+        "ArpMinor2" => "Arp minor, 2 frames",
+        "ArpMinor3" => "Arp minor, 3 frames",
+        "ArpMajor" => "Arp major, 1 frame",
+        "ArpMajor2" => "Arp major, 2 frames",
+        "ArpMajor3" => "Arp major, 3 frames",
         _ => key,
     };
 

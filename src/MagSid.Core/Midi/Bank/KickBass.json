@@ -1,0 +1,74 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Basskick",
+  "waveform": "$41",
+  "attackDecay": "$07",
+  "sustainRelease": "$F7",
+  "pulse": {
+    "width": 7,
+    "sweep": 0,
+    "continuous": false
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$81",
+    "$41"
+  ],
+  "noteProgram": {
+    "steps": [
+      "B-7",
+      "B-7",
+      "D-3",
+      "F#2"
+    ],
+    "ending": "root",
+    "loopPoint": 0
+  },
+  "filterProgram": [
+    {
+      "modeVolume": "$6F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$38",
+      "sweep": 0
+    },
+    {
+      "cutoff": "$38"
+    },
+    {
+      "modeVolume": "$3F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$03",
+      "sweep": 0
+    },
+    {
+      "cutoff": "$02"
+    },
+    {
+      "modeVolume": "$1F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$18",
+      "sweep": 0
+    },
+    {
+      "cutoff": "$10"
+    },
+    {
+      "cutoff": "$08"
+    },
+    {
+      "cutoff": "$05"
+    },
+    {
+      "cutoff": "$04"
+    }
+  ]
+}

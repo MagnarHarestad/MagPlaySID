@@ -436,7 +436,7 @@ internal sealed class DawView : Panel
         drop.Closed += (_, _) => BeginInvoke(drop.Dispose);
 
         picker.Auditioned += sound => SoundAuditionRequested?.Invoke(sound.Instrument,
-            MagSid.Core.Model.NoteName.Parse(sound.Key is "Bass" or "SynthBass" ? "C-2" : "C-4"));
+            MagSid.Core.Model.NoteName.Parse(sound.Key is "Bass" or "SynthBass" or "KickBass" ? "C-2" : "C-4"));
         picker.Picked += sound =>
         {
             drop.Close();

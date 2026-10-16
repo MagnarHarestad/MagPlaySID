@@ -11,19 +11,39 @@ namespace MagSid.Core.Midi;
 /// The sounds ship inside the editor as instrument files. A folder of the user's own can replace
 /// any of them: a file there named after a sound's key - Piano.json, Bass.json - is used instead,
 /// so saving an instrument under that name is all it takes to change what a piano becomes.
+///
+/// Beside the 14 family sounds the bank carries drums and arpeggios from the demo songs. No GM
+/// program maps to them - they are there to be picked by hand from the sound bank.
 /// </summary>
 public sealed class GmBank
 {
     /// <summary>One sound of the bank and the demo song it comes from.</summary>
-    public sealed record Sound(string Key, string Origin, Instrument Instrument);
+    public sealed record Sound(string Key, string Origin, Instrument Instrument)
+    {
+        /// <summary>The group the sound bank shows it under.</summary>
+        public BankSection Section => Sounds.First(s => s.Key == Key).Section;
+    }
 
-    private static readonly (string Key, string Origin)[] Sounds =
+    public enum BankSection { Instruments, Drums, Arpeggios }
+
+    private static readonly (string Key, string Origin, BankSection Section)[] Sounds =
     [
-        ("Piano", "Magnificent"), ("Bells", "Magnificent"), ("Organ", "CityBomber4k"),
-        ("Guitar", "Breakdance"), ("Bass", "Magnificent"), ("SynthBass", "Clarity"),
-        ("Strings", "Fairlighty"), ("Brass", "Airstrike"), ("Reed", "BellaCiao"),
-        ("Flute", "Clarity"), ("SynthLead", "Lightforce"), ("SynthPad", "Clarity"),
-        ("SynthFx", "Breakdance"), ("Noise", "Breakdance"),
+        ("Piano", "Magnificent", BankSection.Instruments), ("Bells", "Magnificent", BankSection.Instruments),
+        ("Organ", "CityBomber4k", BankSection.Instruments), ("Guitar", "Breakdance", BankSection.Instruments),
+        ("Bass", "Magnificent", BankSection.Instruments), ("SynthBass", "Clarity", BankSection.Instruments),
+        ("Strings", "Fairlighty", BankSection.Instruments), ("Brass", "Airstrike", BankSection.Instruments),
+        ("Reed", "BellaCiao", BankSection.Instruments), ("Flute", "Clarity", BankSection.Instruments),
+        ("SynthLead", "Lightforce", BankSection.Instruments), ("SynthPad", "Clarity", BankSection.Instruments),
+        ("SynthFx", "Breakdance", BankSection.Instruments),
+
+        ("Kick", "Lightforce", BankSection.Drums), ("KickBass", "Magnificent", BankSection.Drums),
+        ("Snare", "Magnificent", BankSection.Drums), ("Snare2", "Lightforce", BankSection.Drums),
+        ("Snare3", "Clarity", BankSection.Drums), ("Noise", "Breakdance", BankSection.Drums),
+
+        // The same chord at three speeds: each note held one, two or three frames.
+        ("ArpMinor", "Magnificent", BankSection.Arpeggios), ("ArpMinor2", "Magnificent", BankSection.Arpeggios),
+        ("ArpMinor3", "Magnificent", BankSection.Arpeggios), ("ArpMajor", "Magnificent", BankSection.Arpeggios),
+        ("ArpMajor2", "Magnificent", BankSection.Arpeggios), ("ArpMajor3", "Magnificent", BankSection.Arpeggios),
     ];
 
     /// <summary>The 16 GM families in program order, eight programs each.</summary>
@@ -49,7 +69,7 @@ public sealed class GmBank
     {
         var assembly = typeof(GmBank).Assembly;
         var sounds = new Dictionary<string, Sound>();
-        foreach (var (key, origin) in Sounds)
+        foreach (var (key, origin, _) in Sounds)
         {
             string? own = overrideDirectory is null ? null : Path.Combine(overrideDirectory, key + ".json");
             if (own is not null && File.Exists(own))

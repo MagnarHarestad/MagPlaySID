@@ -1,0 +1,62 @@
+{
+  "format": "MagSID instrument",
+  "version": 1,
+  "name": "Snare",
+  "waveform": "$81",
+  "attackDecay": "$00",
+  "sustainRelease": "$97",
+  "pulse": {
+    "width": 7,
+    "sweep": 0,
+    "continuous": false
+  },
+  "hardRestart": {
+    "off": false,
+    "soft": false
+  },
+  "vibrato": {
+    "delaySpeed": "$00",
+    "depth": "$00"
+  },
+  "wavetable": [
+    "$09",
+    "$81",
+    "$41",
+    "$41",
+    "$80"
+  ],
+  "noteProgram": {
+    "steps": [
+      "B-7",
+      "B-7",
+      "G-3",
+      "E-3",
+      "B-7"
+    ],
+    "ending": "loop",
+    "loopPoint": 3
+  },
+  "filterProgram": [
+    {
+      "modeVolume": "$3F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$68",
+      "sweep": 0
+    },
+    {
+      "cutoff": "$68"
+    },
+    {
+      "modeVolume": "$6F",
+      "resonanceRouting": "$F1",
+      "cutoff": "$04",
+      "sweep": 0
+    },
+    {
+      "cutoff": "$03"
+    },
+    {
+      "cutoff": "$04"
+    }
+  ]
+}
