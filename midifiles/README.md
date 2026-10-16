@@ -1,11 +1,11 @@
 # MIDI files for trying Import MIDI
 
-Nineteen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Eighteen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and every file comes from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The files are Mutopia's own MIDI renderings, unchanged apart from their names.
 
-Fifteen are dedicated to the public domain. Four are under Creative Commons ShareAlike licences, which ask for
+Fifteen are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
 credit and that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -32,11 +32,9 @@ Every file is imported, exported and played on the emulated 6502 by
 | `blue-danube.mid` | The Blue Danube Waltz (main theme) | J. Strauss Jr. (1825–1899) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=519) | [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | `wedding-march.mid` | MARCHE NUPTIALE (Wedding march) | F. Mendelssohn-Bartholdy (1809–1847) | [for Organ](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2198) | [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | `carmen-prelude.mid` | Carmen - Prelude | G. Bizet (1838–1875) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=635) | [Creative Commons Attribution-ShareAlike 2.5](https://creativecommons.org/licenses/by-sa/2.5/) |
-| `nocturne-op9-no2.mid` | Nocturne | F. F. Chopin (1810–1849) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1590) | [Creative Commons Attribution-ShareAlike 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
 
 ## Credits for the Creative Commons files
 
 - **The Blue Danube Waltz (main theme)** (`blue-danube.mid`) - J. Strauss Jr. (1825–1899). Typeset for the Mutopia Project by Nikos Kouremenos (arranger and maintainer). Licensed under [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Original file: https://www.mutopiaproject.org/ftp/StraussJJ/O314/blue_danube/blue_danube.mid
 - **MARCHE NUPTIALE (Wedding march)** (`wedding-march.mid`) - F. Mendelssohn-Bartholdy (1809–1847). Typeset for the Mutopia Project by Alexander Brock (maintainer); organ transcription by Théodore Dubois. Licensed under [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Original file: https://www.mutopiaproject.org/ftp/Mendelssohn-BartholdyF/O61/Sommernachtstraum-wedding-march/Sommernachtstraum-wedding-march.mid
 - **Carmen - Prelude** (`carmen-prelude.mid`) - G. Bizet (1838–1875). Typeset for the Mutopia Project by Alex O'S (maintainer). Licensed under [Creative Commons Attribution-ShareAlike 2.5](https://creativecommons.org/licenses/by-sa/2.5/). Original file: https://www.mutopiaproject.org/ftp/BizetG/prelude/prelude.mid
-- **Nocturne** (`nocturne-op9-no2.mid`) - F. F. Chopin (1810–1849). Typeset for the Mutopia Project by Renato Biolcati Rinaldi (maintainer). Licensed under [Creative Commons Attribution-ShareAlike 3.0](https://creativecommons.org/licenses/by-sa/3.0/). Original file: https://www.mutopiaproject.org/ftp/ChopinFF/O9/chopin_nocturne_op9_n2/chopin_nocturne_op9_n2.mid
