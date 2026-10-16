@@ -25,11 +25,14 @@ internal sealed unsafe class CoreMidiBackend : IMidiBackend
     private uint _client;
     private uint _port;
     private readonly IntPtr _displayName;
+    private readonly IntPtr _plainName;
     private uint _connected;
 
     public CoreMidiBackend()
     {
-        _displayName = *(IntPtr*)NativeLibrary.GetExport(NativeLibrary.Load(CoreMidi), "kMIDIPropertyDisplayName");
+        IntPtr coreMidi = NativeLibrary.Load(CoreMidi);
+        _displayName = *(IntPtr*)NativeLibrary.GetExport(coreMidi, "kMIDIPropertyDisplayName");
+        _plainName = *(IntPtr*)NativeLibrary.GetExport(coreMidi, "kMIDIPropertyName");
         IntPtr defaultMode = *(IntPtr*)NativeLibrary.GetExport(NativeLibrary.Load(CoreFoundation), "kCFRunLoopDefaultMode");
 
         int status = 0;
@@ -140,9 +143,14 @@ internal sealed unsafe class CoreMidiBackend : IMidiBackend
         }
     }
 
-    private string? NameOf(uint endpoint)
+    /// <summary>The name a keyboard shows in Audio MIDI Setup - its device's and its own together -
+    /// or, for a virtual source, which has no device, its own plain name.</summary>
+    private string? NameOf(uint endpoint) =>
+        endpoint == 0 ? null : StringProperty(endpoint, _displayName) ?? StringProperty(endpoint, _plainName);
+
+    private static string? StringProperty(uint endpoint, IntPtr property)
     {
-        if (endpoint == 0 || MIDIObjectGetStringProperty(endpoint, _displayName, out IntPtr text) != 0 || text == IntPtr.Zero)
+        if (MIDIObjectGetStringProperty(endpoint, property, out IntPtr text) != 0 || text == IntPtr.Zero)
             return null;
 
         try
