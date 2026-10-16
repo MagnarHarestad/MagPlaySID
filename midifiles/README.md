@@ -1,16 +1,14 @@
 # MIDI files for trying Import MIDI
 
-Fifteen tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Fourteen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and thirteen files come from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The Entertainer is R. D. Tennent's arrangement for four recorders, from [IMSLP](https://imslp.org) and
 the Werner Icking Music Collection - four separate lines, which suit three SID voices better than a
-piano's two hands. `faststage.mid` is a new tune, not a classic: Tozan's "Melody Chords With Drums" from
-[OpenGameArt](https://opengameart.org), written as game music with a drum kit, a bass line and a piano
-playing the chords and the tune - the rhythm section the importer puts on channel 1. The files are their
+piano's two hands. The files are their
 sources' own MIDI renderings, unchanged apart from their names.
 
-Twelve are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
+Eleven are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
 credit and that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -22,7 +20,6 @@ Every file is imported, exported and played on the emulated 6502 by
 | `fur-elise.mid` | Für Elise | L. V. Beethoven (1770–1827) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931) | Public Domain |
 | `rondo-alla-turca.mid` | Sonate Opus KV 331 - Rondo Alla Turca | W. A. Mozart (1756–1791) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=108) | Public Domain |
 | `eine-kleine-nachtmusik.mid` | Eine kleine Nachtmusik (1st movement) | W. A. Mozart (1756–1791) | [for String Quartet: Violins, Viola, Cello or Double Bass](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=900) | Public Domain |
-| `faststage.mid` | Melody Chords With Drums | Tozan | [OpenGameArt](https://opengameart.org/content/melody-chords-with-drums) | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `the-entertainer.mid` | The Entertainer | S. Joplin (1868–1917) | [for 4 Recorders, arr. R. D. Tennent](https://imslp.org/wiki/The_Entertainer_(Joplin,_Scott)) | [Creative Commons Attribution-ShareAlike 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 | `hall-of-the-mountain-king.mid` | In the Hall of the Mountain King | E. Grieg (1843–1907) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1888) | Public Domain |
 | `toccata-and-fugue-in-d-minor.mid` | Toccata and Fugue in D Minor | J. S. Bach (1685–1750) | [for Organ](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1780) | Public Domain |
