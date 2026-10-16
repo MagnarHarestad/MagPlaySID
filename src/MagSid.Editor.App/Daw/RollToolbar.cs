@@ -23,8 +23,8 @@ internal enum RollTool
 /// Each button names itself in a tooltip, since an icon is a reminder of something you already
 /// know and a name is how you learn it.
 ///
-/// After the tools come the take's own switches: REC, red as a record button is, and CLICK and
-/// PUNCH in the view's cyan - the same shape, so they read as one group.
+/// After the tools come the take's own switches: REC, red as a record button is, and CLICK,
+/// PUNCH and PRE-ROLL in the view's cyan - the same shape, so they read as one group.
 /// </summary>
 internal sealed class RollToolbar : Control
 {
@@ -34,13 +34,14 @@ internal sealed class RollToolbar : Control
     private const int Left0 = 10;
     private const int SwitchGap = 18;
 
-    private enum Switch { Rec, Click, Punch }
+    private enum Switch { Rec, Click, Punch, PreRoll }
 
     private static readonly (Switch Switch, string Label, int Width, string Help)[] Switches =
     [
         (Switch.Rec, "REC", 52, "Record into the selected clip's pattern from a MIDI or computer keyboard, while the song plays from there."),
         (Switch.Click, "CLICK", 62, "A click on every beat while recording - over the pre-roll bar when PRE-ROLL is on, otherwise a one-bar count-in first."),
         (Switch.Punch, "PUNCH", 66, "Record only between the locators: the left one is the punch-in, the right one the punch-out."),
+        (Switch.PreRoll, "PRE-ROLL", 80, "Start the song a bar before the recording starts, so you are in time when it does. Nothing is written in that bar."),
     ];
 
     private static readonly Color RecRed = Color.FromArgb(0xF0, 0x3E, 0x4E);
@@ -59,7 +60,7 @@ internal sealed class RollToolbar : Control
     private readonly ToolTip _tips = new() { InitialDelay = 400, ReshowDelay = 100 };
     private RollTool _tool = RollTool.Draw;
     private int _hovered = -1;
-    private bool _recording, _click, _punch;
+    private bool _recording, _click, _punch, _preRoll = true;
 
     /// <summary>REC pressed: true to start a take, false to stop it.</summary>
     public event Action<bool>? RecordToggled;
@@ -91,6 +92,16 @@ internal sealed class RollToolbar : Control
         set
         {
             _punch = value;
+            Invalidate();
+        }
+    }
+
+    public bool PreRollOn
+    {
+        get => _preRoll;
+        set
+        {
+            _preRoll = value;
             Invalidate();
         }
     }
@@ -154,7 +165,8 @@ internal sealed class RollToolbar : Control
     {
         Switch.Rec => _recording,
         Switch.Click => _click,
-        _ => _punch,
+        Switch.Punch => _punch,
+        _ => _preRoll,
     };
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -193,6 +205,7 @@ internal sealed class RollToolbar : Control
                 case Switch.Rec: RecordToggled?.Invoke(!_recording); break;
                 case Switch.Click: ClickOn = !_click; break;
                 case Switch.Punch: PunchOn = !_punch; break;
+                case Switch.PreRoll: PreRollOn = !_preRoll; break;
             }
         }
 
@@ -260,6 +273,11 @@ internal sealed class RollToolbar : Control
                     // A metronome: its case and the arm.
                     g.DrawPolygon(pen, new PointF[] { new(cx - 4, cy + 4.5f), new(cx - 1.5f, cy - 4.5f), new(cx + 1.5f, cy - 4.5f), new(cx + 4, cy + 4.5f) });
                     g.DrawLine(pen, cx, cy + 2.5f, cx + 3.5f, cy - 5);
+                    break;
+                case Switch.PreRoll:
+                    // A bar line with the play arrow coming up to it.
+                    g.DrawLine(pen, cx + 4.5f, cy - 5, cx + 4.5f, cy + 5);
+                    g.FillPolygon(mark, new PointF[] { new(cx - 4.5f, cy - 4), new(cx + 2, cy), new(cx - 4.5f, cy + 4) });
                     break;
                 default:
                     // Brackets round the stretch that is written.

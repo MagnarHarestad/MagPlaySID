@@ -51,7 +51,6 @@ internal sealed class DawView : Panel
     private readonly Panel _renameHost = new() { Visible = false, BackColor = RenameBack };
     private readonly ToggleButton _autoScroll = new("AUTOSCROLL") { Checked = true, Accent = DawPalette.Oscillator };
     private readonly ToggleButton _cycle = new("CYCLE") { Accent = DawPalette.Oscillator };
-    private readonly ToggleButton _preRoll = new("PRE-ROLL") { Checked = true, Accent = DawPalette.Oscillator };
 
     /// <summary>Notes are written only while this is open - between the punch-in and the
     /// punch-out. Closing it lets go of a held key there.</summary>
@@ -221,7 +220,7 @@ internal sealed class DawView : Panel
         set => _cycle.Checked = value;
     }
 
-    public bool PreRollOn => _preRoll.Checked;
+    public bool PreRollOn => _tools.PreRollOn;
 
     public bool ClickOn => _tools.ClickOn;
 
@@ -558,13 +557,6 @@ internal sealed class DawView : Panel
         _arrange.LocatorsChanged += () => CycleChanged?.Invoke();
         _tabs.Controls.Add(_cycle);
 
-        // How a take starts: PRE-ROLL plays the bar before the punch-in. CLICK and PUNCH sit with
-        // REC in the roll's tool row.
-        _preRoll.Size = new Size(76, 26);
-        _preRoll.BackColor = DawPalette.PanelHeader;
-        _preRoll.Margin = new Padding(6, 0, 0, 0);
-        _tabs.Controls.Add(_preRoll);
-
         // The octave the typing keys play in, where it can be seen. A keyboard that plays two
         // octaves off and says nothing about it reads as a tuning fault.
         _octaveLabel.Text = $"OCT {Octave}";
@@ -892,7 +884,6 @@ internal sealed class DawView : Panel
         _autoScroll.Visible = tab == DawTab.Arrange;
         _soundBank.Visible = tab == DawTab.Instrument;
         _cycle.Visible = tab == DawTab.Arrange;
-        _preRoll.Visible = tab == DawTab.Arrange;
 
         foreach (var button in _tabButtons)
             button.Active = (DawTab)button.Tag! == tab;
