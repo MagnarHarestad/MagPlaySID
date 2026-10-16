@@ -246,6 +246,7 @@ public sealed class MainWindow : Window
                 Item("Save", () => _ = SaveAsync(saveAs: false), $"{command}+S"),
                 Item("Save As...", () => _ = SaveAsync(saveAs: true), $"{command}+Shift+S"),
                 new Separator(),
+                Item("Export to .sid...", () => _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this), "F9"),
                 Item("Load and Play .sid...", () => new SidPlayerWindow().Show()),
                 new Separator(),
                 Item("Quit", Close),
@@ -318,6 +319,9 @@ public sealed class MainWindow : Window
                 break;
             case Key.F4:
                 StopTransport();
+                break;
+            case Key.F9:
+                _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this);
                 break;
             case Key.F5:
             case Key.Space when e.KeyModifiers == KeyModifiers.None:
