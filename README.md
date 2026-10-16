@@ -20,8 +20,12 @@ for technical advice and tools.
 >    linked into `src/MagSid.Editor.Views`, which compiles it against `Shim/`, a WinForms and GDI+ face
 >    over Avalonia. Around it, `MainWindow` has the song's files, undo, the instrument list and an
 >    instrument editor, playback with F1/F2/F3/F4 and the grid following, note entry and jamming, and
->    Export to .sid (F9). Not yet: Import MIDI, Optimize, a MIDI keyboard, the sound bank.
-> 4. The DAW view - the piano roll and the arrange are owner-drawn too, so they go the grid's way.
+>    Export to .sid (F9). Not yet: Import MIDI, Optimize, a MIDI keyboard, the sound bank in Retro.
+> 4. **The DAW view** - in. The **DAW** menu switches to it. The Windows editor's whole `Daw/` folder
+>    (arrange, piano roll, instrument page, sound bank) is linked unchanged too. The shim now also does
+>    WinForms layout (Dock, Anchor, flow and table panels), text boxes, list boxes, menus and popups.
+>    The arrange tools, the roll, REC/CLICK/PUNCH/PRE-ROLL, Cycle and the piano keys are wired as in the
+>    Windows editor, and the playheads follow playback.
 > 5. Signed releases.
 >
 > GitHub Actions tests the engine on Windows, macOS and Linux and builds the Mac app on every push. The

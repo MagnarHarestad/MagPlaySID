@@ -102,6 +102,25 @@ public sealed class GmBank
     /// <summary>The sound for <paramref name="program"/>, or null when the part names none.</summary>
     public Sound? For(int? program) => program is { } p ? _sounds[KeyFor(p)] : null;
 
+    /// <summary>What a sound of the bank is, by its key, for a menu or a card.</summary>
+    public static string Label(string key) => key switch
+    {
+        "SynthBass" => "Synth bass",
+        "SynthLead" => "Synth lead",
+        "SynthPad" => "Synth pad",
+        "SynthFx" => "Synth FX",
+        "KickBass" => "Kick bass",
+        "Snare2" or "Snare3" => "Snare",
+        "Noise" => "Hi-hat",
+        "ArpMinor" => "Arp minor, 1 frame",
+        "ArpMinor2" => "Arp minor, 2 frames",
+        "ArpMinor3" => "Arp minor, 3 frames",
+        "ArpMajor" => "Arp major, 1 frame",
+        "ArpMajor2" => "Arp major, 2 frames",
+        "ArpMajor3" => "Arp major, 3 frames",
+        _ => key,
+    };
+
     /// <summary>General MIDI's names for its 16 families, for showing a program.</summary>
     public static string FamilyName(int program) => new[]
     {

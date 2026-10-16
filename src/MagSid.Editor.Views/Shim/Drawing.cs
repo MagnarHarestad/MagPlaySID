@@ -564,7 +564,7 @@ internal static class Shim
         if (TextCache.Count > 8192)
             TextCache.Clear();
 
-        var formatted = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, font.Typeface, font.PixelSize, brush);
+        var formatted = new FormattedText(text, CultureInfo.InvariantCulture, Avalonia.Media.FlowDirection.LeftToRight, font.Typeface, font.PixelSize, brush);
         TextCache[key] = formatted;
         return formatted;
     }

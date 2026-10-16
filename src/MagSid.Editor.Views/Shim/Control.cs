@@ -7,6 +7,7 @@ using System.Drawing;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -87,6 +88,21 @@ public class Control : AvControl, IWin32Window, IDisposable
     private IPointer? _pointer;
     private MouseButtons _pressed;
     private Size _lastSize;
+    private ControlCollection? _controls;
+
+    // WinForms sizes and places a control by asking it to be so big at such a place; Avalonia by
+    // laying it out. The asked-for values are kept here and used by the parent's layout (see
+    // ArrangeOverride); reading Width gives the laid-out width once there is one, the asked-for
+    // one until then - the same as a WinForms control that has not been docked yet.
+    private int _requestedWidth;
+    private int _requestedHeight;
+    private bool _widthAsked;
+    private bool _heightAsked;
+    private Point _location;
+    private DockStyle _dock;
+    private Padding _padding;
+    private Padding _margin = new(3);
+    private string _text = string.Empty;
 
     public Control()
     {
@@ -94,18 +110,38 @@ public class Control : AvControl, IWin32Window, IDisposable
         ClipToBounds = true;
     }
 
-    // ---------------------------------------------------------------- what WinForms code reads
+    // ---------------------------------------------------------------- size and place
+
+    protected virtual Size DefaultSize => Size.Empty;
+
+    protected virtual Padding DefaultMargin => new(3);
+
+    internal int RequestedWidth => _widthAsked ? _requestedWidth : DefaultSize.Width;
+
+    internal int RequestedHeight => _heightAsked ? _requestedHeight : DefaultSize.Height;
 
     public new int Width
     {
-        get => (int)Math.Round(Bounds.Width);
-        set => base.Width = value;
+        get => _widthAsked || base.Bounds.Width <= 0 ? RequestedWidth : (int)Math.Round(base.Bounds.Width);
+        set
+        {
+            _requestedWidth = Math.Max(0, value);
+            _widthAsked = true;
+            InvalidateMeasure();
+            (base.Parent as Layoutable)?.InvalidateArrange();
+        }
     }
 
     public new int Height
     {
-        get => (int)Math.Round(Bounds.Height);
-        set => base.Height = value;
+        get => _heightAsked || base.Bounds.Height <= 0 ? RequestedHeight : (int)Math.Round(base.Bounds.Height);
+        set
+        {
+            _requestedHeight = Math.Max(0, value);
+            _heightAsked = true;
+            InvalidateMeasure();
+            (base.Parent as Layoutable)?.InvalidateArrange();
+        }
     }
 
     public Size Size
@@ -113,8 +149,8 @@ public class Control : AvControl, IWin32Window, IDisposable
         get => new(Width, Height);
         set
         {
-            base.Width = value.Width;
-            base.Height = value.Height;
+            Width = value.Width;
+            Height = value.Height;
         }
     }
 
@@ -124,21 +160,269 @@ public class Control : AvControl, IWin32Window, IDisposable
         set => Size = value;
     }
 
+    public Point Location
+    {
+        get => _location;
+        set
+        {
+            _location = value;
+            (base.Parent as Layoutable)?.InvalidateArrange();
+        }
+    }
+
+    public int Left
+    {
+        get => _location.X;
+        set => Location = new Point(value, _location.Y);
+    }
+
+    public int Top
+    {
+        get => _location.Y;
+        set => Location = new Point(_location.X, value);
+    }
+
+    public int Right => Left + Width;
+
+    public int Bottom => Top + Height;
+
+    /// <summary>Where the control sits in its parent and how big - WinForms' Bounds. Avalonia's own
+    /// Bounds (a Rect) stays what the layout gave it.</summary>
+    public new Rectangle Bounds
+    {
+        get => new(Left, Top, Width, Height);
+        set
+        {
+            _location = value.Location;
+            Width = value.Width;
+            Height = value.Height;
+        }
+    }
+
+    internal Avalonia.Rect LaidOut => base.Bounds;
+
     public Rectangle ClientRectangle => new(0, 0, Width, Height);
 
-    public Rectangle DisplayRectangle => ClientRectangle;
+    public Rectangle DisplayRectangle => new(_padding.Left, _padding.Top,
+        Math.Max(0, Width - _padding.Horizontal), Math.Max(0, Height - _padding.Vertical));
+
+    public DockStyle Dock
+    {
+        get => _dock;
+        set
+        {
+            _dock = value;
+            (base.Parent as Layoutable)?.InvalidateArrange();
+        }
+    }
+
+    public AnchorStyles Anchor { get; set; } = AnchorStyles.Top | AnchorStyles.Left;
+
+    public Padding Padding
+    {
+        get => _padding;
+        set
+        {
+            _padding = value;
+            InvalidateArrange();
+        }
+    }
+
+    public new Padding Margin
+    {
+        get => _margin;
+        set
+        {
+            _margin = value;
+            (base.Parent as Layoutable)?.InvalidateArrange();
+        }
+    }
+
+    public virtual bool AutoSize { get; set; }
+
+    /// <summary>A flow panel's direction. On every control because WinForms code names the enum
+    /// from inside its own controls, where Avalonia's FlowDirection property would otherwise be
+    /// what the name means.</summary>
+    public new FlowDirection FlowDirection { get; set; }
+
+    /// <summary>Avalonia's alignment, under WinForms' enum - the name WinForms code uses for a text
+    /// box's alignment, which must not find Avalonia's property first.</summary>
+    public new HorizontalAlignment HorizontalAlignment
+    {
+        get => base.HorizontalAlignment switch
+        {
+            Avalonia.Layout.HorizontalAlignment.Center => HorizontalAlignment.Center,
+            Avalonia.Layout.HorizontalAlignment.Right => HorizontalAlignment.Right,
+            _ => HorizontalAlignment.Left,
+        };
+        set => base.HorizontalAlignment = value switch
+        {
+            HorizontalAlignment.Center => Avalonia.Layout.HorizontalAlignment.Center,
+            HorizontalAlignment.Right => Avalonia.Layout.HorizontalAlignment.Right,
+            _ => Avalonia.Layout.HorizontalAlignment.Left,
+        };
+    }
+
+    public AutoSizeMode AutoSizeMode { get; set; }
+
+    public Size MinimumSize { get; set; }
+
+    public Size MaximumSize { get; set; }
+
+    // ---------------------------------------------------------------- children
+
+    public ControlCollection Controls => _controls ??= new ControlCollection(this);
+
+    /// <summary>The WinForms parent - a shim control, or null at the top of the shim's tree.</summary>
+    public new Control? Parent => base.Parent as Control;
+
+    internal void AttachChild(Control child)
+    {
+        VisualChildren.Add(child);
+        LogicalChildren.Add(child);
+        UpdateChildOrder();
+    }
+
+    internal void DetachChild(Control child)
+    {
+        VisualChildren.Remove(child);
+        LogicalChildren.Remove(child);
+        UpdateChildOrder();
+    }
+
+    /// <summary>WinForms draws index 0 on top; Avalonia draws the highest ZIndex on top.</summary>
+    internal void UpdateChildOrder()
+    {
+        if (_controls is null)
+            return;
+        for (int i = 0; i < _controls.Count; i++)
+            _controls[i].ZIndex = _controls.Count - i;
+        InvalidateMeasure();
+        InvalidateArrange();
+    }
+
+    public void BringToFront() => Parent?.Controls.SetChildIndex(this, 0);
+
+    public void SendToBack()
+    {
+        if (Parent is { } parent)
+            parent.Controls.SetChildIndex(this, parent.Controls.Count - 1);
+    }
+
+    public void SuspendLayout()
+    {
+    }
+
+    public void ResumeLayout(bool performLayout = true)
+    {
+    }
+
+    public void PerformLayout() => InvalidateArrange();
+
+    protected override Avalonia.Size MeasureOverride(Avalonia.Size availableSize)
+    {
+        if (_controls is not null)
+        {
+            foreach (var child in _controls)
+                child.Measure(availableSize);
+        }
+
+        return new Avalonia.Size(RequestedWidth, RequestedHeight);
+    }
+
+    protected override Avalonia.Size ArrangeOverride(Avalonia.Size finalSize)
+    {
+        if (_controls is { Count: > 0 })
+            LayoutChildren(finalSize);
+        return finalSize;
+    }
+
+    /// <summary>
+    /// WinForms docking: from the last child to the first, each docked one takes its strip off the
+    /// edge of what is left, and Fill takes the rest; undocked ones keep their own place and size.
+    /// </summary>
+    protected virtual void LayoutChildren(Avalonia.Size size)
+    {
+        double x = _padding.Left, y = _padding.Top;
+        double width = Math.Max(0, size.Width - _padding.Horizontal), height = Math.Max(0, size.Height - _padding.Vertical);
+
+        for (int i = _controls!.Count - 1; i >= 0; i--)
+        {
+            var child = _controls[i];
+            if (!child.IsVisible)
+                continue;
+
+            Avalonia.Rect rect;
+            switch (child.Dock)
+            {
+                case DockStyle.Top:
+                    rect = new Avalonia.Rect(x, y, width, Math.Min(height, child.RequestedHeight));
+                    y += rect.Height;
+                    height -= rect.Height;
+                    break;
+                case DockStyle.Bottom:
+                    rect = new Avalonia.Rect(x, y + height - Math.Min(height, child.RequestedHeight), width, Math.Min(height, child.RequestedHeight));
+                    height -= rect.Height;
+                    break;
+                case DockStyle.Left:
+                    rect = new Avalonia.Rect(x, y, Math.Min(width, child.RequestedWidth), height);
+                    x += rect.Width;
+                    width -= rect.Width;
+                    break;
+                case DockStyle.Right:
+                    rect = new Avalonia.Rect(x + width - Math.Min(width, child.RequestedWidth), y, Math.Min(width, child.RequestedWidth), height);
+                    width -= rect.Width;
+                    break;
+                case DockStyle.Fill:
+                    rect = new Avalonia.Rect(x, y, width, height);
+                    break;
+                default:
+                    rect = new Avalonia.Rect(child.Left, child.Top, child.RequestedWidth, child.RequestedHeight);
+                    break;
+            }
+
+            child.ArrangeTo(rect);
+        }
+    }
+
+    internal void ArrangeTo(Avalonia.Rect rect)
+    {
+        // The layout has decided: from now on Width and Height read what it gave.
+        if (Dock is DockStyle.Top or DockStyle.Bottom or DockStyle.Fill)
+            _widthAsked = false;
+        if (Dock is DockStyle.Left or DockStyle.Right or DockStyle.Fill)
+            _heightAsked = false;
+        if (Dock != DockStyle.None)
+            _location = new Point((int)rect.X, (int)rect.Y);
+        Arrange(rect);
+    }
+
+    // ---------------------------------------------------------------- what WinForms code reads
 
     public Color BackColor { get; set; } = Color.Empty;
 
-    public Color ForeColor { get; set; } = Color.Black;
+    public Color ForeColor { get; set; } = Color.FromArgb(0xD2, 0xD2, 0xDE);
 
     public Font Font { get; set; } = new("Segoe UI", 9f);
+
+    public virtual string Text
+    {
+        get => _text;
+        set
+        {
+            _text = value ?? string.Empty;
+            OnTextChanged(EventArgs.Empty);
+            InvalidateVisual();
+        }
+    }
 
     public bool TabStop
     {
         get => Focusable;
         set => Focusable = value;
     }
+
+    public int TabIndex { get; set; }
 
     public bool Visible
     {
@@ -160,6 +444,10 @@ public class Control : AvControl, IWin32Window, IDisposable
 
     public bool IsDisposed { get; private set; }
 
+    public bool Disposing => false;
+
+    public ContextMenuStrip? ContextMenuStrip { get; set; }
+
     /// <summary>The mouse stays with this control until let go - Avalonia captures on press already,
     /// so this only has to release, or capture again for a drag begun some other way.</summary>
     public bool Capture
@@ -173,9 +461,11 @@ public class Control : AvControl, IWin32Window, IDisposable
         }
     }
 
-    public static Keys ModifierKeys { get; private set; }
+    public static Keys ModifierKeys { get; internal set; }
 
-    public static MouseButtons MouseButtons { get; private set; }
+    public static MouseButtons MouseButtons { get; internal set; }
+
+    public static Point MousePosition { get; internal set; }
 
     protected void SetStyle(ControlStyles styles, bool value)
     {
@@ -203,9 +493,17 @@ public class Control : AvControl, IWin32Window, IDisposable
     {
     }
 
+    /// <summary>Focus, as WinForms code asks for it - a control that hosts an Avalonia one (a text
+    /// box) hands it on.</summary>
+    public new bool Focus() => FocusCore();
+
+    protected virtual bool FocusCore() => base.Focus();
+
     public bool Select() => Focus();
 
     public void BeginInvoke(Action action) => Dispatcher.UIThread.Post(action);
+
+    public void BeginInvoke(Delegate action) => Dispatcher.UIThread.Post(() => action.DynamicInvoke());
 
     public void Invoke(Action action)
     {
@@ -216,6 +514,8 @@ public class Control : AvControl, IWin32Window, IDisposable
     }
 
     public T Invoke<T>(Func<T> action) => Dispatcher.UIThread.CheckAccess() ? action() : Dispatcher.UIThread.Invoke(action);
+
+    public bool InvokeRequired => !Dispatcher.UIThread.CheckAccess();
 
     public Point PointToClient(Point screen)
     {
@@ -228,6 +528,8 @@ public class Control : AvControl, IWin32Window, IDisposable
         var point = this.PointToScreen(new Avalonia.Point(client.X, client.Y));
         return new Point(point.X, point.Y);
     }
+
+    public Control? FindForm() => this;
 
     // ---------------------------------------------------------------- events WinForms code raises and handles
 
@@ -244,11 +546,24 @@ public class Control : AvControl, IWin32Window, IDisposable
     public event KeyEventHandler? KeyDown;
     public event KeyEventHandler? KeyUp;
     public event EventHandler? Resize;
+    public event EventHandler? SizeChanged2;
     public event EventHandler? GotFocus;
     public event EventHandler? LostFocus;
+    public event EventHandler? Enter;
+    public event EventHandler? Leave;
+    public event EventHandler? TextChanged;
+    public event EventHandler? VisibleChanged;
+    public event EventHandler? EnabledChanged;
+    public event EventHandler? HandleCreated;
     public event PaintEventHandler? Paint;
 
     protected virtual void OnPaint(PaintEventArgs e) => Paint?.Invoke(this, e);
+
+    protected virtual void OnPaintBackground(PaintEventArgs e)
+    {
+        if (BackColor.A > 0)
+            e.Graphics.FillRectangle(new SolidBrush(BackColor), ClientRectangle);
+    }
 
     protected virtual void OnMouseDown(MouseEventArgs e) => MouseDown?.Invoke(this, e);
 
@@ -276,23 +591,29 @@ public class Control : AvControl, IWin32Window, IDisposable
 
     protected virtual void OnResize(EventArgs e) => Resize?.Invoke(this, e);
 
-    protected virtual void OnSizeChanged(EventArgs e)
-    {
-    }
+    protected virtual void OnSizeChanged(EventArgs e) => SizeChanged2?.Invoke(this, e);
 
     protected virtual void OnGotFocus(EventArgs e) => GotFocus?.Invoke(this, e);
 
     protected virtual void OnLostFocus(EventArgs e) => LostFocus?.Invoke(this, e);
 
-    protected virtual void OnEnabledChanged(EventArgs e)
+    protected virtual void OnEnter(EventArgs e) => Enter?.Invoke(this, e);
+
+    protected virtual void OnLeave(EventArgs e) => Leave?.Invoke(this, e);
+
+    protected virtual void OnTextChanged(EventArgs e) => TextChanged?.Invoke(this, e);
+
+    protected virtual void OnEnabledChanged(EventArgs e) => EnabledChanged?.Invoke(this, e);
+
+    protected virtual void OnVisibleChanged(EventArgs e) => VisibleChanged?.Invoke(this, e);
+
+    protected virtual void OnHandleCreated(EventArgs e) => HandleCreated?.Invoke(this, e);
+
+    protected virtual void OnLayout(LayoutEventArgs e)
     {
     }
 
-    protected virtual void OnVisibleChanged(EventArgs e)
-    {
-    }
-
-    protected virtual void OnHandleCreated(EventArgs e)
+    protected virtual void OnMouseCaptureChanged(EventArgs e)
     {
     }
 
@@ -312,10 +633,14 @@ public class Control : AvControl, IWin32Window, IDisposable
 
     public override void Render(DrawingContext context)
     {
+        // WinForms never paints a control with no area, and code written for it does not expect to be.
+        if (base.Bounds.Width <= 0 || base.Bounds.Height <= 0)
+            return;
+
         using var graphics = new Graphics(context, Width, Height);
-        if (BackColor.A > 0)
-            graphics.FillRectangle(new SolidBrush(BackColor), ClientRectangle);
-        OnPaint(new PaintEventArgs(graphics, ClientRectangle));
+        var args = new PaintEventArgs(graphics, ClientRectangle);
+        OnPaintBackground(args);
+        OnPaint(args);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -329,30 +654,41 @@ public class Control : AvControl, IWin32Window, IDisposable
         base.OnPropertyChanged(change);
         if (change.Property == BoundsProperty)
         {
-            var size = new Size(Width, Height);
+            var size = new Size((int)Math.Round(base.Bounds.Width), (int)Math.Round(base.Bounds.Height));
             if (size != _lastSize)
             {
                 _lastSize = size;
                 OnSizeChanged(EventArgs.Empty);
                 OnResize(EventArgs.Empty);
+                OnLayout(new LayoutEventArgs(this));
                 InvalidateVisual();
             }
         }
         else if (change.Property == IsEnabledProperty)
         {
             OnEnabledChanged(EventArgs.Empty);
+            InvalidateVisual();
         }
         else if (change.Property == IsVisibleProperty)
         {
             OnVisibleChanged(EventArgs.Empty);
+            (base.Parent as Layoutable)?.InvalidateArrange();
         }
     }
 
     private MouseEventArgs MouseArgs(PointerEventArgs e, MouseButtons button, int clicks, int delta = 0)
     {
         var position = e.GetPosition(this);
+        if (TopLevel(e) is { } top)
+        {
+            var screen = top.PointToScreen(e.GetPosition(top));
+            MousePosition = new Point(screen.X, screen.Y);
+        }
+
         return new MouseEventArgs(button, clicks, (int)Math.Floor(position.X), (int)Math.Floor(position.Y), delta);
     }
+
+    private Avalonia.Controls.TopLevel? TopLevel(PointerEventArgs e) => Avalonia.Controls.TopLevel.GetTopLevel(this);
 
     private static MouseButtons ButtonOf(PointerUpdateKind kind) => kind switch
     {
@@ -372,6 +708,9 @@ public class Control : AvControl, IWin32Window, IDisposable
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        if (e.Handled)
+            return;
+
         _pointer = e.Pointer;
         var point = e.GetCurrentPoint(this);
         var button = ButtonOf(point.Properties.PointerUpdateKind);
@@ -393,6 +732,9 @@ public class Control : AvControl, IWin32Window, IDisposable
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (e.Handled)
+            return;
+
         var point = e.GetCurrentPoint(this);
         var button = ButtonOf(point.Properties.PointerUpdateKind);
         MouseButtons = ButtonsHeld(point.Properties);
@@ -402,11 +744,15 @@ public class Control : AvControl, IWin32Window, IDisposable
         OnMouseUp(args);
 
         var position = e.GetPosition(this);
-        if (_pressed == button && position.X >= 0 && position.Y >= 0 && position.X < Bounds.Width && position.Y < Bounds.Height)
+        bool inside = position.X >= 0 && position.Y >= 0 && position.X < base.Bounds.Width && position.Y < base.Bounds.Height;
+        if (_pressed == button && inside)
         {
             OnClick(EventArgs.Empty);
             OnMouseClick(args);
         }
+
+        if (button == MouseButtons.Right && inside && ContextMenuStrip is { } menu)
+            menu.Show(this, args.Location);
 
         _pressed = MouseButtons.None;
         e.Handled = true;
@@ -424,9 +770,17 @@ public class Control : AvControl, IWin32Window, IDisposable
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
+        if (e.Handled)
+            return;
         ModifierKeys = KeyMap.Modifiers(e.KeyModifiers);
         OnMouseWheel(MouseArgs(e, MouseButtons.None, 0, (int)Math.Round(e.Delta.Y * 120)));
         e.Handled = true;
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        OnMouseCaptureChanged(EventArgs.Empty);
     }
 
     protected override void OnPointerEntered(PointerEventArgs e)
@@ -445,7 +799,7 @@ public class Control : AvControl, IWin32Window, IDisposable
     {
         ModifierKeys = KeyMap.Modifiers(e.KeyModifiers);
         var key = KeyMap.From(e);
-        if (key == Keys.None)
+        if (key == Keys.None || e.Handled)
         {
             base.OnKeyDown(e);
             return;
@@ -466,7 +820,7 @@ public class Control : AvControl, IWin32Window, IDisposable
     {
         ModifierKeys = KeyMap.Modifiers(e.KeyModifiers);
         var key = KeyMap.From(e);
-        if (key == Keys.None)
+        if (key == Keys.None || e.Handled)
         {
             base.OnKeyUp(e);
             return;
@@ -483,14 +837,24 @@ public class Control : AvControl, IWin32Window, IDisposable
     protected override void OnGotFocus(GotFocusEventArgs e)
     {
         base.OnGotFocus(e);
-        OnGotFocus((EventArgs)e);
+        if (e.Source == this)
+        {
+            OnGotFocus((EventArgs)e);
+            OnEnter(EventArgs.Empty);
+        }
+
         InvalidateVisual();
     }
 
     protected override void OnLostFocus(RoutedEventArgs e)
     {
         base.OnLostFocus(e);
-        OnLostFocus((EventArgs)e);
+        if (e.Source == this)
+        {
+            OnLostFocus((EventArgs)e);
+            OnLeave(EventArgs.Empty);
+        }
+
         InvalidateVisual();
     }
 }

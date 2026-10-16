@@ -116,6 +116,11 @@ namespace System.Drawing.Drawing2D
         {
         }
 
+        public LinearGradientBrush(RectangleF rect, Color from, Color to, float angle)
+            : this(rect, from, to, angle is > 45 and < 135 ? LinearGradientMode.Vertical : LinearGradientMode.Horizontal)
+        {
+        }
+
         public LinearGradientBrush(PointF a, PointF b, Color from, Color to)
             : this(new RectangleF(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Max(1, Math.Abs(b.X - a.X)), Math.Max(1, Math.Abs(b.Y - a.Y))),
                 from, to, Math.Abs(b.Y - a.Y) > Math.Abs(b.X - a.X) ? LinearGradientMode.Vertical : LinearGradientMode.Horizontal)

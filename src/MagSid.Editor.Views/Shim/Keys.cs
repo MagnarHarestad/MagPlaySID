@@ -94,3 +94,15 @@ public enum MouseButtons
     XButton1 = 0x00800000,
     XButton2 = 0x01000000,
 }
+
+public enum Orientation
+{
+    Horizontal,
+    Vertical,
+}
+
+public sealed class LayoutEventArgs(object? affectedComponent = null, string? affectedProperty = null) : EventArgs
+{
+    public object? AffectedComponent { get; } = affectedComponent;
+    public string? AffectedProperty { get; } = affectedProperty;
+}

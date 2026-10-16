@@ -12,8 +12,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="MagSID" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="System.Drawing" />
     <Using Include="System.Windows.Forms" />
+    <Using Include="Avalonia.Input.Cursor" Alias="Cursor" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +32,7 @@
     <Compile Include="..\MagSid.Editor.App\EditorPalette.cs" Link="Linked\EditorPalette.cs" />
     <Compile Include="..\MagSid.Editor.App\PianoKeyMap.cs" Link="Linked\PianoKeyMap.cs" />
     <Compile Include="..\MagSid.Editor.App\Controls\TrackerGridControl.cs" Link="Linked\Controls\TrackerGridControl.cs" />
+    <Compile Include="..\MagSid.Editor.App\Daw\*.cs" Link="Linked\Daw\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

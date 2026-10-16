@@ -119,7 +119,7 @@ public static class MessageBox
         MessageBoxButtons buttons = MessageBoxButtons.OK, MessageBoxIcon icon = MessageBoxIcon.None)
     {
         var parent = owner is Avalonia.Visual visual ? TopLevel.GetTopLevel(visual) as Window : null;
-        var ok = new Button { Content = "OK", HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 80 };
+        var ok = new Button { Content = "OK", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, MinWidth = 80 };
         var window = new Window
         {
             Title = caption,

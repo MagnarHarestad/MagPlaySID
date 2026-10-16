@@ -141,23 +141,7 @@ public sealed class InstrumentListHeader : Panel
 
     /// <summary>What a sound of the bank is, by its key - the menu's words and the sound bank
     /// cards' family line.</summary>
-    public static string SoundLabel(string key) => key switch
-    {
-        "SynthBass" => "Synth bass",
-        "SynthLead" => "Synth lead",
-        "SynthPad" => "Synth pad",
-        "SynthFx" => "Synth FX",
-        "KickBass" => "Kick bass",
-        "Snare2" or "Snare3" => "Snare",
-        "Noise" => "Hi-hat",
-        "ArpMinor" => "Arp minor, 1 frame",
-        "ArpMinor2" => "Arp minor, 2 frames",
-        "ArpMinor3" => "Arp minor, 3 frames",
-        "ArpMajor" => "Arp major, 1 frame",
-        "ArpMajor2" => "Arp major, 2 frames",
-        "ArpMajor3" => "Arp major, 3 frames",
-        _ => key,
-    };
+    public static string SoundLabel(string key) => GmBank.Label(key);
 
     /// <summary>Where files of the user's own replace the bank's sounds - made on first use, so
     /// there is somewhere to save them.</summary>

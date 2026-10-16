@@ -7,22 +7,27 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using MagSid.Core.Midi;
 using MagSid.Core.Model;
+using MagSid.Core.Serialization;
+using MagSid.Core.Validation;
 using MagSid.Editor.App;
 using MagSid.Editor.App.Controls;
+using MagSid.Editor.App.Daw;
 using MagSid.Editor.Avalonia.Player;
 using MagSid.Playback;
 using MagSid.Sid;
 using AvColor = Avalonia.Media.Color;
+using WinKeys = System.Windows.Forms.Keys;
 
 namespace MagSid.Editor.Avalonia;
 
 /// <summary>
 /// The editor's window on every system: the Retro view - the instrument list and the tracker grid -
-/// with the song's file, history and playback around it. The grid is the Windows editor's own
-/// TrackerGridControl, compiled against the WinForms face in MagSid.Editor.Views; what is here is
-/// the part MainForm does there, rebuilt in Avalonia: menus, transport, and wiring the grid's
-/// events to the session and the engines.
+/// and the DAW view, with the song's file, history and playback around them. The grid and the DAW
+/// are the Windows editor's own TrackerGridControl and DawView, compiled against the WinForms face
+/// in MagSid.Editor.Views; what is here is the part MainForm does there, rebuilt in Avalonia:
+/// menus, transport, and wiring the views' events to the session and the engines.
 /// </summary>
 public sealed class MainWindow : Window
 {
@@ -35,6 +40,7 @@ public sealed class MainWindow : Window
 
     private readonly EditorSession _session = new();
     private readonly TrackerGridControl _grid = new();
+    private readonly DawView _daw = new();
     private readonly ListBox _instruments = new();
     private readonly InstrumentEditorView _instrumentEditor = new();
     private readonly TextBlock _status = new();
@@ -54,6 +60,19 @@ public sealed class MainWindow : Window
     private SongSequencer.SequencerPosition? _resumeFrom;
     private (int Position, int Row)? _resumeCursor;
     private bool _refreshing;
+    private Control _retroView = null!;
+    private MenuItem _viewToggle = null!;
+    private bool _dawShowing;
+
+    /// <summary>The piano keys held down in the DAW, so a key's repeat does not retrigger it and its
+    /// release finds the note it started.</summary>
+    private readonly Dictionary<WinKeys, NoteName> _dawHeldKeys = [];
+
+    /// <summary>The take's punch-in and punch-out, in song frames: notes are written between them.</summary>
+    private (int In, int Out) _recordWindow = (0, int.MaxValue);
+
+    /// <summary>The song frame heard at the last poll - a step back means Cycle jumped.</summary>
+    private int _lastHeardFrame;
 
     public MainWindow(string? songPath = null)
     {
@@ -72,6 +91,7 @@ public sealed class MainWindow : Window
         // The transport keys work wherever focus is - tunnelling, so they arrive before the grid
         // or a list would take them.
         AddHandler(KeyDownEvent, OnTransportKey, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, OnDawKeyUp, RoutingStrategies.Tunnel);
 
         Closing += OnClosing;
         Closed += (_, _) =>
@@ -129,6 +149,7 @@ public sealed class MainWindow : Window
         _chip.Click += (_, _) =>
         {
             _chipModel = _chipModel == ChipModel.Mos6581 ? ChipModel.Mos8580 : ChipModel.Mos6581;
+            _daw.ChipModel = _chipModel;
             _jam?.Dispose();
             _jam = null;
             UpdateChipButton();
@@ -199,9 +220,26 @@ public sealed class MainWindow : Window
         left.Children.Add(_instruments);
         left.Children.Add(new ScrollViewer { Content = _instrumentEditor, Margin = new Thickness(0, 8, 0, 0) });
 
+        // The grid's columns are fixed pixel widths; it keeps its own width, left-aligned.
         _grid.Width = TrackerGridControl.ContentWidth;
-        _grid.HorizontalAlignment = HorizontalAlignment.Left;
-        _grid.Margin = new Thickness(0, 4, 8, 8);
+        var gridHost = new Border
+        {
+            Child = _grid,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 4, 8, 8),
+        };
+
+        var retro = new DockPanel();
+        DockPanel.SetDock(left, Dock.Left);
+        retro.Children.Add(left);
+        retro.Children.Add(gridHost);
+        _retroView = retro;
+
+        // Both views fill the same place; only one is ever visible, and both stay alive so
+        // selection and scroll survive a round trip.
+        _daw.IsVisible = false;
+        _daw.ChipModel = _chipModel;
+        var centre = new Panel { Children = { retro, _daw } };
 
         _status.Foreground = Dim;
         _status.Margin = new Thickness(8, 2);
@@ -210,12 +248,10 @@ public sealed class MainWindow : Window
         DockPanel.SetDock(menu, Dock.Top);
         DockPanel.SetDock(toolbar, Dock.Top);
         DockPanel.SetDock(_status, Dock.Bottom);
-        DockPanel.SetDock(left, Dock.Left);
         root.Children.Add(menu);
         root.Children.Add(toolbar);
         root.Children.Add(_status);
-        root.Children.Add(left);
-        root.Children.Add(_grid);
+        root.Children.Add(centre);
         return root;
     }
 
@@ -280,7 +316,10 @@ public sealed class MainWindow : Window
             },
         };
 
-        return new Menu { ItemsSource = new[] { file, edit, play } };
+        _viewToggle = new MenuItem { Header = "_DAW" };
+        _viewToggle.Click += (_, _) => ToggleView();
+
+        return new Menu { ItemsSource = new[] { file, edit, play, _viewToggle } };
     }
 
     // ------------------------------------------------------------------------------------ wiring
@@ -293,7 +332,7 @@ public sealed class MainWindow : Window
 
         _grid.Edited += () => _session.MarkDirty();
         _grid.NoteEntered += PreviewNote;
-        _grid.NoteReleased += note => _jam?.NoteOff(note);
+        _grid.NoteReleased += ReleaseJamNote;
         _grid.InstrumentStepRequested += StepSelectedInstrument;
         _grid.JamSilenceRequested += () => _jam?.SilenceAll();
         _grid.EditModeChanged += UpdateEditMode;
@@ -308,7 +347,80 @@ public sealed class MainWindow : Window
         };
         UpdateEditMode();
 
+        WireDaw();
+
         _poll.Tick += (_, _) => DrainPlaybackEvents();
+    }
+
+    /// <summary>The DAW's events, as MainForm wires them: edits go through the session, and the
+    /// tracker is told so the two views never disagree about the song.</summary>
+    private void WireDaw()
+    {
+        _daw.InstrumentEdited += _ =>
+        {
+            _session.MarkDirty();
+            RefreshInstrumentNames();
+        };
+
+        // A click in the piano roll is a short tap: a fixed release, whatever the instrument's own.
+        _daw.NotePreviewRequested += (note, instrument) => PreviewNote(note, instrument, RollPreviewRelease);
+        _daw.NotePreviewReleased += ReleaseJamNote;
+        _daw.CycleChanged += () => ApplyCycle(_engine);
+        _daw.RecordToggled += on =>
+        {
+            if (on)
+                StartRecording();
+            else
+                StopAny();
+        };
+        _daw.MuteToggleRequested += channel => _grid.ToggleChannelMute(channel);
+        _daw.IsChannelMuted = _grid.IsChannelMuted;
+        _daw.Notice += ShowNotice;
+
+        _daw.InstrumentAddRequested += AddInstrument;
+        _daw.InstrumentFromBankRequested += AddFromBank;
+        _daw.InstrumentLoadRequested += () => _ = LoadInstrumentsAsync();
+        _daw.SoundAuditionRequested += AuditionSound;
+        _daw.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
+        _daw.InstrumentDeleteRequested += instrument => _session.DeleteInstrument(instrument);
+
+        _daw.PatternEdited += SongEditedInDaw;
+        _daw.OrderEdited += SongEditedInDaw;
+    }
+
+    private void SongEditedInDaw()
+    {
+        _session.MarkDirty();
+        _grid.SetSong(_session.Song);
+        RefreshStatus();
+    }
+
+    /// <summary>Swaps the centre between the tracker and the DAW. Both edit the same Song, so there
+    /// is nothing to convert; the selected instrument is carried across.</summary>
+    private void ToggleView()
+    {
+        _dawShowing = !_dawShowing;
+        _dawHeldKeys.Clear();
+
+        if (_dawShowing)
+        {
+            _daw.LoadSong(_session.Song);
+            if (SelectedInstrument is { } selected)
+                _daw.SelectInstrument(selected.Number);
+        }
+        else if (_daw.SelectedInstrumentNumber is { } number)
+        {
+            SelectInstrumentNumber(number);
+        }
+
+        _retroView.IsVisible = !_dawShowing;
+        _daw.IsVisible = _dawShowing;
+        _viewToggle.Header = _dawShowing ? "_Retro" : "_DAW";
+
+        if (_dawShowing)
+            _daw.Focus();
+        else
+            _grid.Focus();
     }
 
     private void OnTransportKey(object? sender, KeyEventArgs e)
@@ -323,13 +435,22 @@ public sealed class MainWindow : Window
                 StartFromBeginning();
                 break;
             case Key.F2:
-                StartFromCurrentPosition();
+                // In the DAW the project cursor says where, and F2 goes back to it while playing too.
+                if (_dawShowing)
+                    PlayFromProjectCursor();
+                else
+                    StartFromCurrentPosition();
                 break;
             case Key.F3:
                 PlayCurrentPattern();
                 break;
             case Key.F4:
-                StopAny();
+                // Stopped already: a second stop takes the DAW's project cursor back to where
+                // playback last started, as Cubase does.
+                if (_output is null && _previewOutput is null && _dawShowing)
+                    _daw.ReturnToPlayStart();
+                else
+                    StopAny();
                 break;
             case Key.F9:
                 _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this);
@@ -339,10 +460,94 @@ public sealed class MainWindow : Window
                 _grid.ToggleEditMode();
                 break;
             default:
+                if (_dawShowing)
+                    OnDawKeyDown(e);
                 return;
         }
 
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// The piano keys, for the DAW view - caught at the window, before whatever has focus, as
+    /// MainForm does with KeyPreview: the tracker grid that owns them in Retro is hidden here.
+    /// Routed through the same path a MIDI key takes, so Edit mode decides whether the note is
+    /// written into the roll and Jam mode only sounds it.
+    /// </summary>
+    private void OnDawKeyDown(KeyEventArgs e)
+    {
+        // The arrange lanes take digits as pattern numbers, and a selected LE in the roll takes
+        // them as its loop count; 2, 3, 5, 6 and 7 would otherwise be piano keys.
+        var modifiers = System.Windows.Forms.KeyMap.Modifiers(e.KeyModifiers);
+        if ((modifiers & (WinKeys.Control | WinKeys.Alt)) != 0 || _daw.ArrangeHasFocus)
+            return;
+
+        var key = System.Windows.Forms.KeyMap.From(e);
+        if (_daw.RollTakesDigits && key is >= WinKeys.D0 and <= WinKeys.D9 or >= WinKeys.NumPad0 and <= WinKeys.NumPad9)
+            return;
+
+        bool shift = (modifiers & WinKeys.Shift) != 0;
+
+        // Numpad /, Cubase's Cycle key.
+        if (key == WinKeys.Divide)
+        {
+            _daw.CycleOn = !_daw.CycleOn;
+            e.Handled = true;
+            return;
+        }
+
+        if (key == PianoKeyMap.OctaveKey)
+        {
+            _daw.StepOctave(shift);
+            e.Handled = true;
+            return;
+        }
+
+        // Shift+C and Shift+V are the roll's own copy and paste.
+        if (shift && key is WinKeys.C or WinKeys.V)
+            return;
+
+        if (PianoKeyMap.TryNote(key, _daw.Octave) is not { } note)
+            return;
+
+        // A held key repeats; the note is already sounding.
+        if (_dawHeldKeys.TryAdd(key, note))
+            PlayDawNote(note);
+
+        e.Handled = true;
+    }
+
+    private void OnDawKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (_dawHeldKeys.Remove(System.Windows.Forms.KeyMap.From(e), out var note))
+        {
+            ReleaseDawNote(note);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>A piano key in the DAW. It always sounds; it is written down only by a take, a
+    /// chord being recorded, or in Edit mode with the roll focused - see MainForm.OnMidiNote.</summary>
+    private void PlayDawNote(NoteName note)
+    {
+        int instrument = _daw.SelectedInstrumentNumber ?? SelectedInstrument?.Number ?? 1;
+
+        if (_daw.IsRecording)
+            _daw.RecordNote(note, instrument);
+        else if (_daw.IsRecordingChord)
+            _daw.RecordChordNote(note);
+        else if (_grid.EditMode && _daw.RollHasFocus)
+            _daw.StepInput(note);
+
+        PreviewNote(note, instrument);
+    }
+
+    private void ReleaseDawNote(NoteName note)
+    {
+        if (_daw.IsRecording)
+            _daw.RecordRelease(note);
+        _daw.RecordChordRelease(note);
+        ReleaseJamNote(note);
     }
 
     private Instrument? SelectedInstrument =>
@@ -356,6 +561,8 @@ public sealed class MainWindow : Window
         try
         {
             _grid.SetSong(_session.Song);
+            // Undo restores a whole-song snapshot, so the DAW is pointed at the new object too.
+            _daw.LoadSong(_session.Song);
             _speed.Value = _session.Song.Speed;
             RefreshInstrumentNames();
             ShowSelectedInstrument();
@@ -421,14 +628,94 @@ public sealed class MainWindow : Window
 
     private void AddInstrument()
     {
-        if (_session.AddInstrument() is null)
+        if (_session.AddInstrument() is not { } added)
         {
-            ShowNotice("All 16 instruments are in use - a pattern names one with a single byte.");
+            ShowInstrumentLimit();
             return;
         }
 
-        _instruments.SelectedIndex = _session.Song.Instruments.Count - 1;
+        SelectInstrumentNumber(added.Number);
+        if (_dawShowing)
+            _daw.RenameSelectedInstrument();
     }
+
+    /// <summary>A copy of one of the GM bank's sounds, as it is in the bank, added after the
+    /// song's own instruments.</summary>
+    private void AddFromBank(GmBank.Sound sound)
+    {
+        var instrument = InstrumentFile.Read(InstrumentFile.Write(sound.Instrument));
+        if (_session.ImportInstrument(instrument) is not { } added)
+        {
+            ShowInstrumentLimit();
+            return;
+        }
+
+        SelectInstrumentNumber(added.Number);
+        ShowNotice($"Added {added.Name} from the sound bank ({sound.Origin})");
+    }
+
+    private static readonly FilePickerFileType InstrumentFiles = new("MagSID instruments") { Patterns = ["*.json"] };
+
+    private async Task LoadInstrumentsAsync()
+    {
+        var options = new FilePickerOpenOptions
+        {
+            Title = "Load instrument",
+            AllowMultiple = true,
+            FileTypeFilter = [InstrumentFiles, FilePickerFileTypes.All],
+        };
+        if (EditorSettings.InstrumentDirectory is { Length: > 0 } remembered)
+            options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(remembered);
+
+        var files = await StorageProvider.OpenFilePickerAsync(options);
+        var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
+        if (paths.Count == 0)
+            return;
+
+        EditorSettings.InstrumentDirectory = Path.GetDirectoryName(paths[0]) ?? "";
+
+        var problems = new List<string>();
+        Instrument? last = null;
+        foreach (string path in paths)
+        {
+            string file = Path.GetFileName(path);
+            Instrument loaded;
+            try
+            {
+                loaded = InstrumentFile.Read(File.ReadAllText(path));
+            }
+            catch (Exception ex) when (ex is InstrumentFileException or IOException or UnauthorizedAccessException)
+            {
+                problems.Add($"{file}: {ex.Message}");
+                continue;
+            }
+
+            if (_session.ImportInstrument(loaded) is null)
+            {
+                problems.Add($"{file}: the song already has all {SongValidator.MaxInstrumentNumber} instruments.");
+                break;
+            }
+            last = loaded;
+        }
+
+        if (last is not null)
+            SelectInstrumentNumber(last.Number);
+
+        if (problems.Count > 0)
+            await MessageWindow.ShowAsync(this, "Some instruments were not loaded", string.Join(Environment.NewLine + Environment.NewLine, problems));
+    }
+
+    /// <summary>Selects the instrument in both views' lists.</summary>
+    private void SelectInstrumentNumber(int number)
+    {
+        int index = _session.Song.Instruments.FindIndex(i => i.Number == number);
+        if (index >= 0)
+            _instruments.SelectedIndex = index;
+        _daw.SelectInstrument(number);
+    }
+
+    private void ShowInstrumentLimit() =>
+        ShowNotice($"This song already has all {SongValidator.MaxInstrumentNumber} instruments a pattern can select.");
 
     private void DeleteInstrument()
     {
@@ -448,17 +735,34 @@ public sealed class MainWindow : Window
 
     // ------------------------------------------------------------------------------------ playback
 
-    private void PreviewNote(NoteName note, int instrumentNumber)
+    /// <summary>The release a note clicked into the piano roll is auditioned with - a tap, so the
+    /// same short tail for every instrument. As MainForm.RollPreviewRelease.</summary>
+    private const int RollPreviewRelease = 0x9;
+
+    /// <summary>The longest release an Edit-mode note is auditioned with.</summary>
+    private const int MaxEditPreviewRelease = 0xA;
+
+    private void PreviewNote(NoteName note, int instrumentNumber) => PreviewNote(note, instrumentNumber, null);
+
+    /// <param name="forcedRelease">A release nibble to audition with in place of the
+    /// instrument's own, or null for the usual: capped in Edit mode only.</param>
+    private void PreviewNote(NoteName note, int instrumentNumber, int? forcedRelease)
     {
         var instrument = _session.Song.Instruments.FirstOrDefault(i => i.Number == instrumentNumber);
         if (instrument is null)
             return;
+
+        if (forcedRelease is { } release)
+            instrument = WithRelease(instrument, release);
+        else if (_grid.EditMode && (instrument.SustainRelease & 0x0F) > MaxEditPreviewRelease)
+            instrument = WithRelease(instrument, MaxEditPreviewRelease);
 
         try
         {
             _jam ??= new JamEngine(_chipModel);
             _jam.Start();
             _jam.NoteOn(note, instrument);
+            _daw.SetNoteSounding(note, true);
         }
         catch (Exception ex) when (ex is InvalidOperationException or PortAudioSharp.PortAudioException)
         {
@@ -467,8 +771,53 @@ public sealed class MainWindow : Window
         }
     }
 
+    private void ReleaseJamNote(NoteName note)
+    {
+        _jam?.NoteOff(note);
+        _daw.SetNoteSounding(note, false);
+    }
+
+    /// <summary>A copy with the release nibble replaced; the song's own instrument is never touched.</summary>
+    private static Instrument WithRelease(Instrument instrument, int release)
+    {
+        if ((instrument.SustainRelease & 0x0F) == release)
+            return instrument;
+
+        var copy = InstrumentFile.Read(InstrumentFile.Write(instrument));
+        copy.Number = instrument.Number;
+        copy.SustainRelease = (byte)((instrument.SustainRelease & 0xF0) | (release & 0x0F));
+        return copy;
+    }
+
+    /// <summary>Plays a sound that is not in the song yet - the sound bank's cards - for half a second.</summary>
+    private void AuditionSound(Instrument instrument, NoteName note)
+    {
+        try
+        {
+            _jam ??= new JamEngine(_chipModel);
+            _jam.Start();
+            _jam.ResetFilter();
+            _jam.NoteOn(note, instrument);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or PortAudioSharp.PortAudioException)
+        {
+            _jam?.Dispose();
+            _jam = null;
+            return;
+        }
+
+        var release = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        release.Tick += (_, _) =>
+        {
+            release.Stop();
+            _jam?.NoteOff(note);
+        };
+        release.Start();
+    }
+
     private void StartFromBeginning()
     {
+        _daw.ResetProjectCursor();
         StopTransport();
         _resumeFrom = null;
         _resumeCursor = null;
@@ -498,6 +847,98 @@ public sealed class MainWindow : Window
         return target.TicksInto >= 0
             ? SongSequencer.FindPositionInEntry(_session.Song, target.Channel, target.OrderIndex, target.TicksInto)
             : SongSequencer.FindPosition(_session.Song, target.Channel, target.OrderIndex, target.RowIndex);
+    }
+
+    /// <summary>
+    /// Cycle, when it is on in the DAW and the locators are set: the engine goes on from L each
+    /// time the song reaches R. Cleared otherwise. As MainForm.ApplyCycle.
+    /// </summary>
+    private void ApplyCycle(SongPlaybackEngine? engine)
+    {
+        if (engine is null)
+            return;
+
+        if (!_daw.CycleOn || _daw.LocatorRange is not { } range)
+        {
+            engine.ClearCycle();
+            return;
+        }
+
+        var start = range.Left is { } left
+            ? SongSequencer.FindPositionInEntry(_session.Song, left.Channel, left.Index, left.TicksInto)
+            : null;
+        var end = SongSequencer.FindPositionInEntry(_session.Song, range.Right.Channel, range.Right.Index, range.Right.TicksInto);
+        if (end is null)
+        {
+            engine.ClearCycle();
+            return;
+        }
+
+        engine.SetCycle(start, end.Frame);
+    }
+
+    /// <summary>The DAW's F2: plays from the project cursor - where the song last stopped, or
+    /// wherever it was put in the arrange ruler. Playing already, it starts again from there.</summary>
+    private void PlayFromProjectCursor()
+    {
+        StopAny();
+        _daw.MarkPlayStart();
+        StartPlaybackFrom(_daw.PlayFrom is { } at
+            ? SongSequencer.FindPositionInEntry(_session.Song, at.Channel, at.Index, at.TicksInto)
+            : null);
+    }
+
+    /// <summary>
+    /// The piano roll's REC: plays the song from the selected clip's place in it - or the left
+    /// locator with PUNCH on, a bar earlier with PRE-ROLL - and the notes played go into that
+    /// clip's pattern. As MainForm.StartRecording.
+    /// </summary>
+    private void StartRecording()
+    {
+        StopAny();
+        if (_session.Song.Instruments.Count == 0 || !_daw.BeginRecording() || _daw.RecordingFrom is not { } clip)
+            return;
+
+        var song = _session.Song;
+        SongSequencer.SequencerPosition? punchIn;
+        int punchOut = int.MaxValue;
+        if (_daw.PunchOn && _daw.LocatorRange is { } range)
+        {
+            punchIn = range.Left is { } left ? SongSequencer.FindPositionInEntry(song, left.Channel, left.Index, left.TicksInto) : null;
+            punchOut = SongSequencer.FindPositionInEntry(song, range.Right.Channel, range.Right.Index, range.Right.TicksInto)?.Frame ?? int.MaxValue;
+        }
+        else
+        {
+            punchIn = clip.Index == 0 ? null : SongSequencer.FindPositionInEntry(song, clip.Channel, clip.Index, 0);
+            if (clip.Index > 0 && punchIn is null)
+            {
+                _daw.EndRecording();
+                return;
+            }
+        }
+
+        // A bar is 16 rows, as the piano roll counts; a beat is 4.
+        int framesPerBeat = 4 * (song.Speed + 1);
+        int punchInFrame = punchIn?.Frame ?? 0;
+        var start = _daw.PreRollOn && punchInFrame > 0
+            ? SongSequencer.PositionAtFrame(song, Math.Max(0, punchInFrame - (4 * framesPerBeat)))
+            : punchIn;
+
+        _recordWindow = (punchInFrame, punchOut);
+        _daw.SetRecordWindow(false);
+        _resumeFrom = null;
+        _resumeCursor = null;
+        StartPlaybackFrom(start);
+        if (_output is null || _engine is null)
+        {
+            _daw.EndRecording();
+            return;
+        }
+
+        if (_daw.ClickOn && _daw.PreRollOn && start is not null)
+            _engine.SetClick(start.Frame, punchInFrame, framesPerBeat);
+        else if (_daw.ClickOn)
+            _engine.SetCountIn(4 * framesPerBeat, framesPerBeat);
     }
 
     /// <summary>F4: stops whichever is running, the song or an F3 loop.</summary>
@@ -576,6 +1017,7 @@ public sealed class MainWindow : Window
             _jam = null;
 
             var engine = new SongPlaybackEngine(_session.Song, _chipModel, resume);
+            ApplyCycle(engine);
             for (int ch = 0; ch < 3; ch++)
                 engine.SetVoiceMuted(ch, _grid.IsChannelMuted(ch));
 
@@ -624,7 +1066,13 @@ public sealed class MainWindow : Window
         _poll.Stop();
         output?.Stop();
         output?.Dispose();
+
+        // A take ends with the song: a held key is let go where it got to, and the take becomes
+        // one edit - one undo step.
+        if (_daw.IsRecording)
+            _daw.EndRecording();
         _grid.SetPlaybackActive(false);
+        _daw.ClearPlayback();
         _play.Content = "▶ Play";
     }
 
@@ -635,6 +1083,55 @@ public sealed class MainWindow : Window
 
         while (engine.TryDequeueRowEvent(out var row))
             _grid.SetChannelPlaybackAnchor(row.Channel, row.PatternNumber, row.RowIndex, row.OrderEntrySequence, row.SampleIndex);
+
+        if (_dawShowing && _output is { } output)
+            DrainToDaw(engine, output.SamplesPlayed);
+    }
+
+    /// <summary>The DAW's views follow the clock the listener hears, as in MainForm: the clips'
+    /// playheads, the roll's row, the record window and the instrument page's program steps.</summary>
+    private void DrainToDaw(SongPlaybackEngine engine, long heard)
+    {
+        if (engine.PositionAt(heard, out long capturedAt) is { Channels.Count: 3 } position)
+        {
+            _daw.SetPlayheads(
+                position.Channels[0].PlayingEntry, position.Channels[1].PlayingEntry, position.Channels[2].PlayingEntry);
+
+            double subFrame = (heard - capturedAt) / SongPlaybackEngine.SamplesPerFrame;
+            int speed = _session.Song.Speed;
+
+            var at = new (int Pattern, int Row, double Fraction, double Ticks)[3];
+            var lanes = new (int Entry, double Ticks)?[3];
+            for (int ch = 0; ch < 3; ch++)
+            {
+                var channel = position.Channels[ch];
+                var (row, fraction) = PlayheadPosition.Of(channel, position.SpeedCounter, speed, subFrame);
+                double ticks = PlayheadPosition.TicksIntoEntry(channel, position.SpeedCounter, speed, subFrame);
+                at[ch] = (channel.CurrentPatternNumber, row, fraction, ticks);
+                lanes[ch] = (channel.PlayingEntry, ticks);
+            }
+
+            _daw.SetPlayRow(at[0], at[1], at[2]);
+            _daw.SetSongPositions(lanes);
+
+            if (_daw.IsRecording)
+            {
+                // Cycle took the song back from R to L: a punch-out and a punch-in at once.
+                if (position.Frame < _lastHeardFrame)
+                    _daw.SetRecordWindow(false);
+                _daw.SetRecordWindow(position.Frame >= _recordWindow.In && position.Frame < _recordWindow.Out);
+            }
+
+            _lastHeardFrame = position.Frame;
+        }
+
+        if (_daw.SelectedInstrumentNumber is { } selected and > 0)
+        {
+            engine.PlayheadAt(heard, selected, out int wave, out int arp, out int filter);
+            _daw.SetProgramPlayheads(wave, arp, filter);
+            _daw.SetEnvelopePlayhead(engine.EnvelopeAt(heard, selected, out int stage, out int level) ? (stage, level) : null);
+            _daw.SetCutoffPlayhead(engine.FilterAt(heard, selected, out int frame, out int cutoff) ? (frame, cutoff) : null);
+        }
     }
 
     // ------------------------------------------------------------------------------------ files
