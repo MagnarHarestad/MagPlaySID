@@ -15,7 +15,7 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagSID logo">
-    <h1>MagSID Editor <span id="version">v1.4</span></h1>
+    <h1>MagSID Editor <span id="version">v1.5</span></h1>
     <p class="released">Release date: <time id="released" datetime="2026-10-16">2026-10-16</time></p>
     <p>A Windows tracker for Commodore 64 music. Write in a classic tracker grid or a DAW-style piano roll,
       hear it through reSID, and export a <code>.sid</code> that plays exactly the same on the real machine.</p>
@@ -33,13 +33,13 @@
   <h2 id="features">What it does</h2>
   <p class="lead">Two views of the same song, a player that fits in a few hundred bytes, and nothing else to install.</p>
   <div class="grid">
-    <div class="card"><div class="i">🎹</div><h3>Retro and DAW</h3><p>A classic tracker grid for typing fast, and an arrangement with a piano roll for seeing the whole song. Both edit the same song at once.</p></div>
+    <div class="card"><div class="i">🎹</div><h3>Retro and DAW</h3><p>A classic tracker grid for typing fast, and an arrangement with a piano roll for seeing the whole song - drag clips between channels, split, glue and erase them. Both edit the same song at once.</p></div>
     <div class="card"><div class="i">⏺️</div><h3>Record from MIDI</h3><p>Play into the piano roll from a MIDI keyboard, with a one-bar pre-roll, an optional click, and punch-in between the locators. Hold a chord to make an arpeggio.</p></div>
     <div class="card"><div class="i">🔊</div><h3>The real SID sound</h3><p>Every note is played through reSID, the reference SID emulation, on a 6581 or an 8580. The waveform strip shows what the chip actually outputs.</p></div>
     <div class="card"><div class="i">💾</div><h3>Tiny player</h3><p>The C64 player is written in 6502 assembly and only carries the effects a song uses. A finished song, player included, is around 750-1250 bytes.</p></div>
     <div class="card"><div class="i">🎯</div><h3>Exact export</h3><p>Export to <code>.sid</code> at any load address. The editor builds the file itself, byte for byte what the assembler would make - no assembler or emulator needed.</p></div>
     <div class="card"><div class="i">📼</div><h3>Built-in SID player</h3><p>Open any <code>.sid</code> to play it, with a spectrum and a scope per voice, and save it as WAV, MP3 or FLAC.</p></div>
-    <div class="card"><div class="i">🎼</div><h3>Import MIDI</h3><p>Turn a .mid file into a song the C64 way: bass and drums on channel 1, the chords as arpeggios, the lead on top - and each General MIDI sound mapped to an instrument from the demo songs.</p></div>
+    <div class="card"><div class="i">🎼</div><h3>Import MIDI</h3><p>Turn a .mid file into a song the C64 way: bass and drums on channel 1, the chords read bar by bar as arpeggios, the lead on top - and each General MIDI sound mapped to an instrument from the demo songs, or one picked from the sound bank.</p></div>
     <div class="card"><div class="i">🎛️</div><h3>Sound bank</h3><p>25 sounds from the demo songs - instruments, drums, and arpeggios at three speeds. Click a card to hear it, double-click to add it. Save any instrument as a small JSON file to build up your own.</p></div>
   </div>
 
@@ -136,7 +136,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagSID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagSID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagSID/issues">Report a problem</a></div></footer>
 <script>
-// The version and release date under the logo follow the latest release; v1.4 and its date stand
+// The version and release date under the logo follow the latest release; v1.5 and its date stand
 // until GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagSID/releases/latest')
   .then(response => response.ok ? response.json() : null)

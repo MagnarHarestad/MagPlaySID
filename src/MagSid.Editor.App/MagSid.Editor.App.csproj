@@ -18,7 +18,7 @@
          assembly is renamed, so the .exe and its .dll are MagSID-Editor.* -->
     <AssemblyName>MagSID-Editor</AssemblyName>
     <!-- The editor's version: what About shows and what the .exe's properties say. -->
-    <Version>1.4</Version>
+    <Version>1.5</Version>
     <TargetFramework>net8.0-windows</TargetFramework>
     <!-- Runs on any Desktop Runtime from 8 upwards. Without it a machine carrying only .NET 9 or
          10 refuses to start the app although its runtime is newer than the one asked for, which is

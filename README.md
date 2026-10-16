@@ -42,7 +42,8 @@ Settings — MIDI device, knob bindings, view preferences — are kept in
 
 - Songs are plain-text `.s` files. Open one from `SongData` with **Menu → Open** (F10).
 - There are two views of the same song: **Retro**, a classic tracker grid, and **DAW**, an
-  arrangement with a piano roll and an instrument page. The menu bar switches between them.
+  arrangement with a piano roll and an instrument page. The menu bar switches between them. In the
+  DAW's arrangement, the tools next to the tabs drag clips between channels, erase, split and glue them.
 - F1 plays from the top, F2 from the cursor (in the DAW, from the project cursor), F4 stops. Space
   or F5 switches between Edit and Jam mode — **Menu → Swap Spacebar Behavior** gives Space the
   transport instead.
