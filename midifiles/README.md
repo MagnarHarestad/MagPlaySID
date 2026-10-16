@@ -1,11 +1,11 @@
 # MIDI files for trying Import MIDI
 
-Eighteen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
+Seventeen well-known tunes for **Menu → Import MIDI**, chosen so they can ship with MagSID: the music
 is in the public domain, and every file comes from the [Mutopia Project](https://www.mutopiaproject.org),
 whose music "may be freely downloaded, printed, copied, distributed, modified, performed and recorded".
 The files are Mutopia's own MIDI renderings, unchanged apart from their names.
 
-Fifteen are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
+Fourteen are dedicated to the public domain. Three are under Creative Commons ShareAlike licences, which ask for
 credit and that a changed version keeps the same licence. Those credits are below. These files
 are not covered by MagSID's own GPL; each keeps the licence listed here.
 
@@ -23,7 +23,6 @@ Every file is imported, exported and played on the emulated 6502 by
 | `prelude-in-c-wtc1.mid` | Das Wohltemperierte Clavier I, Praeludium I | J. S. Bach (1685–1750) | [for Harpsichord, Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=5) | Public Domain |
 | `premiere-arabesque.mid` | Première Arabesque | C. Debussy (1862–1918) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1777) | Public Domain |
 | `minute-waltz.mid` | Valse Op. 64, No. 1 ('Minute Waltz') | F. F. Chopin (1810–1849) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=483) | Public Domain |
-| `ode-to-joy.mid` | Ode to Joy | L. V. Beethoven (1770–1827) | [for Voice (SATB)](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=528) | Public Domain |
 | `greensleeves.mid` | Greensleeves | Traditional | [for Accordion](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1265) | Public Domain |
 | `moonlight-sonata.mid` | Sonata No. 14 “Moonlight” (1st Movement: Adagio sostenuto) | L. V. Beethoven (1770–1827) | [for 2 Guitars](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2101) | Public Domain |
 | `liberty-bell-march.mid` | The Liberty Bell March | J. P. Sousa (1854–1932) | [for Piano](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=625) | Public Domain |
