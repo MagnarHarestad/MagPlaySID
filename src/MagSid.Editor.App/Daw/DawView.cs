@@ -683,6 +683,7 @@ internal sealed class DawView : Panel
             _pianoRoll.ReloadPattern();
             PatternEdited?.Invoke();
         };
+        _arrange.PatternLengthChanging += _pianoRoll.ReloadPattern;
         // The roll below always shows the pattern of the selected clip - selecting is the whole
         // gesture, no double-click and no tab switch.
         _arrange.SelectedPatternChanged += (channel, patternNumber) =>

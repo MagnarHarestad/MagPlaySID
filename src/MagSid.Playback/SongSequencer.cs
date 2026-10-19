@@ -25,8 +25,8 @@ public sealed class SongSequencer
 {
     private readonly Song _song;
     private readonly Action<int, int> _write;
-    private readonly Dictionary<int, Pattern> _patternsByNumber;
-    private readonly Dictionary<int, Instrument> _instrumentsByNumber;
+    private Dictionary<int, Pattern> _patternsByNumber;
+    private Dictionary<int, Instrument> _instrumentsByNumber;
 
     /// <summary>Instrument index 0 in the player's tables - what a release before a voice's
     /// first note runs on.</summary>
@@ -77,8 +77,8 @@ public sealed class SongSequencer
     {
         _song = song;
         _write = writeRegister;
-        _patternsByNumber = song.Patterns.ToDictionary(p => p.Number);
-        _instrumentsByNumber = song.Instruments.ToDictionary(i => i.Number);
+        _patternsByNumber = ByNumber(song.Patterns, p => p.Number);
+        _instrumentsByNumber = ByNumber(song.Instruments, i => i.Number);
         _firstInstrument = song.Instruments.MinBy(i => i.Number);
 
         bool slides = MagSid.Core.SongSizeCalculator.UsesSlide(song);
@@ -125,7 +125,7 @@ public sealed class SongSequencer
         for (int ch = 0; ch < 3; ch++)
         {
             var state = _channels[ch];
-            if (_triggeredThisFrame[ch] || !_patternsByNumber.TryGetValue(state.CurrentPatternNumber, out var pattern))
+            if (_triggeredThisFrame[ch] || PatternFor(state.CurrentPatternNumber) is not { } pattern)
             {
                 continue;
             }
@@ -355,7 +355,7 @@ public sealed class SongSequencer
     /// caller to start that channel normally.</summary>
     private bool TryRestore(int ch, ChannelPlaybackState captured)
     {
-        if (!_patternsByNumber.TryGetValue(captured.CurrentPatternNumber, out var pattern) ||
+        if (PatternFor(captured.CurrentPatternNumber) is not { } pattern ||
             pattern.Rows.Count == 0)
         {
             return false;
@@ -533,9 +533,17 @@ public sealed class SongSequencer
     {
         var state = _channels[ch];
 
-        while (true)
+        // An order entry whose pattern is gone is passed over; a whole order of them would
+        // otherwise go round for ever, so the channel rests a tick instead.
+        for (int missing = 0; ; )
         {
-            var pattern = _patternsByNumber[state.CurrentPatternNumber];
+            if (PatternFor(state.CurrentPatternNumber) is not { } pattern)
+            {
+                if (++missing > 256)
+                    return;
+                AdvanceOrder(ch);
+                continue;
+            }
 
             if (state.RowIndex >= pattern.Rows.Count)
             {
@@ -624,13 +632,16 @@ public sealed class SongSequencer
             }
             else if (row is NoteRow noteRow)
             {
-                var instrument = _instrumentsByNumber[noteRow.InstrumentNumber];
-                state.Voice.TriggerNote(
-                    RegisterBase(ch), noteRow.Note, noteRow.InstrumentNumber, instrument, _write);
-
-                if (instrument.Filter.Count > 0)
+                // An instrument that is not there plays nothing new; the voice carries on.
+                if (InstrumentFor(noteRow.InstrumentNumber) is { } instrument)
                 {
-                    _filter.Claim(instrument.Filter, noteRow.InstrumentNumber);
+                    state.Voice.TriggerNote(
+                        RegisterBase(ch), noteRow.Note, noteRow.InstrumentNumber, instrument, _write);
+
+                    if (instrument.Filter.Count > 0)
+                    {
+                        _filter.Claim(instrument.Filter, noteRow.InstrumentNumber);
+                    }
                 }
             }
 
@@ -638,6 +649,44 @@ public sealed class SongSequencer
             RowTriggered?.Invoke(ch, triggeredPatternNumber, triggeredRowIndex, state.OrderEntrySequence, row);
             return;
         }
+    }
+
+    /// <summary>
+    /// The song is edited while it plays - an instrument loaded, a pattern drawn - so the tables
+    /// built at the start can fall behind it. A number they do not have, or have under an object
+    /// since renumbered, re-reads the song; before, the lookup threw on the audio thread, and the
+    /// output stopped the moment a note named an instrument loaded after Play.
+    /// </summary>
+    private Instrument? InstrumentFor(int number)
+    {
+        if (_instrumentsByNumber.TryGetValue(number, out var instrument) && instrument.Number == number)
+            return instrument;
+
+        _instrumentsByNumber = ByNumber(_song.Instruments, i => i.Number);
+        return _instrumentsByNumber.GetValueOrDefault(number);
+    }
+
+    private Pattern? PatternFor(int number)
+    {
+        if (_patternsByNumber.TryGetValue(number, out var pattern) && pattern.Number == number)
+            return pattern;
+
+        _patternsByNumber = ByNumber(_song.Patterns, p => p.Number);
+        return _patternsByNumber.GetValueOrDefault(number);
+    }
+
+    /// <summary>By number, from a list the editor may be changing on another thread - read by
+    /// index, and the first of a number kept, so a half-made change cannot throw here.</summary>
+    private static Dictionary<int, T> ByNumber<T>(List<T> items, Func<T, int> number)
+    {
+        var byNumber = new Dictionary<int, T>();
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items.ElementAtOrDefault(i) is { } item)
+                byNumber.TryAdd(number(item), item);
+        }
+
+        return byNumber;
     }
 
     private void AdvanceOrder(int ch)

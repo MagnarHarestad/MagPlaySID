@@ -2696,7 +2696,7 @@ internal sealed class PianoRollView : Control
         for (int column = 0; column < ColumnCount; column++)
         {
             int row = RowOf(column);
-            if (row < 0 || row >= _slideRates.Length)
+            if (row < 0 || row >= _slideRates.Length || row >= _slidable.Length || row >= pattern.Rows.Count)
                 continue;
 
             int rate = _slideStroke is { } stroke && stroke.TryGetValue(column, out int drawn) && _slidable[row]

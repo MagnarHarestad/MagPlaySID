@@ -538,6 +538,11 @@ internal sealed class ArrangeView : Control
     /// to the pattern, not to the order, and the roll showing it has to be told.</summary>
     public event Action? PatternLengthChanged;
 
+    /// <summary>A clip's end moved during a drag - the pattern's rows already changed, so the roll
+    /// showing it has to re-read them now, not at the end of the drag: a repaint in between read
+    /// rows that were no longer there.</summary>
+    public event Action? PatternLengthChanging;
+
     /// <summary>The clip being resized, as (channel, index), or null.</summary>
     private (int Channel, int Index)? _resizing;
 
@@ -752,6 +757,7 @@ internal sealed class ArrangeView : Control
         _resizeChanged = true;
         UpdateScrollRange();
         Invalidate();
+        PatternLengthChanging?.Invoke();
     }
 
     private double TicksAtX(int x) => Math.Max(0, (x - GutterWidth + _scroll.Value) / PixelsPerRow);
