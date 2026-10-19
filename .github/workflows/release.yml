@@ -6,7 +6,7 @@ name: release
 # only, with no release, to try the packaging out.
 #
 # Signing on the Mac uses these repository secrets when they are there, and ad hoc signing when
-# they are not (the app then opens with right-click, Open the first time):
+# they are not (macOS then has to be told once to open it - see the release notes below):
 #   MACOS_CERTIFICATE_P12        a "Developer ID Application" certificate with its key, base64
 #   MACOS_CERTIFICATE_PASSWORD   the .p12's password
 #   APPLE_API_KEY_P8             an App Store Connect API key (.p8), base64 - for notarising
@@ -161,12 +161,15 @@ jobs:
         run: (cd dist && sha256sum MagSID-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - name: Open a draft release
         run: |
+          # Single quotes: the Terminal line's backticks are Markdown, not a command to run here.
           if [ "$NOTARISED" = true ]; then
             mac="Signed with a Developer ID and notarised by Apple: it opens with a double-click."
-          elif [ "$SIGNED" = true ]; then
-            mac="Signed with a Developer ID but not notarised: the first time, right-click the app and choose **Open**."
           else
-            mac="Not signed with a Developer ID: the first time, right-click the app and choose **Open**, then **Open** again."
+            mac='It is not notarised by Apple yet, so macOS stops it the first time it is opened:
+
+          - **macOS 15 Sequoia and later:** open MagSID once and close the warning, then go to **System Settings → Privacy & Security**, scroll down to MagSID and choose **Open Anyway**.
+          - **macOS 14 and earlier:** right-click MagSID, choose **Open**, then **Open** again.
+          - If macOS says MagSID *is damaged and can'"'"'t be opened*, remove the mark macOS puts on downloads, in Terminal: `xattr -dr com.apple.quarantine /Applications/MagSID.app` - only for software you trust.'
           fi
           cat > notes.md <<NOTES
           MagSID Editor $VERSION for macOS, Windows and Linux - the Avalonia port.

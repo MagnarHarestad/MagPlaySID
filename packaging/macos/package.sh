@@ -48,7 +48,8 @@ if [ -n "$identity" ]; then
   codesign --verify --strict --verbose=2 "$app"
 else
   # Apple Silicon will not run a binary with no signature at all, so without a Developer ID the
-  # bundle is signed ad hoc. First launch: right-click, Open.
+  # bundle is signed ad hoc. The first launch needs Open Anyway in Privacy & Security (macOS 15),
+  # right-click, Open (macOS 14), or the quarantine mark removed - see the release notes.
   echo "No MACOS_SIGN_IDENTITY: signing ad hoc, not notarised."
   codesign --force --deep --sign - "$app"
 fi

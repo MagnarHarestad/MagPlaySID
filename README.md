@@ -32,7 +32,8 @@ Slaygon, Bob and Swallow for design inspirations, technical advices, tools & SVN
 >    app for Apple Silicon and Intel, Windows and Linux packages (one self-contained executable each)
 >    and SHA-256 checksums, and open a draft release with them to publish by hand. The Mac app is
 >    signed with a Developer ID and notarised when the repository has the secrets the workflow lists;
->    until then it is signed ad hoc, and opens with right-click, **Open** the first time. Windows
+>    until then it is signed ad hoc, and macOS has to be told once to open it - **Open Anyway** in
+>    Privacy & Security on macOS 15, right-click **Open** on 14; the website has the steps. Windows
 >    builds are not code-signed.
 >
 > GitHub Actions tests the engine on Windows, macOS and Linux and builds the Mac app on every push.
