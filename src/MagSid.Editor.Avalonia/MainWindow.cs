@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using MagSid.Core.Midi;
 using MagSid.Core.Model;
 using MagSid.Core.Serialization;
+using MagSid.Core.SidImport;
 using MagSid.Core.Validation;
 using MagSid.Editor.App;
 using MagSid.Editor.App.Controls;
@@ -290,6 +291,7 @@ public sealed class MainWindow : Window
                 Item("New", () => _ = NewAsync(), $"{command}+N"),
                 Item("Open...", () => _ = OpenAsync(), $"{command}+O"),
                 Item("Import MIDI...", () => _ = ImportMidiAsync()),
+                Item("Import SID...", () => _ = ImportSidAsync()),
                 Item("Save", () => _ = SaveAsync(saveAs: false), $"{command}+S"),
                 Item("Save As...", () => _ = SaveAsync(saveAs: true), $"{command}+Shift+S"),
                 new Separator(),
@@ -1424,6 +1426,59 @@ public sealed class MainWindow : Window
         _session.LoadImported(result.Song, Path.GetFileNameWithoutExtension(path));
         _grid.SetSongPosition(0);
         ShowNotice($"Imported {Path.GetFileName(path)}: {result.Report.Bars} bars, {result.Report.TotalBytes} bytes");
+    }
+
+    /// <summary>Makes a new song from a .sid tune - see SidImportWindow for the choices and
+    /// SidTranscriber for how what the tune does to the chip becomes notes and instruments.</summary>
+    private async Task ImportSidAsync()
+    {
+        if (!await ConfirmDiscardAsync())
+            return;
+
+        var options = new FilePickerOpenOptions
+        {
+            Title = "Import SID",
+            FileTypeFilter = [new FilePickerFileType("SID tunes") { Patterns = ["*.sid"] }, FilePickerFileTypes.All],
+        };
+        if (EditorSettings.SidOpenDirectory is { Length: > 0 } remembered)
+            options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(remembered);
+
+        var files = await StorageProvider.OpenFilePickerAsync(options);
+        if (files.Count == 0 || files[0].TryGetLocalPath() is not { } path)
+            return;
+
+        EditorSettings.SidOpenDirectory = Path.GetDirectoryName(path) ?? "";
+
+        SidFile file;
+        try
+        {
+            file = SidFile.Parse(File.ReadAllBytes(path));
+        }
+        catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException)
+        {
+            await MessageWindow.ShowAsync(this, "Cannot read .sid file", ex.Message);
+            return;
+        }
+
+        if (file.UnsupportedReason() is { } reason)
+        {
+            await MessageWindow.ShowAsync(this, "Cannot import this .sid", reason);
+            return;
+        }
+
+        // The engines hold the old song; they stop before it is replaced.
+        StopTransport();
+        StopPatternPreview();
+        _jam?.SilenceAll();
+        _daw.ClearSoundingNotes();
+
+        var result = await new SidImportWindow(file, Path.GetFileName(path)).ShowDialog<SidImportResult?>(this);
+        if (result is null)
+            return;
+
+        _session.LoadImported(result.Song, file.Name.Length > 0 ? file.Name : Path.GetFileNameWithoutExtension(path));
+        _grid.SetSongPosition(0);
+        ShowNotice($"Imported {Path.GetFileName(path)}: {result.Report.Rows} rows, {result.Report.TotalBytes} bytes");
     }
 
     private async Task NewAsync()
