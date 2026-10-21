@@ -47,8 +47,9 @@ public static class SidSongLength
         public TimeSpan Loop => TimeSpan.FromSeconds(LoopFrames / CallsPerSecond);
     }
 
-    /// <summary>Null when the tune shows no repeating state inside <paramref name="maxFrames"/>.</summary>
-    public static Result? Measure(SidFile file, int maxFrames = DefaultMaxFrames)
+    /// <summary>Null when the tune shows no repeating state inside <paramref name="maxFrames"/>.
+    /// <paramref name="song"/> is the subtune, 1-based; the file's start song when left out.</summary>
+    public static Result? Measure(SidFile file, int maxFrames = DefaultMaxFrames, int? song = null)
     {
         if (file.UnsupportedReason() is not null)
             return null;
@@ -58,7 +59,8 @@ public static class SidSongLength
 
         bool timerSet = false;
         var cpu = new Mos6502(memory, (address, _) => timerSet |= PlayRate.IsTimerLatch(address));
-        cpu.A = Math.Max(0, file.StartSong - 1);
+        int subtune = song ?? file.StartSong;
+        cpu.A = Math.Max(0, subtune - 1);
 
         try
         {
@@ -71,7 +73,7 @@ public static class SidSongLength
 
         // The rate init left the timer at; a tune that changes it while playing is measured at this
         // one, which is the tempo it starts with.
-        double callsPerSecond = PlayRate.PalClock / PlayRate.CyclesPerCall(file, file.StartSong, memory, timerSet);
+        double callsPerSecond = PlayRate.PalClock / PlayRate.CyclesPerCall(file, subtune, memory, timerSet);
 
         int from = file.LoadAddress;
         int to = Math.Min(0xFFFF, file.LoadAddress + file.Data.Length - 1);

@@ -245,6 +245,7 @@ public sealed class MainForm : Form
         var newItem = new ToolStripMenuItem("&New", null, (_, _) => DoNew());
         var openItem = new ToolStripMenuItem("&Open...", null, (_, _) => DoOpen());
         var importMidiItem = new ToolStripMenuItem("Import &MIDI...", null, (_, _) => DoImportMidi());
+        var importSidItem = new ToolStripMenuItem("Import SI&D...", null, (_, _) => DoImportSid());
         var saveItem = new ToolStripMenuItem("&Save", null, (_, _) => DoSave());
         var saveAsItem = new ToolStripMenuItem("Save &As...", null, (_, _) => DoSaveAs());
         var loadInstrumentItem = new ToolStripMenuItem("Load &Instrument...", null, (_, _) => DoLoadInstrument());
@@ -303,7 +304,7 @@ public sealed class MainForm : Form
         exportSidItem.ShortcutKeys = Keys.F9;
 
         file.DropDownItems.AddRange([aboutItem, new ToolStripSeparator(), _undoItem, _redoItem,
-            new ToolStripSeparator(), newItem, openItem, importMidiItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), loadInstrumentItem, saveInstrumentItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
+            new ToolStripSeparator(), newItem, openItem, importMidiItem, importSidItem, new ToolStripSeparator(), saveItem, saveAsItem, new ToolStripSeparator(), loadInstrumentItem, saveInstrumentItem, new ToolStripSeparator(), exportSidItem, loadAndPlaySidItem, new ToolStripSeparator(), showHighHexItem, swapSpacebarItem, unrollLoopsItem, new ToolStripSeparator(), exitItem]);
         menu.Items.Add(file);
 
         var signalPathItem = new ToolStripMenuItem("&Signal Path", null, (_, _) => DoSignalPath());
@@ -1905,6 +1906,53 @@ public sealed class MainForm : Form
         StopSongForSwap();
         _session.LoadImported(result.Song, Path.GetFileNameWithoutExtension(open.FileName));
         ShowNotice($"Imported {Path.GetFileName(open.FileName)}: {result.Report.Bars} bars, {result.Report.TotalBytes} bytes");
+    }
+
+    /// <summary>Makes a new song from a .sid tune - see SidImportForm for the choices and
+    /// SidTranscriber for how what the tune does to the chip becomes notes and instruments.</summary>
+    private void DoImportSid()
+    {
+        if (!ConfirmDiscardIfDirty())
+            return;
+
+        using var open = new OpenFileDialog
+        {
+            Filter = "SID tunes (*.sid)|*.sid|All files (*.*)|*.*",
+            Title = "Import SID",
+        };
+        if (EditorSettings.SidOpenDirectory is { Length: > 0 } remembered)
+            open.InitialDirectory = remembered;
+        if (open.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        if (Path.GetDirectoryName(open.FileName) is { Length: > 0 } opened)
+            EditorSettings.SidOpenDirectory = opened;
+
+        SidFile file;
+        try
+        {
+            file = SidFile.Parse(File.ReadAllBytes(open.FileName));
+        }
+        catch (Exception ex) when (ex is SidPlaybackException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, ex.Message, "Cannot read .sid file", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (file.UnsupportedReason() is { } reason)
+        {
+            MessageBox.Show(this, reason, "Cannot import this .sid", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        StopSongForSwap();
+        using var dialog = new SidImportForm(file, Path.GetFileName(open.FileName));
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Result is not { } result)
+            return;
+
+        string name = file.Name.Length > 0 ? file.Name : Path.GetFileNameWithoutExtension(open.FileName);
+        _session.LoadImported(result.Song, name);
+        ShowNotice($"Imported {Path.GetFileName(open.FileName)}: {result.Report.Rows} rows, {result.Report.TotalBytes} bytes");
     }
 
     private void DoSave()

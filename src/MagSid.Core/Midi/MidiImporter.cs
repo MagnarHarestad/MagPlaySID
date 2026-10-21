@@ -804,7 +804,9 @@ public static class MidiImporter
         return NoteName.AllNotes[index];
     }
 
-    private static Song Build(List<PatternRow[]?> lines, List<Instrument> instruments, int speed, int rowsPerPattern)
+    /// <summary>Three channels' rows as a song: cut into patterns of <paramref name="rowsPerPattern"/>,
+    /// each distinct one stored once - shared with the SID import.</summary>
+    internal static Song Build(List<PatternRow[]?> lines, List<Instrument> instruments, int speed, int rowsPerPattern)
     {
         var song = new Song { Speed = speed };
         foreach (var instrument in instruments)
@@ -861,7 +863,7 @@ public static class MidiImporter
     };
 
     /// <summary>Why the song cannot be exported as built, or null.</summary>
-    private static string? Problem(Song song)
+    internal static string? Problem(Song song)
     {
         int orderBytes = song.ChannelOrders.Sum(o => o.Tokens.Count + 2);
         if (orderBytes > MaxOrderBytes)
