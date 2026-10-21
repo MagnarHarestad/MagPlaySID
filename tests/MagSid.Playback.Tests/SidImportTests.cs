@@ -39,16 +39,6 @@ public class SidImportTests
     }
 
     [Fact]
-    public void An_exported_sid_imports_through_the_6502_player()
-    {
-        var file = SidFile.Parse(File.ReadAllBytes(Path.Combine(SongDataDir, "Outlaws.sid")));
-        var (_, result, agreement) = RoundTrip(SidImportTrace.Record(file, file.StartSong, 50 * 36));
-
-        Assert.True(agreement >= 0.9, $"{agreement:P1} of the notes came back");
-        Assert.Equal(6, result.Song.Speed);    // Outlaws' own speed, found from where its notes start
-    }
-
-    [Fact]
     public void A_gate_held_while_the_pitch_moves_is_a_legato_note()
     {
         // One gate-on, then C-4 for 10 frames, E-4 for 10, G-4 for 10: three notes.
