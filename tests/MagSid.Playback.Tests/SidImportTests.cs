@@ -90,6 +90,63 @@ public class SidImportTests
         Assert.DoesNotContain(result.Song.Patterns.SelectMany(p => p.Rows), r => r is NoteOffRow);
     }
 
+    /// <summary>Notes on one voice, each 24 frames: the gate on, and the frequency
+    /// <paramref name="pitch"/> gives for each frame into the note.</summary>
+    private static SidTranscriber.Analysis Notes(int count, Func<int, int> pitch)
+    {
+        var frames = new List<IReadOnlyList<(int, int)>>();
+        for (int note = 0; note < count; note++)
+        {
+            for (int i = 0; i < 24; i++)
+            {
+                int frequency = pitch(i);
+                var writes = new List<(int, int)> { (0, frequency & 0xFF), (1, frequency >> 8) };
+                if (i == 0)
+                    writes.AddRange([(5, 0x00), (6, 0xF0), (4, 0x41)]);
+                else if (i == 22)
+                    writes.Add((4, 0x40));
+                frames.Add(writes);
+            }
+        }
+
+        return SidTranscriber.Analyze(new SidTrace([], frames));
+    }
+
+    private static int Frequency(string note)
+    {
+        var (lo, hi) = MagSid.Core.NotePalTable.GetFreq(NoteName.Parse(note));
+        return lo | (hi << 8);
+    }
+
+    [Fact]
+    public void A_pitch_that_swings_wider_than_a_vibrato_is_not_made_one()
+    {
+        // A bass bending up and down by four semitones, as Viva Las Vegas's does: imported as a
+        // vibrato of depth 255 it dragged every bass note off its pitch.
+        // As Viva Las Vegas's bass does: tuned a third of a semitone off the table, with an
+        // octave strike on its second frame - off any note, so it looked like a vibrato.
+        int d2 = (int)(Frequency("D#2") * 1.02);
+        var analysis = Notes(4, i => i == 1 ? 2 * d2 : d2);
+
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(24, 0, analysis.FrameCount));
+
+        Assert.All(result.Song.Instruments, i => Assert.Equal(0, i.VibratoDepth));
+        Assert.All(result.Song.Patterns.SelectMany(p => p.Rows).OfType<NoteRow>(), r => Assert.Equal("D#2", r.Note.ToString()));
+    }
+
+    [Fact]
+    public void A_real_vibrato_is_kept()
+    {
+        // A-4, wobbling a little either side every two frames after the first four.
+        int a4 = Frequency("A-4");
+        var analysis = Notes(4, i => i < 4 ? a4 : a4 + (i / 2 % 2 == 0 ? 40 : -40));
+
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(24, 0, analysis.FrameCount));
+
+        Assert.Contains(result.Song.Instruments, i => i.VibratoDepth > 0);
+        Assert.All(result.Song.Patterns.SelectMany(p => p.Rows).OfType<NoteRow>(), r => Assert.Equal("A-4", r.Note.ToString()));
+    }
+
     [Fact]
     public void A_wavetable_never_gets_a_zero_step()
     {

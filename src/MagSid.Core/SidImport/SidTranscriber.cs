@@ -595,7 +595,7 @@ public static class SidTranscriber
                 sweep = Math.Clamp(Median(deltas), -128, 127);
         }
 
-        var (delaySpeed, depth) = options.Vibrato ? Vibrato(frames, note, offsets) : ((byte)0, (byte)0);
+        var (delaySpeed, depth) = options.Vibrato ? Vibrato(frames, note, offsets, played) : ((byte)0, (byte)0);
         var filter = options.Filter ? FilterProgram(analysis, note, length) : [];
 
         return new Sound
@@ -753,7 +753,7 @@ public static class SidTranscriber
     /// it moves one way, and how far each frame - MagSID's three vibrato numbers. Looked for over
     /// the whole note, since a delayed vibrato starts well after its sound has settled.
     /// </summary>
-    private static (byte DelaySpeed, byte Depth) Vibrato(VoiceFrame[] frames, NoteEvent note, int[] offsets)
+    private static (byte DelaySpeed, byte Depth) Vibrato(VoiceFrame[] frames, NoteEvent note, int[] offsets, int root)
     {
         int end = note.SoundEnd;
         if (end - note.Start < 8 || offsets.Any(o => o != 0))
@@ -765,7 +765,21 @@ public static class SidTranscriber
 
         var moving = deltas.Where(d => d.Delta != 0).ToList();
         int turns = moving.Zip(moving.Skip(1), (a, b) => Math.Sign(a.Delta) != Math.Sign(b.Delta) ? 1 : 0).Sum();
-        if (moving.Count < 4 || turns < 2)
+        if (moving.Count < 4 || turns < 3)
+            return (0, 0);
+
+        // A vibrato wobbles around its note and comes back. A pitch that swings further than two
+        // semitones, or ends up somewhere else, is a bend or a slide - and played as a vibrato it
+        // drags the note off its pitch, as it did the bass of Viva Las Vegas.
+        double pitch = NoteFrequencies[Math.Clamp(root, 0, NoteFrequencies.Length - 1)];
+        int low = int.MaxValue, high = int.MinValue;
+        for (int f = note.Start; f < end; f++)
+        {
+            low = Math.Min(low, frames[f].Frequency);
+            high = Math.Max(high, frames[f].Frequency);
+        }
+        int drift = Math.Abs(frames[end - 1].Frequency - frames[note.Start].Frequency);
+        if (high - low > pitch * 0.12 || drift > (high - low) / 2)
             return (0, 0);
 
         // Runs of frames moving the same way.
@@ -784,8 +798,10 @@ public static class SidTranscriber
 
         int delay = Math.Clamp(moving[0].Frame / 4, 0, 15);
         int speed = Math.Clamp(Median(runs) - 1, 0, 15);
-        int depth = Math.Clamp(Median([.. moving.Select(m => Math.Abs(m.Delta))]), 1, 255);
-        return ((byte)((delay << 4) | speed), (byte)depth);
+        int depth = Median([.. moving.Select(m => Math.Abs(m.Delta))]);
+        if (depth > 255)
+            return (0, 0);
+        return ((byte)((delay << 4) | speed), (byte)Math.Max(1, depth));
     }
 
     /// <summary>
