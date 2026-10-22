@@ -154,7 +154,7 @@ public sealed class AboutForm : Form
         Mono("  CH    Song order position (\"01→\"), RST01 marks the loop-back point\n" +
              "  PAT   Pattern number, and loop markers LS / LE04\n" +
              "  NOT   Note, \"...\" hold, \"---\" note off, 1xx / 2xx slide (orange)\n" +
-             "  INS   Instrument number (hex, two quick keys make two digits)\n\n");
+             "  INS   Instrument number, 1-16 (two quick keys make two digits)\n\n");
         Body("A note off (\"---\") releases the gate and stops the wavetable; pulse sweep, note " +
              "program, vibrato and slide run on through the release.\n\n");
         Body("LS / LE loops are drawn unrolled, as they play: the first pass as written, each " +

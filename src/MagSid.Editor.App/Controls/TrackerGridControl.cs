@@ -1,6 +1,7 @@
 ﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using MagSid.Core.Model;
+using MagSid.Core.Validation;
 using MagSid.Playback;
 
 namespace MagSid.Editor.App.Controls;
@@ -971,10 +972,10 @@ public sealed class TrackerGridControl : Control
         }
         else if (_cursorField == CursorField.Instrument && _editMode)
         {
-            int? hex = HexDigitFromKey(e.KeyCode);
-            if (hex is not null)
+            int? digit = HexDigitFromKey(e.KeyCode);
+            if (digit is <= 9)
             {
-                EnterInstrumentDigit(hex.Value);
+                EnterInstrumentDigit(digit.Value);
                 e.Handled = true;
             }
         }
@@ -1722,9 +1723,12 @@ public sealed class TrackerGridControl : Control
             return;
         }
 
+        // Decimal, two digits typed in quick succession making one number: 1 then 4 is 14. A pair
+        // past the last instrument there can be starts again from its second digit instead.
         bool combine = _pendingInstrumentDigit >= 0 &&
-                       (DateTime.UtcNow - _lastInstrumentDigitTime) < TimeSpan.FromMilliseconds(800);
-        int newValue = combine ? _pendingInstrumentDigit * 16 + digit : digit;
+                       (DateTime.UtcNow - _lastInstrumentDigitTime) < TimeSpan.FromMilliseconds(800) &&
+                       _pendingInstrumentDigit * 10 + digit <= SongValidator.MaxInstrumentNumber;
+        int newValue = combine ? _pendingInstrumentDigit * 10 + digit : digit;
         _pendingInstrumentDigit = combine ? -1 : digit;
         _lastInstrumentDigitTime = DateTime.UtcNow;
 
@@ -2437,7 +2441,8 @@ public sealed class TrackerGridControl : Control
         {
             case NoteRow(var note, var inst):
                 noteText = note.ToString();
-                instText = inst.ToString("X2");
+                // Decimal, as the instrument list beside the grid numbers them: 14, not 0E.
+                instText = inst.ToString("D2");
                 noteBrush = BrushNote;
                 break;
             case HoldRow:
