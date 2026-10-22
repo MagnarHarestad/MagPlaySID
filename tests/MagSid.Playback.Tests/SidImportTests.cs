@@ -123,10 +123,18 @@ public class SidImportTests
     {
         // A bass bending up and down by four semitones, as Viva Las Vegas's does: imported as a
         // vibrato of depth 255 it dragged every bass note off its pitch.
-        // As Viva Las Vegas's bass does: tuned a third of a semitone off the table, with an
-        // octave strike on its second frame - off any note, so it looked like a vibrato.
+        // As Viva Las Vegas's bass does, frame by frame: tuned a third of a semitone off the table,
+        // an octave strike on its second frame, then a small wobble in its tail. That turns often
+        // enough to look like a vibrato, but its swing is an octave.
         int d2 = (int)(Frequency("D#2") * 1.02);
-        var analysis = Notes(4, i => i == 1 ? 2 * d2 : d2);
+        var analysis = Notes(4, i => i switch
+        {
+            1 => 2 * d2,
+            8 => d2 + 16,
+            10 => d2 - 16,
+            >= 11 => d2 - 32,
+            _ => d2,
+        });
 
         var result = SidTranscriber.Import(analysis, new SidImportOptions(24, 0, analysis.FrameCount));
 
