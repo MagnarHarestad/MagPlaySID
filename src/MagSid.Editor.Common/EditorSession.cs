@@ -134,6 +134,16 @@ public sealed class EditorSession
         return instrument;
     }
 
+    /// <summary>Gives <paramref name="target"/> the sound of <paramref name="sound"/> - every
+    /// setting and program, and its name - keeping its number, so the notes on it play the new
+    /// sound. The sound bank's "change sound": a new instrument starts as a plain Flute, and this
+    /// is how it becomes a bank sound without adding a second one and deleting the first.</summary>
+    public void ReplaceInstrumentSound(Instrument target, Instrument sound)
+    {
+        target.CopySoundFrom(MagSid.Core.Serialization.InstrumentFile.Read(MagSid.Core.Serialization.InstrumentFile.Write(sound)));
+        RaiseStructureChanged();
+    }
+
     /// <summary>Adds a new instrument that starts as an exact copy of <paramref name="source"/> -
     /// every field and program (Wavetable/Arpeggio/Filter cloned, not shared - editing the copy
     /// must never reach back into the original) - at the next available number, or returns null

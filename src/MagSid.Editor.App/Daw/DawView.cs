@@ -129,6 +129,9 @@ internal sealed class DawView : Panel
     /// always add instruments the same way.</summary>
     public event Action? InstrumentAddRequested;
     public event Action<MagSid.Core.Midi.GmBank.Sound>? InstrumentFromBankRequested;
+
+    /// <summary>The sound bank's swap button: this sound onto that instrument, in place.</summary>
+    public event Action<Instrument, MagSid.Core.Midi.GmBank.Sound>? InstrumentSoundChangeRequested;
     public event Action? InstrumentLoadRequested;
 
     /// <summary>A sound of the bank to be heard before it is taken, on the note given.</summary>
@@ -437,7 +440,16 @@ internal sealed class DawView : Panel
     /// so a file just saved into the bank folder is there.</summary>
     private void ShowSoundBank()
     {
-        var picker = new SoundBankPicker(MagSid.Core.Midi.GmBank.Load(EditorSettings.BankDirectory).All.ToList());
+        // The swap button puts a sound on the selected instrument - a new one is a plain Flute.
+        var selected = _song?.Instruments.FirstOrDefault(i => i.Number == SelectedInstrumentNumber);
+        string? target = selected is null ? null : $"{selected.Number:00} {InstrumentNames.Display(selected)}";
+        var picker = new SoundBankPicker(MagSid.Core.Midi.GmBank.Load(EditorSettings.BankDirectory).All.ToList())
+        {
+            ChangeTarget = target,
+            Hint = target is null
+                ? "Click to hear  ·  double-click or + to add to the song"
+                : $"Click to hear  ·  + adds it to the song  ·  \u21C4 puts it on {target}",
+        };
         var host = new ToolStripControlHost(picker) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = picker.Size };
         var drop = new ToolStripDropDown { Padding = Padding.Empty, BackColor = DawPalette.Panel };
         drop.Items.Add(host);
@@ -449,6 +461,12 @@ internal sealed class DawView : Panel
         {
             drop.Close();
             BeginInvoke(() => InstrumentFromBankRequested?.Invoke(sound));
+        };
+        picker.Changed += sound =>
+        {
+            drop.Close();
+            if (selected is not null)
+                BeginInvoke(() => InstrumentSoundChangeRequested?.Invoke(selected, sound));
         };
         picker.LoadRequested += () =>
         {

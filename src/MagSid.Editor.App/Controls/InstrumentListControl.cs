@@ -57,6 +57,9 @@ public sealed class InstrumentListControl : UserControl
 
     public event Action? AddRequested;
     public event Action<GmBank.Sound>? AddFromBankRequested;
+
+    /// <summary>A sound of the bank, onto the selected instrument in place of its own.</summary>
+    public event Action<Instrument, GmBank.Sound>? ChangeSoundRequested;
     public event Action? LoadRequested;
     /// <summary>The selected instrument should be cloned into a new instrument number - see
     /// EditorSession.CopyInstrument for what "cloned" actually copies.</summary>
@@ -138,6 +141,11 @@ public sealed class InstrumentListControl : UserControl
         // every row, which a DataGridView refuses to have done to it from its own mouse handler.
         _header.AddRequested += RequestAdd;
         _header.AddFromBankRequested += sound => BeginInvoke(() => AddFromBankRequested?.Invoke(sound));
+        _header.ChangeSoundRequested += sound =>
+        {
+            if (SelectedInstrument is { } i)
+                BeginInvoke(() => ChangeSoundRequested?.Invoke(i, sound));
+        };
         _header.LoadRequested += () => LoadRequested?.Invoke();
         _header.DuplicateRequested += () => { if (SelectedInstrument is { } i) CopyRequested?.Invoke(i); };
         _header.DeleteRequested += () => { if (SelectedInstrument is { } i) DeleteRequested?.Invoke(i); };

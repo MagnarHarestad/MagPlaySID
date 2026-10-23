@@ -32,10 +32,14 @@ public sealed class InstrumentListHeader : Panel
     private readonly ToolStripMenuItem _menuDuplicate = new("&Duplicate selected");
     private readonly ToolStripMenuItem _menuNew = new("&New instrument") { ShortcutKeyDisplayString = "Ins" };
     private readonly ToolStripMenuItem _bankMenu = new("From sound &bank");
+    private readonly ToolStripMenuItem _changeMenu = new("&Change sound of selected");
     private bool _full;
 
     public event Action? AddRequested;
     public event Action<GmBank.Sound>? AddFromBankRequested;
+
+    /// <summary>A sound of the bank, onto the selected instrument in place of its own.</summary>
+    public event Action<GmBank.Sound>? ChangeSoundRequested;
     public event Action? LoadRequested;
     public event Action? DuplicateRequested;
     public event Action? DeleteRequested;
@@ -77,7 +81,7 @@ public sealed class InstrumentListHeader : Panel
         _menuDuplicate.Click += (_, _) => DuplicateRequested?.Invoke();
         var load = new ToolStripMenuItem("&Load from file...", null, (_, _) => LoadRequested?.Invoke());
         var folder = new ToolStripMenuItem("Open bank &folder", null, (_, _) => OpenBankFolder());
-        _menu.Items.AddRange([_menuNew, _bankMenu, load, new ToolStripSeparator(), _menuDuplicate, new ToolStripSeparator(), folder]);
+        _menu.Items.AddRange([_menuNew, _bankMenu, load, new ToolStripSeparator(), _changeMenu, _menuDuplicate, new ToolStripSeparator(), folder]);
         _menu.Opening += (_, _) => FillBankMenu();
         DarkTheme.Apply(_menu);
 
@@ -95,6 +99,7 @@ public sealed class InstrumentListHeader : Panel
         _count.Text = $"{count}/{max}";
         _add.Enabled = _menuNew.Enabled = _bankMenu.Enabled = !_full;
         _duplicate.Enabled = _menuDuplicate.Enabled = hasSelection && !_full;
+        _changeMenu.Enabled = hasSelection;                 // changes one in place: room or none
         _delete.Enabled = hasSelection;
         _tips.SetToolTip(_add, _full
             ? $"All {max} instruments are in use - a pattern names one with a single byte"
@@ -120,6 +125,9 @@ public sealed class InstrumentListHeader : Panel
         _bankMenu.DropDownItems.Clear();
         AddBankItems(_bankMenu.DropDownItems, sound => AddFromBankRequested?.Invoke(sound));
         DarkTheme.Apply(_bankMenu.DropDown);
+        _changeMenu.DropDownItems.Clear();
+        AddBankItems(_changeMenu.DropDownItems, sound => ChangeSoundRequested?.Invoke(sound));
+        DarkTheme.Apply(_changeMenu.DropDown);
     }
 
     /// <summary>One item per sound of the bank as it stands now - the built-in sounds with the

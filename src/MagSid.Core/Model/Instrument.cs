@@ -138,6 +138,33 @@ public sealed class Instrument
 
     public bool HasVibrato => VibratoDepth != 0;
 
+    /// <summary>
+    /// Takes on <paramref name="other"/>'s whole sound - every setting and program, and its name -
+    /// keeping its own number, so the notes that play this instrument play the new sound. Programs
+    /// are copied, never shared. Done by reflection so a setting added to the class later is
+    /// carried too; InstrumentTests checks that every one is.
+    /// </summary>
+    public void CopySoundFrom(Instrument other)
+    {
+        foreach (var property in typeof(Instrument).GetProperties())
+        {
+            if (property.Name == nameof(Number) || property.GetIndexParameters().Length > 0)
+                continue;
+
+            if (property.CanWrite)
+            {
+                property.SetValue(this, property.GetValue(other));
+            }
+            else if (property.GetValue(this) is System.Collections.IList mine
+                     && property.GetValue(other) is System.Collections.IEnumerable theirs)
+            {
+                mine.Clear();
+                foreach (var item in theirs.Cast<object>().ToList())
+                    mine.Add(item);
+            }
+        }
+    }
+
     /// <summary>GoatTracker's 1xx/2xx slide as an instrument property: a signed rate added to the
     /// 16-bit SID frequency every frame the note sounds (positive up, negative down). 0 means no
     /// slide, which is also why the file grammar cannot spell a rate of 0.</summary>

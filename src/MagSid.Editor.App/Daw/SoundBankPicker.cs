@@ -44,6 +44,13 @@ internal sealed class SoundBankPicker : Control
     /// <summary>The line under the title: what a click and a pick do where the sheet is opened.</summary>
     public string Hint { get; init; } = "Click to hear  ·  double-click or + to add to the song";
 
+    /// <summary>The swap button beside +: put the sound on the instrument <see cref="ChangeTarget"/>
+    /// names, in place of what it plays now.</summary>
+    public event Action<GmBank.Sound>? Changed;
+
+    /// <summary>"02 Flute" - the instrument the swap button puts a sound on. Null hides the button.</summary>
+    public string? ChangeTarget { get; init; }
+
     public event Action? LoadRequested;
     public event Action? FolderRequested;
 
@@ -95,6 +102,13 @@ internal sealed class SoundBankPicker : Control
     {
         var card = CardBounds(index);
         return new Rectangle(card.Right - AddSize - 10, card.Top + (card.Height - AddSize) / 2, AddSize, AddSize);
+    }
+
+    /// <summary>The swap button, left of the +; only when there is an instrument to change.</summary>
+    private Rectangle ChangeBounds(int index)
+    {
+        var add = AddBounds(index);
+        return ChangeTarget is null ? Rectangle.Empty : new Rectangle(add.Left - AddSize - 6, add.Top, AddSize, AddSize);
     }
 
     private Rectangle LinkBounds(int link)
@@ -155,6 +169,12 @@ internal sealed class SoundBankPicker : Control
             return;
         }
 
+        if (ChangeBounds(card).Contains(e.Location))
+        {
+            Changed?.Invoke(_sounds[card]);
+            return;
+        }
+
         _playing = card;
         Invalidate();
         Auditioned?.Invoke(_sounds[card]);
@@ -164,7 +184,8 @@ internal sealed class SoundBankPicker : Control
     {
         base.OnMouseDoubleClick(e);
         int card = CardAt(e.Location);
-        if (e.Button == MouseButtons.Left && card >= 0 && !AddBounds(card).Contains(e.Location))
+        if (e.Button == MouseButtons.Left && card >= 0 && !AddBounds(card).Contains(e.Location)
+            && !ChangeBounds(card).Contains(e.Location))
             Picked?.Invoke(_sounds[card]);
     }
 
@@ -251,6 +272,20 @@ internal sealed class SoundBankPicker : Control
         int cx = add.Left + add.Width / 2, cy = add.Top + add.Height / 2;
         g.DrawLine(plus, cx - 6, cy, cx + 6, cy);
         g.DrawLine(plus, cx, cy - 6, cx, cy + 6);
+
+        if (ChangeTarget is null)
+            return;
+
+        // Swap: two arrows, one each way - the sound goes onto the selected instrument.
+        var change = ChangeBounds(index);
+        using (var ring = new Pen(accent, 2f))
+            g.DrawEllipse(ring, change.Left + 1, change.Top + 1, change.Width - 2, change.Height - 2);
+        using var arrow = new Pen(accent, 1.6f);
+        int sx = change.Left + change.Width / 2, sy = change.Top + change.Height / 2;
+        g.DrawLine(arrow, sx - 6, sy - 3, sx + 6, sy - 3);
+        g.DrawLine(arrow, sx + 6, sy - 3, sx + 3, sy - 6);
+        g.DrawLine(arrow, sx + 6, sy + 3, sx - 6, sy + 3);
+        g.DrawLine(arrow, sx - 6, sy + 3, sx - 3, sy + 6);
     }
 
     private void DrawLink(Graphics g, int link, string text) =>

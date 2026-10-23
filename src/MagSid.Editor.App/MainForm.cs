@@ -597,6 +597,7 @@ public sealed class MainForm : Form
         // the same way, with the same undo behaviour and the same numbering rules.
         _dawView.InstrumentAddRequested += AddNewInstrument;
         _dawView.InstrumentFromBankRequested += AddFromBank;
+        _dawView.InstrumentSoundChangeRequested += ChangeSoundFromBank;
         _dawView.InstrumentLoadRequested += DoLoadInstrument;
         _dawView.SoundAuditionRequested += AuditionSound;
         _dawView.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
@@ -851,6 +852,7 @@ public sealed class MainForm : Form
 
         _instrumentList.AddRequested += AddNewInstrument;
         _instrumentList.AddFromBankRequested += AddFromBank;
+        _instrumentList.ChangeSoundRequested += ChangeSoundFromBank;
         _instrumentList.LoadRequested += DoLoadInstrument;
         _instrumentList.CopyRequested += i =>
         {
@@ -2284,6 +2286,15 @@ public sealed class MainForm : Form
 
         SelectAddedInstrument(added.Number);
         ShowNotice($"Added {added.Name} from the sound bank ({sound.Origin})");
+    }
+
+    /// <summary>A sound of the bank onto an instrument the song has, in place of its own - its
+    /// number stays, so every note on it plays the new sound. One undo step.</summary>
+    private void ChangeSoundFromBank(Instrument target, GmBank.Sound sound)
+    {
+        _session.ReplaceInstrumentSound(target, sound.Instrument);
+        SelectAddedInstrument(target.Number);
+        ShowNotice($"Instrument {target.Number:00} is now {target.Name} from the sound bank ({sound.Origin})");
     }
 
     /// <summary>Plays a sound that is not in the song yet - the sound bank's cards - for half a
