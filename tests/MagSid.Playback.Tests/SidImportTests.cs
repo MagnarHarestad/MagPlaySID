@@ -296,6 +296,100 @@ public class SidImportTests
         Assert.Equal("KickBass", Assert.Single(result.Song.Instruments).Name);
     }
 
+    // ------------------------------------------------------------------- GoatTracker tunes
+
+    /// <summary>A note as GoatTracker plays it: its table is at A-4 = 440 Hz, a quarter of a
+    /// semitone and a bit above MagSID's - Viva Las Vegas measures +0.28.</summary>
+    private static int GoatTracker(string note) => Math.Min(0xFFFF, (int)Math.Round(Frequency(note) * Math.Pow(2, 0.28 / 12)));
+
+    private static (int, int)[] GoatSound(params (int Control, string? Note)[] frames) =>
+        [.. frames.Select(f => (f.Control, f.Note is null ? 0 : GoatTracker(f.Note)))];
+
+    [Fact]
+    public void A_GoatTracker_kick_keeps_its_strike_and_plays_its_note()
+    {
+        // Viva Las Vegas's Basskick: the test bit, noise at B-7, pulse at C-3 and E-2 - fixed
+        // notes - then the row's note. Out of MagSID's tuning no frame was on a note but the
+        // strike, so every kick came out as a B-7 with no note program, and was called a snare.
+        string[] roots = ["D#2", "C#2", "B-1", "A#1"];
+        var result = Tune(4, (0, row => row % 4 == 0 ? GoatTracker(roots[row / 4 % roots.Length]) : null,
+            GoatSound((0x09, null), (0x81, "B-7"), (0x41, "C-3"), (0x41, "E-2"), (0x41, null), (0x41, null), (0x41, null), (0x41, null))));
+
+        var kick = Assert.Single(result.Song.Instruments);
+        Assert.Equal("KickBass", kick.Name);
+        Assert.Equal(ArpeggioEnding.Root, kick.ArpeggioEnding);
+        Assert.Equal(["B-7", "C-3", "E-2"], kick.Arpeggio.Select(n => n.ToString()).Distinct());
+        Assert.Equal(roots, result.Song.Patterns.SelectMany(p => p.Rows).OfType<NoteRow>().Take(4).Select(r => r.Note.ToString()));
+    }
+
+    [Fact]
+    public void A_GoatTracker_snare_plays_its_own_notes_on_into_the_release()
+    {
+        // Viva Las Vegas's Snare: noise at F#6, pulse at F#3, then with the gate off pulse at C-3
+        // and noise at D#7 in turn for as long as it rings. Read only while the gate was on, and
+        // out of tune, it played its waveforms on the last note's pitch.
+        var turns = Enumerable.Range(0, 29).Select(i => i % 2 == 0 ? (0x40, "C-3") : (0x80, "D#7"));
+        var snare = GoatSound([(0x09, null), (0x81, "F#6"), (0x41, "F#3"), .. turns]);
+        // Not in the last bar: the song's end would cut the last one's ringing short. A bass on
+        // another voice holds its notes long enough for the tune's tuning to be read.
+        var result = Tune(4,
+            (0, row => row % 16 is 4 or 12 && row < 48 ? 1 : null, snare),
+            (1, row => row % 4 == 0 ? GoatTracker("C-2") : null, GoatSound([.. Enumerable.Repeat<(int, string?)>((0x41, null), 12)])));
+
+        var instrument = Assert.Single(result.Song.Instruments, i => i.Name.StartsWith("Snare"));
+        Assert.Equal("Snare", instrument.Name);
+        Assert.Equal(ArpeggioEnding.Loop, instrument.ArpeggioEnding);
+        Assert.Equal(["F#6", "F#3", "C-3", "D#7"], instrument.Arpeggio.Select(n => n.ToString()).Distinct());
+        Assert.Equal(["C-3", "D#7"], instrument.Arpeggio.Skip(instrument.ArpeggioLoopPoint).Select(n => n.ToString()));
+    }
+
+    [Fact]
+    public void The_first_note_is_on_the_first_row()
+    {
+        // Viva Las Vegas's first kick comes seven frames in; the grid's phase put it on row 1.
+        var frames = Enumerable.Range(0, 7 + 6 * 32).Select(_ => new List<(int, int)>()).ToList();
+        for (int row = 0; row < 32; row += 2)
+        {
+            int f = 7 + row * 6;
+            frames[f].AddRange([(0, 0x00), (1, 0x10), (5, 0x00), (6, 0xF0), (4, 0x41)]);
+            frames[f + 4].Add((4, 0x40));
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], [.. frames]));
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(6, 0, analysis.FrameCount));
+
+        var first = result.Song.Patterns.First(p => p.Number == ((PatternRefToken)result.Song.ChannelOrders[0].Tokens[0]).PatternNumber);
+        Assert.IsType<NoteRow>(first.Rows[0]);
+    }
+
+    [Fact]
+    public void A_volume_fade_does_not_make_an_instrument_of_every_step()
+    {
+        // Viva Las Vegas fades in with the master volume, and every filtered sound came out five
+        // times over, once for each volume its notes set up the filter with.
+        var frames = new List<IReadOnlyList<(int, int)>>();
+        for (int note = 0; note < 16; note++)
+        {
+            int volume = Math.Min(15, 4 + note);
+            for (int i = 0; i < 12; i++)
+            {
+                frames.Add(i switch
+                {
+                    0 => [(0, 0x00), (1, 0x10), (5, 0x00), (6, 0xF0), (4, 0x41), (0x16, 0x40), (0x17, 0xF1), (0x18, 0x10 | volume)],
+                    1 => [(0x16, 0x30)],
+                    10 => [(4, 0x40)],
+                    _ => [],
+                });
+            }
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], frames));
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(12, 0, analysis.FrameCount));
+
+        var instrument = Assert.Single(result.Song.Instruments);
+        Assert.Equal((byte?)0x1F, instrument.Filter[0].ModeVolume);
+    }
+
     [Fact]
     public void Past_sixteen_sounds_the_snare_and_the_bass_keep_their_places()
     {

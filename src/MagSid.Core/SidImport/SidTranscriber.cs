@@ -62,16 +62,24 @@ public static partial class SidTranscriber
 
     private const int MaxRowsPerPattern = 64;
 
+    /// <summary>What playing a sound on one of another role costs, against <see cref="Sound.Distance"/>:
+    /// more than another waveform or note program, so an arpeggio goes on an arpeggio, not the kick.</summary>
+    private const int OtherRole = 4000;
+
     /// <summary>What every voice does in every frame, and where its notes start - worked out once
     /// per tune, before any choice is made.</summary>
     public sealed class Analysis
     {
-        internal Analysis(VoiceFrame[][] voices, GlobalFrame[] global, List<NoteEvent>[] notes)
+        internal Analysis(VoiceFrame[][] voices, GlobalFrame[] global, List<NoteEvent>[] notes, double tuning)
         {
             Voices = voices;
             Global = global;
             Notes = notes;
+            Tuning = tuning;
         }
+
+        /// <summary>How far the tune's notes sit from MagSID's, in semitones (<see cref="TuningOf"/>).</summary>
+        internal double Tuning { get; }
 
         internal VoiceFrame[][] Voices { get; }
 
@@ -159,6 +167,7 @@ public static partial class SidTranscriber
             global[f] = new GlobalFrame((registers[0x15] & 7) | (registers[0x16] << 3), registers[0x17], registers[0x18]);
         }
 
+        double tuning = TuningOf(voices);
         var notes = new List<NoteEvent>[3];
         for (int v = 0; v < 3; v++)
         {
@@ -180,7 +189,7 @@ public static partial class SidTranscriber
                 // With the gate held, a pitch that moves to another note and stays is a new note.
                 int from = start;
                 bool legato = false;
-                foreach (int change in LegatoChanges(voices[v], start, off ?? hardRestart ?? end))
+                foreach (int change in LegatoChanges(voices[v], start, off ?? hardRestart ?? end, tuning))
                 {
                     notes[v].Add(new NoteEvent(v, from, change, null, legato, LegatoNext: true));
                     from = change;
@@ -191,21 +200,62 @@ public static partial class SidTranscriber
             }
         }
 
-        return new Analysis(voices, global, notes);
+        return new Analysis(voices, global, notes, tuning);
     }
 
-    private static IEnumerable<int> LegatoChanges(VoiceFrame[] frames, int start, int end)
+    /// <summary>
+    /// How far the tune is tuned from MagSID's note table, in semitones: GoatTracker's table is at
+    /// A-4 = 440 Hz, a quarter of a semitone above MagSID's, so every note of a GoatTracker tune
+    /// sat just outside <see cref="OnNote"/>'s quarter semitone and the pitch was read from a
+    /// drum's noise or the last note's leftover frequency instead. Read from the frames that hold a
+    /// tonal pitch steady with the gate on - a vibrato or a slide passes through, a note holds.
+    /// </summary>
+    private static double TuningOf(VoiceFrame[][] voices)
+    {
+        double sin = 0, cos = 0;
+        int count = 0;
+        foreach (var frames in voices)
+        {
+            for (int f = 1; f < frames.Length; f++)
+            {
+                var frame = frames[f];
+                if ((frame.Control & 0x01) == 0 || !Tonal(frame.Control) || frame.Frequency < 0x100
+                    || frame.Frequency != frames[f - 1].Frequency)
+                    continue;
+
+                // The distance from the nearest note, as an angle: -0.5 and +0.5 are the same place.
+                double semitones = 12 * Math.Log2(frame.Frequency / NoteFrequencies[0]);
+                double angle = 2 * Math.PI * (semitones - Math.Round(semitones));
+                sin += Math.Sin(angle);
+                cos += Math.Cos(angle);
+                count++;
+            }
+        }
+
+        // Too few steady notes, or no one tuning they agree on: as MagSID's own.
+        if (count < 16 || Math.Sqrt(sin * sin + cos * cos) < count * 0.5)
+            return 0;
+        return Math.Atan2(sin, cos) / (2 * Math.PI);
+    }
+
+    /// <summary>Pulse, saw or triangle, without noise or the test bit - a waveform with a pitch.</summary>
+    private static bool Tonal(byte control) => (control & 0x70) != 0 && (control & 0x88) == 0;
+
+    /// <summary>Silent this frame: the test bit holds the oscillator, or no waveform is chosen.</summary>
+    private static bool Silent(byte control) => (control & 0x08) != 0 || (control & 0xF0) == 0;
+
+    private static IEnumerable<int> LegatoChanges(VoiceFrame[] frames, int start, int end, double tuning)
     {
         for (int f = start + LegatoHold; f + LegatoHold <= end; f++)
         {
-            int now = NearestNote(frames[f].Frequency);
-            int before = NearestNote(frames[f - 1].Frequency);
+            int now = NearestNote(frames[f].Frequency, tuning);
+            int before = NearestNote(frames[f - 1].Frequency, tuning);
             if (now < 0 || before < 0 || now == before)
                 continue;
 
             bool held = true;
             for (int k = 1; k < LegatoHold && held; k++)
-                held = NearestNote(frames[f + k].Frequency) == now && NearestNote(frames[f - 1 - k].Frequency) == before;
+                held = NearestNote(frames[f + k].Frequency, tuning) == now && NearestNote(frames[f - 1 - k].Frequency, tuning) == before;
             if (held)
                 yield return f;
         }
@@ -255,6 +305,20 @@ public static partial class SidTranscriber
         return (best, Near(best));
     }
 
+    /// <summary>The frame the song's first row is: on the grid's best phase, at the row the first
+    /// note starts on. Counted from the stretch's own start, the phase put Viva Las Vegas's first
+    /// kick, seven frames in, on the second row.</summary>
+    private static int Origin(Analysis analysis, int first, int count, int framesPerRow)
+    {
+        var starts = Starts(analysis, first, count);
+        var (phase, _) = BestPhase(starts, framesPerRow);
+        if (starts.Count == 0)
+            return first + phase;
+
+        int rows = (int)Math.Floor((starts.Min() - phase) / (double)framesPerRow + 0.5);
+        return first + phase + Math.Max(0, rows) * framesPerRow;
+    }
+
     // ------------------------------------------------------------------------------------ import
 
     public static SidImportResult Import(Analysis analysis, SidImportOptions options)
@@ -269,39 +333,47 @@ public static partial class SidTranscriber
         if (notes.All(n => n.Count == 0))
             throw new SidImportException("No notes start in this stretch of the tune - the gates never go on.");
 
-        var (phase, _) = BestPhase(Starts(analysis, first, count), framesPerRow);
-        int origin = first + phase;
-        int rowCount = Math.Max(1, (count - phase + framesPerRow - 1) / framesPerRow);
+        int origin = Origin(analysis, first, count, framesPerRow);
+        int rowCount = Math.Max(1, (first + count - origin + framesPerRow - 1) / framesPerRow);
         int RowOf(int frame) => (int)Math.Floor((frame - origin) / (double)framesPerRow + 0.5);
+
+        // The master volume is the song's, not a sound's: a tune that fades in sets it again on
+        // every note, and as part of each filter setup it made five of every filtered sound.
+        byte volume = (byte)Enumerable.Range(first, count).Select(f => analysis.Global[f].ModeVolume & 0x0F)
+            .GroupBy(v => v).OrderByDescending(g => g.Count()).ThenByDescending(g => g.Key).First().Key;
 
         var stats = new Stats();
         var groups = new Dictionary<string, List<Sound>>();
         var usage = new Dictionary<Sound, Usage>();
         var placed = new List<(int Voice, int Row, Sound Sound, NoteName Note, int? OffRow)>();
 
-        foreach (var voiceNotes in notes)
+        var heard = notes.SelectMany(n => n)
+            .Select(note => (Note: note, Sound: SoundOf(analysis, note, options, framesPerRow, volume, out var root, stats), Root: root))
+            .ToList();
+        var relative = RelativeTransients(heard.Select(h => (h.Sound, h.Root)));
+
+        foreach (var (note, heardSound, root) in heard)
         {
-            foreach (var note in voiceNotes)
-            {
-                var sound = SoundOf(analysis, note, options, framesPerRow, out var root, stats);
-                if (!groups.TryGetValue(sound.Key, out var members))
-                    groups[sound.Key] = members = [];
-                members.Add(sound);
-                var known = members[0];
+            var sound = TransientOf(heardSound, root) is { } transient && relative.Contains(transient)
+                ? heardSound.WithoutNotes()
+                : heardSound;
+            if (!groups.TryGetValue(sound.Key, out var members))
+                groups[sound.Key] = members = [];
+            members.Add(sound);
+            var known = members[0];
 
-                int row = Math.Max(0, RowOf(note.Start));
-                if (Math.Abs(note.Start - origin - row * framesPerRow) > (framesPerRow < 4 ? 0 : 1))
-                    stats.Moved++;
+            int row = Math.Max(0, RowOf(note.Start));
+            if (Math.Abs(note.Start - origin - row * framesPerRow) > (framesPerRow < 4 ? 0 : 1))
+                stats.Moved++;
 
-                int? offRow = sound.GateOffInProgram || note.GateOff is not { } off ? null : RowOf(off);
-                placed.Add((note.Voice, row, known, root, offRow));
+            int? offRow = sound.GateOffInProgram || note.GateOff is not { } off ? null : RowOf(off);
+            placed.Add((note.Voice, row, known, root, offRow));
 
-                if (!usage.TryGetValue(known, out var used))
-                    usage[known] = used = new Usage();
-                used.Rows.Add(row);
-                used.Roots.Add(root.TableIndex);
-                used.Lengths.Add(note.SoundEnd - note.Start);
-            }
+            if (!usage.TryGetValue(known, out var used))
+                usage[known] = used = new Usage();
+            used.Rows.Add(row);
+            used.Roots.Add(root.TableIndex);
+            used.Lengths.Add(note.SoundEnd - note.Start);
         }
 
         // A sound's settings - where its pulse starts and how it sweeps, its vibrato, its cutoff -
@@ -332,7 +404,7 @@ public static partial class SidTranscriber
             var candidates = kept.Where(k => sounds[k].Notes is null || sounds[k].Ending == ArpeggioEnding.Root
                                              || (own is not null && sounds[k].Notes!.SequenceEqual(own))).ToList();
             var nearest = (candidates.Count > 0 ? candidates : kept)
-                .MinBy(k => sounds[k].Distance(sounds[sound]) + (roles[k] == roles[sound] ? 0 : 800))!;
+                .MinBy(k => sounds[k].Distance(sounds[sound]) + (roles[k] == roles[sound] ? 0 : OtherRole))!;
             return numberOf[sound] = numberOf[nearest];
         }
         var keptSet = kept.ToHashSet();
@@ -527,7 +599,9 @@ public static partial class SidTranscriber
                 distance += 300;
             else if (Notes is not null && !Notes.SequenceEqual(other.Notes!))
                 distance += 2000;
-            if ((Controls[0] & 0xF0) != (other.Controls[0] & 0xF0))
+            // The first waveform heard: a hard restart's test-bit frame comes before it.
+            static int Heard(byte[] controls) => controls.Select(c => c & 0xF0).FirstOrDefault(w => w != 0);
+            if (Heard(Controls) != Heard(other.Controls))
                 distance += 1000;
             if ((Filter.Length > 0) != (other.Filter.Length > 0))
                 distance += 60;
@@ -539,6 +613,25 @@ public static partial class SidTranscriber
 
             static int Nibbles(byte a, byte b) => Math.Abs((a >> 4) - (b >> 4)) + Math.Abs((a & 15) - (b & 15));
         }
+
+        /// <summary>The same sound playing only the row's note.</summary>
+        public Sound WithoutNotes() => new()
+        {
+            AttackDecay = AttackDecay,
+            SustainRelease = SustainRelease,
+            Controls = Controls,
+            Notes = null,
+            Ending = ArpeggioEnding.Loop,
+            LoopPoint = 0,
+            PulseWidth = PulseWidth,
+            PulseSweep = PulseSweep,
+            VibratoDelaySpeed = VibratoDelaySpeed,
+            VibratoDepth = VibratoDepth,
+            Filter = Filter,
+            GateOffInProgram = GateOffInProgram,
+            NoHardRestart = NoHardRestart,
+            Uses = Uses,
+        };
 
         public Instrument ToInstrument(int number, string name)
         {
@@ -573,19 +666,67 @@ public static partial class SidTranscriber
         }
     }
 
+    /// <summary>
+    /// The families whose short strike before the note moves with the note - a GoatTracker bass's
+    /// first frame of saw an octave up, say. MagSID's note programs are absolute, so kept it would
+    /// make one instrument for every note the bass plays; played on the row's note instead it is
+    /// one. A strike on fixed notes - a kick falling from B-7 - is the same on every note, and stays.
+    /// </summary>
+    private static HashSet<string> RelativeTransients(IEnumerable<(Sound Sound, NoteName Root)> heard) =>
+        heard.Where(h => TransientOf(h.Sound, h.Root) is not null)
+            .GroupBy(h => TransientOf(h.Sound, h.Root)!)
+            .Where(g => g.Select(h => h.Root).Distinct().Count() >= 2)
+            .Select(g => g.Key)
+            .ToHashSet();
+
+    /// <summary>"family|+12" - a strike of at most three frames before the row's note, as steps
+    /// away from it; null for any other program.</summary>
+    private static string? TransientOf(Sound sound, NoteName root) =>
+        sound.Notes is { Length: <= 3 } steps && sound.Ending == ArpeggioEnding.Root
+            ? $"{FamilyOf(sound)}|{string.Join(",", steps.Select(n => n.TableIndex - root.TableIndex))}"
+            : null;
+
     private static Sound SoundOf(Analysis analysis, NoteEvent note, SidImportOptions options, int framesPerRow,
-                                 out NoteName root, Stats stats)
+                                 byte volume, out NoteName root, Stats stats)
     {
         var frames = analysis.Voices[note.Voice];
         int length = Math.Min((note.HardRestart ?? note.End) - note.Start, ProgramFrames);
+
+        // A gate that goes off inside the note's own first row cannot be a note-off row; it goes
+        // into the wavetable at the frame it happened instead - unless it is in the row's last two
+        // frames, where GoatTracker's early gate-off ends a note it was told to end on the next row.
+        // Rows of four frames or fewer are too short to tell the two apart.
+        int inFirstRow = Math.Max(framesPerRow - (HardRestartFrames - 1), Math.Min(framesPerRow, 4));
+        bool gateOffInProgram = note.GateOff is { } off && off - note.Start < inFirstRow && off - note.Start < ProgramFrames;
+
+        // After that the sound lasts as long as its release, or until the oscillator is held
+        // silent for the next note: cut there, every strike of a drum is the same program however
+        // far away the next note is.
+        if (gateOffInProgram)
+        {
+            int gateOff = note.GateOff!.Value;
+            int heard = gateOff - note.Start + ReleaseFrames(frames[gateOff].SustainRelease);
+            int silence = Enumerable.Range(gateOff, Math.Max(0, note.Start + length - gateOff)).FirstOrDefault(f => Silent(frames[f].Control), -1);
+            length = Math.Min(length, silence < 0 ? heard : Math.Min(heard, silence - note.Start));
+        }
         var window = Enumerable.Range(note.Start, Math.Max(1, length)).Select(f => frames[f]).ToArray();
 
         // The pitch is read while the gate is on: in the release a player is free to set up the
-        // next note's frequency already. Only frames that sit on a note are steps; a vibrato or a
-        // slide passes between notes, and the nearest note flickering under it is not a program.
-        var pitched = window.Take(Math.Clamp(note.SoundEnd - note.Start, 1, window.Length)).ToArray();
-        int[] index = [.. pitched.Select(f => OnNote(f.Frequency))];
-        int rootIndex = RootOf(pitched);
+        // next note's frequency already - unless its program still runs there, as a snare's
+        // noise and pulse take turns after the gate. Only frames that sit on a note are steps; a
+        // vibrato or a slide passes between notes, and the nearest note flickering under it is not
+        // a program.
+        int gated = Math.Clamp(note.SoundEnd - note.Start, 1, window.Length);
+        int changes = Enumerable.Range(gated, Math.Max(0, window.Length - gated))
+            .Count(f => window[f].Control != window[f - 1].Control || window[f].Frequency != window[f - 1].Frequency);
+        bool runsOn = gateOffInProgram && changes >= 2;
+        var pitched = window.Take(runsOn ? window.Length : gated).ToArray();
+        int[] index = [.. pitched.Select(f => PitchOf(f, analysis.Tuning))];
+        // A silent frame - the test bit restarting the oscillator - plays whatever comes next.
+        for (int i = index.Length - 2; i >= 0; i--)
+            if (Silent(pitched[i].Control))
+                index[i] = index[i + 1];
+        int rootIndex = RootOf(pitched, analysis.Tuning);
         int played = rootIndex;
         while (played < 0) played += 12;
         while (played >= NoteName.AllNotes.Count) played -= 12;
@@ -593,29 +734,32 @@ public static partial class SidTranscriber
             stats.Shifted++;
         root = NoteName.AllNotes[played];
 
-        // A gate that goes off inside the note's own first row cannot be a note-off row; it goes
-        // into the wavetable at the frame it happened instead.
-        bool gateOffInProgram = note.GateOff is { } off && off - note.Start < framesPerRow && off - note.Start < ProgramFrames;
         int controlFrames = note.GateOff is { } o && !gateOffInProgram ? Math.Min(length, o - note.Start) : length;
         // $00 ends a wavetable in MagSID's format; the test bit with the gate off is as silent.
         var controls = Trim([.. window.Take(Math.Max(1, controlFrames)).Select(f => f.Control == 0 ? (byte)0x08 : f.Control)]);
 
-        // Pitch steps away from the root, one a frame, become a note program.
+        // Pitch steps away from the root, one a frame, become a note program. One that the gate
+        // cuts off away from the root, and that is back on it in the release, ends on the root.
         int[] offsets = [.. index.Select(i => i < 0 ? 0 : i - rootIndex)];
+        if (!runsOn && gated < window.Length && offsets.Length > 0 && offsets[^1] != 0
+            && PitchOf(window[gated], analysis.Tuning) == rootIndex)
+            offsets = [.. offsets, 0];
         var (notes, ending, loopPoint) = NoteProgram(offsets, played);
 
-        // Pulse: where it starts, and how far it moves a frame.
+        // Pulse: where it starts, and how far it moves a frame. Read where the pulse first sounds -
+        // on a hard restart's first frame the width is still the last note's.
         int pulseWidth = Instrument.DefaultPulseWidth, sweep = 0;
         if (window.Any(f => (f.Control & 0x40) != 0))
         {
-            pulseWidth = window[0].PulseWidth >> 8;
+            int sounds = Array.FindIndex(window, f => (f.Control & 0x48) == 0x40);
+            pulseWidth = window[Math.Max(0, sounds)].PulseWidth >> 8;
             var deltas = window.Zip(window.Skip(1), (a, b) => b.PulseWidth - a.PulseWidth).Where(d => d != 0).ToList();
             if (deltas.Count > window.Length / 3)
                 sweep = Math.Clamp(Median(deltas), -128, 127);
         }
 
         var (delaySpeed, depth) = options.Vibrato ? Vibrato(frames, note, offsets, played) : ((byte)0, (byte)0);
-        var filter = options.Filter ? FilterProgram(analysis, note, length) : [];
+        var filter = options.Filter ? FilterProgram(analysis, note, length, volume) : [];
 
         return new Sound
         {
@@ -647,7 +791,21 @@ public static partial class SidTranscriber
     private static int RootOf(Analysis analysis, NoteEvent note)
     {
         int length = Math.Max(1, Math.Min(note.SoundEnd - note.Start, ProgramFrames));
-        return RootOf([.. Enumerable.Range(note.Start, length).Select(f => analysis.Voices[note.Voice][f])]);
+        return RootOf([.. Enumerable.Range(note.Start, length).Select(f => analysis.Voices[note.Voice][f])], analysis.Tuning);
+    }
+
+    /// <summary>The note a frame sounds, or -1 for none: silent, or between notes. A drum's
+    /// strike at $FFFF is B-7 in any tuning - the table goes no higher.</summary>
+    private static int PitchOf(VoiceFrame frame, double tuning) =>
+        Silent(frame.Control) ? -1
+        : frame.Frequency >= 0xFFF0 ? NoteName.AllNotes.Count - 1
+        : OnNote(frame.Frequency, tuning);
+
+    /// <summary>Frames a release lasts, from the SID's release times (6 ms to 24 s).</summary>
+    private static int ReleaseFrames(byte sustainRelease)
+    {
+        int[] milliseconds = [6, 24, 48, 72, 114, 168, 204, 240, 300, 750, 1500, 2400, 3000, 9000, 15000, 24000];
+        return (milliseconds[sustainRelease & 0x0F] + 19) / 20;
     }
 
     /// <summary>
@@ -656,16 +814,18 @@ public static partial class SidTranscriber
     /// before the bass, is colour, not the note. Without that a bass with a one-frame click had as
     /// many frames on the click as on its note, and every bass note became an instrument of its own.
     /// </summary>
-    private static int RootOf(VoiceFrame[] frames)
+    private static int RootOf(VoiceFrame[] frames, double tuning)
     {
-        static bool Tonal(byte control) => (control & 0x70) != 0 && (control & 0x80) == 0;
-
-        int[] tonal = [.. frames.Where(f => Tonal(f.Control)).Select(f => OnNote(f.Frequency)).Where(i => i >= 0)];
+        int[] tonal = [.. frames.Where(f => Tonal(f.Control)).Select(f => OnNote(f.Frequency, tuning)).Where(i => i >= 0)];
         if (tonal.Length > 0)
             return RootOf(tonal);
 
-        int[] on = [.. frames.Select(f => OnNote(f.Frequency))];
-        return RootOf(on.Any(i => i >= 0) ? on : [.. frames.Select(f => NearestNote(f.Frequency))]);
+        // A frame with the test bit on still holds the last note's frequency; it is no pitch.
+        var sounding = frames.Where(f => !Silent(f.Control)).ToArray();
+        if (sounding.Length == 0)
+            sounding = frames;
+        int[] on = [.. sounding.Select(f => OnNote(f.Frequency, tuning))];
+        return RootOf(on.Any(i => i >= 0) ? on : [.. sounding.Select(f => NearestNote(f.Frequency, tuning))]);
     }
 
     // ------------------------------------------------------------------------------------ check
@@ -684,18 +844,19 @@ public static partial class SidTranscriber
 
         var want = new List<(int Voice, int Frame, int Note)>();
         var got = new List<(int Voice, int Frame, int Note)>();
+        int origin = Origin(original, first, count, Math.Clamp(options.FramesPerRow, 1, 64)) - first;
         for (int v = 0; v < 3; v++)
         {
             want.AddRange(original.Notes[v].Where(n => n.Start >= first && n.Start < first + count)
                 .Select(n => (v, n.Start - first, Fold(RootOf(original, n)))));
-            got.AddRange(imported.Notes[v].Select(n => (v, n.Start, Fold(RootOf(imported, n)))));
+            got.AddRange(imported.Notes[v].Select(n => (v, n.Start + origin, Fold(RootOf(imported, n)))));
         }
 
         if (want.Count == 0)
             return 1;
 
-        // The imported song starts on its first row, which is the grid's phase into the stretch,
-        // and MagSID's player starts a note a frame or two into its row: the best shift is found.
+        // The imported song starts on its first row, the one the first note is on, and MagSID's
+        // player starts a note a frame or two into its row: the best shift is found.
         int best = 0;
         for (int shift = -options.FramesPerRow - 4; shift <= options.FramesPerRow + 4; shift++)
             best = Math.Max(best, Matches(want, got, shift, tolerance));
@@ -759,23 +920,25 @@ public static partial class SidTranscriber
 
         NoteName At(int offset) => NoteName.AllNotes[Math.Clamp(root + offset, 0, NoteName.AllNotes.Count - 1)];
 
-        // Comes back to the root at the end: a strike, then the note.
-        int lastAway = Array.FindLastIndex(offsets, o => o != 0);
-        if (lastAway < offsets.Length - 1)
-            return ([.. offsets.Take(lastAway + 1).Select(At)], ArpeggioEnding.Root, 0);
-
-        // A cycle, seen at least twice round.
+        // A cycle, seen at least twice round - first, as a cycle through the root can stop on it
+        // where the note was cut off, as a snare ringing on C-3 and D#7 in turn does. A constant
+        // tail is no cycle: it is a note held.
         for (int start = 0; start <= offsets.Length / 2; start++)
         {
-            for (int period = 2; period <= 8 && start + 2 * period <= offsets.Length; period++)
+            for (int period = 2; period <= 16 && start + 2 * period <= offsets.Length; period++)
             {
-                bool cycles = true;
+                bool cycles = offsets.Skip(start).Take(period).Distinct().Count() > 1;
                 for (int i = start + period; i < offsets.Length && cycles; i++)
                     cycles = offsets[i] == offsets[start + (i - start) % period];
                 if (cycles)
                     return ([.. offsets.Take(start + period).Select(At)], ArpeggioEnding.Loop, start);
             }
         }
+
+        // Comes back to the root at the end: a strike, then the note.
+        int lastAway = Array.FindLastIndex(offsets, o => o != 0);
+        if (lastAway < offsets.Length - 1)
+            return ([.. offsets.Take(lastAway + 1).Select(At)], ArpeggioEnding.Root, 0);
 
         int lastChange = offsets.Length - 1;
         while (lastChange > 0 && offsets[lastChange] == offsets[lastChange - 1])
@@ -840,21 +1003,45 @@ public static partial class SidTranscriber
     }
 
     /// <summary>
-    /// The filter, if the note's voice goes through it: a setup step with the tune's mode, volume,
-    /// resonance and routing, then the cutoff frame by frame. MagSID's filter belongs to the last
-    /// note that sets it up, so a sweep the tune runs across many notes starts again with each.
+    /// The filter, if the note's voice goes through it: a setup step with the tune's mode,
+    /// resonance and routing, then the cutoff frame by frame - and a setup again where the mode or
+    /// the resonance changes, as a GoatTracker kick goes from band-pass to low-pass. MagSID's
+    /// filter belongs to the last note that sets it up, so a sweep the tune runs across many notes
+    /// starts again with each.
     /// </summary>
-    private static FilterStep[] FilterProgram(Analysis analysis, NoteEvent note, int length)
+    private static FilterStep[] FilterProgram(Analysis analysis, NoteEvent note, int length, byte volume)
     {
-        var at = analysis.Global[note.Start];
+        // A hard restart's first frame, with the test bit on, still has the last note's filter:
+        // the note's own begins where the voice first sounds.
+        var voice = analysis.Voices[note.Voice];
+        int sounds = note.Start;
+        while (sounds < note.Start + length - 1 && Silent(voice[sounds].Control))
+            sounds++;
+
+        var at = analysis.Global[sounds];
         if ((at.ResonanceRouting & (1 << note.Voice)) == 0)
             return [];
 
-        byte Cutoff(int frame) => (byte)Math.Clamp(analysis.Global[frame].Cutoff >> 3, FilterStep.MinCutoff, FilterStep.MaxCutoff);
+        (byte Mode, byte Resonance, byte Cutoff) State(int frame)
+        {
+            var g = analysis.Global[Math.Max(frame, sounds)];
+            return ((byte)(g.ModeVolume & 0xF0), g.ResonanceRouting,
+                    (byte)Math.Clamp(g.Cutoff >> 3, FilterStep.MinCutoff, FilterStep.MaxCutoff));
+        }
 
-        var cutoffs = Trim([.. Enumerable.Range(note.Start, Math.Max(1, length)).Select(Cutoff)]);
-        var steps = new List<FilterStep> { FilterStep.Setup(at.ModeVolume, at.ResonanceRouting, cutoffs[0]) };
-        steps.AddRange(cutoffs.Skip(1).Select(FilterStep.Sweep));
+        var states = Enumerable.Range(note.Start, Math.Max(1, length)).Select(State).ToList();
+        while (states.Count > 1 && states[^1] == states[^2])
+            states.RemoveAt(states.Count - 1);
+
+        var steps = new List<FilterStep>();
+        for (int i = 0; i < states.Count; i++)
+        {
+            var (mode, resonance, cutoff) = states[i];
+            steps.Add(i == 0 || (mode, resonance) != (states[i - 1].Mode, states[i - 1].Resonance)
+                ? FilterStep.Setup((byte)(mode | volume), resonance, cutoff)
+                : FilterStep.Sweep(cutoff));
+        }
+
         return [.. steps];
     }
 
@@ -885,23 +1072,23 @@ public static partial class SidTranscriber
 
     /// <summary>The note nearest a SID frequency, by ratio, as an index that may run past either
     /// end of C-0..B-7 - an octave out is still the right note name. -1 for silence.</summary>
-    internal static int NearestNote(int frequency)
+    internal static int NearestNote(int frequency, double tuning = 0)
     {
         if (frequency <= 0)
             return -1;
 
-        double semitones = 12 * Math.Log2(frequency / NoteFrequencies[0]);
+        double semitones = 12 * Math.Log2(frequency / NoteFrequencies[0]) - tuning;
         return (int)Math.Round(semitones);
     }
 
-    /// <summary>The note a frequency sits on, within a quarter of a semitone - or -1 for one between
-    /// notes, as a vibrato or a slide passes through.</summary>
-    internal static int OnNote(int frequency)
+    /// <summary>The note a frequency sits on, within a quarter of a semitone of the tune's own
+    /// tuning - or -1 for one between notes, as a vibrato or a slide passes through.</summary>
+    internal static int OnNote(int frequency, double tuning = 0)
     {
         if (frequency <= 0)
             return -1;
 
-        double semitones = 12 * Math.Log2(frequency / NoteFrequencies[0]);
+        double semitones = 12 * Math.Log2(frequency / NoteFrequencies[0]) - tuning;
         int nearest = (int)Math.Round(semitones);
         return Math.Abs(semitones - nearest) <= 0.25 ? nearest : -1;
     }

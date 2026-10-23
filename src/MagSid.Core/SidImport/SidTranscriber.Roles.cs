@@ -77,8 +77,10 @@ public static partial class SidTranscriber
 
         // Snare: noise, tonal, noise again - or a loop back to noise, ringing on the way - on the
         // backbeat. Its tonal frames, when it says them, are around $20-$30.
+        // A sound with no note program has a Loop ending too, which made every kick a snare.
         bool backToNoise = tonal && (waves.Skip(firstTonal).Any(Noise)
-            || sound.Ending == ArpeggioEnding.Loop && sound.Controls.Skip(sound.LoopPoint).Any(c => Noise(c & 0xF0)));
+            || sound.Notes is not null && sound.Ending == ArpeggioEnding.Loop
+               && sound.Controls.Skip(sound.LoopPoint).Any(c => Noise(c & 0xF0)));
         bool snareNotes = sound.Notes is null
             || sound.Notes.Any(n => n.TableIndex is >= SnareLow and <= SnareHigh)
             || root is >= SnareLow and <= SnareHigh;
@@ -88,6 +90,11 @@ public static partial class SidTranscriber
         if (startsOnNoise && !tonal && onBackbeat >= 0.7)
             return SoundRole.Snare;
 
+        // A drum: struck on noise, its program on fixed notes to the end and never the row's -
+        // a clap, a tom. Rooted low it would otherwise pass for a bass.
+        if (startsOnNoise && sound.GateOffInProgram && sound.Notes is not null && sound.Ending == ArpeggioEnding.Hold)
+            return SoundRole.Other;
+
         // Kick-bass: a strike on noise at a high fixed note, falling to a root at C-3 or below.
         if (startsOnNoise && tonal && root <= BassCeiling && sound.Notes is { Length: >= 1 } steps
             && steps[0].TableIndex >= 5 * 12)
@@ -96,8 +103,9 @@ public static partial class SidTranscriber
         if (root <= BassCeiling && tonal)
             return SoundRole.Bass;
 
-        // Arpeggios: cycled by the instrument, or played by hand.
-        if (sound.Notes is not null && sound.Ending == ArpeggioEnding.Loop)
+        // Arpeggios: cycled by the instrument - or stepping through three notes or more, which a
+        // note too short to show the whole cycle does - or played by hand.
+        if (sound.Notes is not null && (sound.Ending == ArpeggioEnding.Loop || sound.Notes.Distinct().Count() >= 3))
             return SoundRole.Arp;
         if (length <= 3 && usage.Roots.Distinct().Count() >= 3)
             return SoundRole.Arp;
@@ -158,7 +166,8 @@ public static partial class SidTranscriber
         SoundRole.Bass => "Bass",
         SoundRole.Lead => "Lead",
         SoundRole.Arp => "Arp",
-        _ => sound.Controls.All(c => (c & 0xF0) is 0 or 0x80) ? "Hihat" : "Sound",
+        _ => sound.Controls.All(c => (c & 0xF0) is 0 or 0x80) ? "Hihat"
+            : sound.Controls.FirstOrDefault(c => (c & 0xF0) != 0) is >= 0x80 ? "Drum" : "Sound",
     };
 
     /// <summary>"2 snares, 1 kick-bass, 3 basses, 5 leads, 2 arpeggios, 3 other" - for the report.</summary>
