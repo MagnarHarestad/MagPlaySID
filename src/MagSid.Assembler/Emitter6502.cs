@@ -114,6 +114,10 @@ public sealed class Emitter6502(int origin)
     /// <summary>Illegal opcode: increment memory, then subtract the result from A.</summary>
     public void Isc(Operand operand) => Emit("isc", operand);
 
+    /// <summary>Illegal opcode ALR - "asr" in c6510: AND with the operand, then shift A right, with
+    /// the flags LSR would leave.</summary>
+    public void Asr(Operand operand) => Emit("asr", operand);
+
     public void Jmp(Label target) => Emit("jmp", Mem(target));
     public void Jsr(Label target) => Emit("jsr", Mem(target));
 

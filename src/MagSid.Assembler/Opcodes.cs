@@ -115,14 +115,18 @@ internal static class Opcodes
         { ("dec", AddressMode.Absolute), 0xCE },
         { ("dec", AddressMode.AbsoluteX), 0xDE },
 
-        // ISC (also called ISB/INS) - the one illegal opcode the player uses: increment memory,
-        // then subtract it from A. Saves the separate INC and SBC.
+        // ISC (also called ISB/INS) - illegal, and stable: increment memory, then subtract it
+        // from A. Saves the separate INC and SBC.
         { ("isc", AddressMode.ZeroPage), 0xE7 },
         { ("isc", AddressMode.ZeroPageX), 0xF7 },
         { ("isc", AddressMode.Absolute), 0xEF },
         { ("isc", AddressMode.AbsoluteX), 0xFF },
         { ("isc", AddressMode.AbsoluteY), 0xFB },
         { ("isc", AddressMode.IndirectY), 0xF3 },
+
+        // ALR - c6510 calls it ASR - illegal, and stable: AND #imm, then LSR A, with the flags LSR
+        // leaves. One byte less than the pair.
+        { ("asr", AddressMode.Immediate), 0x4B },
 
         // Jumps. Only the absolute form of JMP is needed; indirect would be a different mode.
         { ("jmp", AddressMode.Absolute), 0x4C },

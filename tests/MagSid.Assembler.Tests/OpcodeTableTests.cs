@@ -3,7 +3,7 @@ namespace MagSid.Assembler.Tests;
 /// <summary>
 /// Pins the emitter's opcode table against Goldens\opcodes.txt.
 ///
-/// That file is not a second copy of my own reading of the 6502 table. Every one of the 106 entries
+/// That file is not a second copy of my own reading of the 6502 table. Every one of the 107 entries
 /// was checked against the real c6510 instruction by instruction - each assembled into its own
 /// four-byte slot so a disagreement about one length could not cascade - and the list was frozen
 /// once that passed. The assembler is no longer in this repository, so freezing was the way to keep

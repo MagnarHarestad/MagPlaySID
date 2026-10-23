@@ -24,7 +24,23 @@
  		m_ZP.b "filter_pos"
  		m_ZP.b "filter_phase"
  		m_ZP.b "filter_delta"
-@@ -114,10 +124,9 @@
+@@ -87,15 +97,6 @@
+ 		lua asm('const ZP_Player_Amount = ', ZPamount)
+ 
+ 
+-		; Set ZP_lb/ZP_hb from a lo/hi pointer pair indexed by the pattern number in X. Only the row
+-		; tables need it - their streams run past 256 bytes. The song order fits one byte and uses a
+-		; plain "abs,y" instead, see Voice_AdvanceOrder.
+-
+-		macro m_setptr_x lo:16 hi:16 {
+-			move8 lo,x, ZP_lb
+-			move8 hi,x, ZP_hb
+-		}
+-
+ 
+ 		; --- MUSIC PLAYER LOCATION --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 		org addr.music.loc, "M_Music Player - JMPs for Init and Play"
+@@ -114,10 +115,9 @@
  		lda voice_last_waveform,x
  		and #$fe                               ; clear gate bit only - keep the waveform-select
  		sta $d404,y                            ; bits set, or the oscillator goes instantly
@@ -38,7 +54,31 @@
  
  Voice_AdvanceOrder:
  .read:
-@@ -238,6 +247,9 @@
+@@ -212,20 +212,17 @@
+ 		ldy arp_start,x                        ; 0 for an instrument with no arpeggio
+ 		ldx ZP_ch
+ 		sta voice_wt_pos,x
+-		tya
+-		sta voice_arp_pos,x
++		sty voice_arp_pos,x                    ; zp,x - A is reloaded on every path below
+ 		if def v_vibrato
+ 		; Arm this note's vibrato: delay from vib_ds's top nibble (x4 frames), first run half a
+ 		; speed long (low nibble >> 1), which centres the wave on the note.
+ 		ldy voice_inst,x
+ 		lda vib_ds,y
+-		and #$f0
+-		lsr
++		asr #$f0                               ; ALR: and #$f0 + lsr, same flags
+ 		lsr
+ 		sta voice_vib_delay,x
+ 		lda vib_ds,y
+-		and #$0f
+-		lsr
++		asr #$0f                               ; ALR: and #$0f + lsr
+ 		sta voice_vib_cnt,x
+ 		lda #0
+ 		sta voice_vib_dir,x
+@@ -238,6 +235,9 @@
  		sta voice_off_lo,x                     ; vibrato and slide both start from the bare note
  		sta voice_off_hi,x
  		endif
@@ -48,7 +88,7 @@
  		pla
  		tay                                    ; park pw_init while testing it - Y is free from
  		sta voice_prev_pw,x                    ; here to the end of this routine. Stashed for the
-@@ -344,17 +356,15 @@
+@@ -344,17 +344,15 @@
  		; rewrites the bare note every frame. Both move one signed 16-bit offset; slide adds
  		; slide_rate a frame, vibrato traces a triangle from vib_ds (delay/speed) and vib_depth.
  .freqmod:
@@ -73,7 +113,33 @@
  		endif
  		; offset += rate, sign-extended. None of pla/and/beq/lda touches the carry the adc
  		; produced, the same idiom the pulse-width sweep uses.
-@@ -572,7 +582,12 @@
+@@ -402,8 +400,7 @@
+ 		lda voice_vib_dir,x                    ; run finished: turn round and reload the speed
+ 		eor #$ff
+ 		sta voice_vib_dir,x
+-		ldy voice_inst,x
+-		lda vib_ds,y
++		lda vib_ds,y                           ; Y is still voice_inst from .freqmod
+ 		and #$0f
+ 		sta voice_vib_cnt,x
+ 		endif
+@@ -557,10 +554,11 @@
+ 		rts
+ 
+ .fetch:
+-		lda voice_patternidx,x
+-		tax                                    ; X = pattern index, channel parked in ZP_ch
+-		m_setptr_x tbl_rows_lo tbl_rows_hi
+-		ldx ZP_ch
++		ldy voice_patternidx,x                 ; Y = pattern index, so X stays the channel -
++		lda tbl_rows_lo,y                      ; 3 bytes less than borrowing X and putting it
++		sta ZP_lb                              ; back from ZP_ch
++		lda tbl_rows_hi,y
++		sta ZP_hb
+ .fetchrow:
+ 		ldy voice_event,x
+ .nextcmd:
+@@ -572,7 +570,12 @@
  		cmp #CMD_OFF
  		bcc .setinstrument                     ; $C0..$CF
  		cmp #LOOP_END
@@ -86,7 +152,7 @@
  		                                       ; command byte itself, which is what NOTE_OFF/ROW_WAIT
  		                                       ; are defined to be. Falls through on $D2 into .loopend,
  		                                       ; which is why that block has to stay right here.
-@@ -604,6 +619,17 @@
+@@ -604,6 +607,17 @@
  		tay                                    ; same reasoning - jump straight in with Y set
  		jmp .nextcmd
  

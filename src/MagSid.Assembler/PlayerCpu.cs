@@ -170,6 +170,7 @@ internal sealed class PlayerCpu
             case "inc": { int v = (Read(ea) + 1) & 0xFF; Write(ea, v); SetNz(v); break; }
             case "dec": { int v = (Read(ea) - 1) & 0xFF; Write(ea, v); SetNz(v); break; }
             case "isc": { int v = (Read(ea) + 1) & 0xFF; Write(ea, v); Add(v ^ 0xFF); break; }
+            case "asr": _a &= Read(ea); _c = (_a & 1) != 0; _a >>= 1; SetNz(_a); break;   // ALR
             case "jmp": _pc = ea; break;
             case "jsr":
             {

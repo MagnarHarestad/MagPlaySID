@@ -278,8 +278,7 @@ public static class PlayerProgram
         asm.Ldy(MemX(tables.ArpStart));             // 0 for an instrument with no arpeggio
         asm.Ldx(Mem(zp.ZpCh));
         asm.Sta(MemX(zp.VoiceWtPos));
-        asm.Tya();
-        asm.Sta(MemX(zp.VoiceArpPos));
+        asm.Sty(MemX(zp.VoiceArpPos));              // zp,x - A is reloaded on every path below
 
         if (features.Vibrato)
         {
@@ -287,13 +286,11 @@ public static class PlayerProgram
             // speed long (low nibble >> 1), which centres the wave on the note.
             asm.Ldy(MemX(zp.VoiceInst));
             asm.Lda(MemY(tables.VibDs!));
-            asm.And(Imm(0xF0));
-            asm.Lsr();
+            asm.Asr(Imm(0xF0));                     // ALR: and #$f0 + lsr, same flags
             asm.Lsr();
             asm.Sta(MemX(zp.VoiceVibDelay));
             asm.Lda(MemY(tables.VibDs!));
-            asm.And(Imm(0x0F));
-            asm.Lsr();
+            asm.Asr(Imm(0x0F));                     // ALR: and #$0f + lsr
             asm.Sta(MemX(zp.VoiceVibCnt));
             asm.Lda(Imm(0));
             asm.Sta(MemX(zp.VoiceVibDir));
@@ -506,8 +503,7 @@ public static class PlayerProgram
             asm.Lda(MemX(zp.VoiceVibDir));          // run finished: turn round and reload the speed
             asm.Eor(Imm(0xFF));
             asm.Sta(MemX(zp.VoiceVibDir));
-            asm.Ldy(MemX(zp.VoiceInst));
-            asm.Lda(MemY(tables.VibDs!));
+            asm.Lda(MemY(tables.VibDs!));          // Y is still voice_inst from .freqmod
             asm.And(Imm(0x0F));
             asm.Sta(MemX(zp.VoiceVibCnt));
         }
@@ -677,10 +673,11 @@ public static class PlayerProgram
         asm.Rts();
 
         asm.Define(fetch);
-        asm.Lda(MemX(zp.VoicePatternIdx));
-        asm.Tax();                                  // X = pattern index, channel parked in ZP_ch
-        asm.SetPtrX(MemX(tables.TblRowsLo), MemX(tables.TblRowsHi), zp.ZpLb, zp.ZpHb);
-        asm.Ldx(Mem(zp.ZpCh));
+        asm.Ldy(MemX(zp.VoicePatternIdx));          // Y = pattern index, so X stays the channel -
+        asm.Lda(MemY(tables.TblRowsLo));            // 3 bytes less than borrowing X and putting it
+        asm.Sta(Mem(zp.ZpLb));                      // back from ZP_ch
+        asm.Lda(MemY(tables.TblRowsHi));
+        asm.Sta(Mem(zp.ZpHb));
 
         // .fetchrow in the assembly - a label nothing jumps to, so there is nothing to define.
         asm.Ldy(MemX(zp.VoiceEvent));

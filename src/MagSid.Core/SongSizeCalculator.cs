@@ -37,10 +37,12 @@ public static class SongSizeCalculator
     // without each effect and read "player, song-free" out of tools\measure.py. The effects are
     // gated out of the player entirely when no instrument uses them, and they share the
     // frequency-modulation block, which is why both-at-once is less than the two deltas summed.
-    private static readonly int PlayerBare = 462 + HardRestartBytes;
-    private static readonly int PlayerVibrato = 574 + HardRestartBytes;
-    private static readonly int PlayerSlide = 533 + HardRestartBytes;
-    private static readonly int PlayerVibratoAndSlide = 608 + HardRestartBytes;
+    // 2026-10-23: 4 bytes less throughout, 8 with vibrato - the row tables indexed by Y, the arp
+    // start stored with STY, ALR for and+lsr and a redundant ldy when the vibrato turns round.
+    private static readonly int PlayerBare = 458 + HardRestartBytes;
+    private static readonly int PlayerVibrato = 566 + HardRestartBytes;
+    private static readonly int PlayerSlide = 529 + HardRestartBytes;
+    private static readonly int PlayerVibratoAndSlide = 600 + HardRestartBytes;
 
     /// <summary>Keeping the waveform through the hard restart loads and masks it rather than
     /// loading $08 - two bytes. The four figures above are the $08 player's.</summary>

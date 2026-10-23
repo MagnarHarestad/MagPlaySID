@@ -44,12 +44,25 @@ parks `voice_wt_pos` on `wt_hold`, the wavetable pool's closing `$00`, so pulse,
 vibrato and slide run on through the release (`lda #wt_hold-wt_data` for `lda #0`, same size). Each
 image differs from the one before in that single immediate byte at `$1011`.
 
+All eleven, and the eleven in `GateOff\`, were reassembled on **2026-10-23**, when the player shrank
+by 4 bytes, 8 with vibrato: `Voice_Tick`'s fetch indexes the row tables with Y instead of borrowing X,
+`sty voice_arp_pos,x` replaces `tya`/`sta`, ALR (`asr #imm` in c6510, `$4B`) replaces `and #imm`/`lsr`
+where the vibrato is armed, and a redundant `ldy voice_inst,x` goes where it turns round. Same
+procedure; the eleven old images were first rebuilt byte for byte. Old and new were then run for 5000
+frames each in the 6502 emulator and wrote the same SID registers, values and order, every frame.
+
+`GateOff\` had not followed the 2026-10-08 and 2026-10-13 reassemblies - it matched the player neither
+before nor after that change, which went unnoticed because the tests read it only with
+`KeepsWaveform` on. It was rebuilt from the same player with its one-instruction edit, then checked
+against the emitter with `KeepsWaveform` switched on: all 25 image tests passed.
+
 `player.patch` beside this file is every change the scratch player carries - pattern slides, SOFTHR
 and the release - against commit `6221867`'s `Code/musicplayer.s` and `Startup/Tables.s` (apply with
 `patch -p0 --binary`; the sources are CRLF). Rebuilding any golden means applying it first.
 
 `opcodes.txt` is the emitter's opcode table, one `mnemonic mode hex` line each, frozen after
-`OpcodeTableTests` had checked all 106 of them against c6510 instruction by instruction.
+`OpcodeTableTests` had checked all 106 of them against c6510 instruction by instruction. `asr Immediate
+4B` (ALR) joined it on 2026-10-23, after c6510 assembled `asr #$12` as `4B 12`.
 
 ## When one of these has to change
 

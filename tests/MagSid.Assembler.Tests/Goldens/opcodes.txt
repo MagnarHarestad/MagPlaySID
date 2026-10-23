@@ -49,6 +49,7 @@ inc ZeroPage E6
 inc ZeroPageX F6
 inx Implied E8
 iny Implied C8
+asr Immediate 4B
 isc Absolute EF
 isc AbsoluteX FF
 isc AbsoluteY FB
