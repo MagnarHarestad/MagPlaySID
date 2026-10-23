@@ -37,10 +37,14 @@ public sealed class PortAudioOutput : IAudioOutput
     private Exception? _failure;
 
     // Where the device was at the last callback: frames handed over before it, less those still
-    // queued in front of the speaker, and when that was - SamplesPlayed runs on from there.
+    // queued in front of the speaker, and when that was - SamplesPlayed runs on from there. The two
+    // are written and read together under a lock: read apart, a new position with the old time ran
+    // a whole callback ahead and then fell back, and the DAW's playhead flickered with it.
+    private readonly object _clockLock = new();
     private long _framesRendered;
     private double _playedAtCallback;
     private long _callbackTicks;
+    private long _lastReported;
 
     private PortAudioOutput(IWaveProvider source, int latencyMs)
     {
@@ -112,13 +116,20 @@ public sealed class PortAudioOutput : IAudioOutput
 
     public bool IsPlaying => _started && !_paused;
 
+    /// <summary>Never goes backwards: a device's reported latency wanders, and a clock that steps
+    /// back across a pattern's end turns the DAW's roll back to the previous clip.</summary>
     public long SamplesPlayed
     {
         get
         {
-            double since = (Stopwatch.GetTimestamp() - Interlocked.Read(ref _callbackTicks)) / (double)Stopwatch.Frequency;
-            double played = Volatile.Read(ref _playedAtCallback) + (_paused ? 0 : since * _sampleRate);
-            return (long)Math.Clamp(played, 0, Interlocked.Read(ref _framesRendered));
+            lock (_clockLock)
+            {
+                double since = (Stopwatch.GetTimestamp() - _callbackTicks) / (double)Stopwatch.Frequency;
+                double played = _playedAtCallback + (_paused ? 0 : since * _sampleRate);
+                long now = (long)Math.Clamp(played, 0, _framesRendered);
+                _lastReported = Math.Max(_lastReported, now);
+                return _lastReported;
+            }
         }
     }
 
@@ -154,9 +165,13 @@ public sealed class PortAudioOutput : IAudioOutput
             // This buffer starts playing outputBufferDacTime - currentTime from now; everything
             // handed over before it has played except what that gap still holds.
             double queued = Math.Max(0, timeInfo.outputBufferDacTime - timeInfo.currentTime) * _sampleRate;
-            long before = Interlocked.Add(ref _framesRendered, frameCount) - frameCount;
-            Volatile.Write(ref _playedAtCallback, Math.Max(0, before - queued));
-            Interlocked.Exchange(ref _callbackTicks, Stopwatch.GetTimestamp());
+            lock (_clockLock)
+            {
+                long before = _framesRendered;
+                _framesRendered += frameCount;
+                _playedAtCallback = Math.Max(0, before - queued);
+                _callbackTicks = Stopwatch.GetTimestamp();
+            }
         }
 
         return StreamCallbackResult.Continue;
