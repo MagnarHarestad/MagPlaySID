@@ -8,10 +8,13 @@ namespace MagSid.Playback;
 /// reproduces what musicplayer.s <em>means</em>, while this runs the bytes that were written to the
 /// file. The two agreeing is evidence; one of them alone is not.
 ///
-/// Scope is the documented instruction set plus ISC, the one illegal opcode this project's player
-/// uses. Anything else throws by name rather than being quietly treated as a NOP - a SID player that
-/// silently mis-executes produces a tune that sounds plausible and wrong, which is the worst outcome
-/// available here.
+/// Scope is the documented instruction set and the undocumented opcodes an NMOS 6510 runs - the
+/// stable ones exactly (SLO, RLA, SRE, RRA, SAX, LAX, DCP, ISC, ANC, ALR, ARR, SBX, the extra SBC and
+/// NOPs), the unstable ones (SHA, SHX, SHY, TAS, ANE, LXA, LAS) as a C64 usually behaves, the way
+/// VICE takes them. Music players reach for them to save a byte or a cycle; LFT's Lunatico uses SBX.
+/// Only the JAM opcodes, which halt the CPU, throw - by name, rather than being quietly treated as a
+/// NOP: a SID player that silently mis-executes produces a tune that sounds plausible and wrong,
+/// which is the worst outcome available here.
 /// </summary>
 public sealed class Mos6502
 {
@@ -294,8 +297,9 @@ public sealed class Mos6502
 
             case 0xEA: break;   // NOP
 
-            // --- the one illegal opcode this project's player uses ---
-            // ISC: increment memory, then subtract the result from A. Replaces an inc + cmp pair.
+            // --- undocumented: read-modify-write, then an operation on A ---
+            // ISC: increment memory, then subtract the result from A - this project's own player
+            // uses it in place of an inc + cmp pair.
             case 0xE7: Isc(ZeroPage()); break;
             case 0xF7: Isc(ZeroPageX()); break;
             case 0xEF: Isc(Absolute()); break;
@@ -304,11 +308,101 @@ public sealed class Mos6502
             case 0xE3: Isc(IndirectX()); break;
             case 0xF3: Isc(IndirectY()); break;
 
-            default:
+            // SLO: shift left, then OR into A.
+            case 0x07: Slo(ZeroPage()); break;
+            case 0x17: Slo(ZeroPageX()); break;
+            case 0x0F: Slo(Absolute()); break;
+            case 0x1F: Slo(AbsoluteX()); break;
+            case 0x1B: Slo(AbsoluteY()); break;
+            case 0x03: Slo(IndirectX()); break;
+            case 0x13: Slo(IndirectY()); break;
+
+            // RLA: rotate left, then AND into A.
+            case 0x27: Rla(ZeroPage()); break;
+            case 0x37: Rla(ZeroPageX()); break;
+            case 0x2F: Rla(Absolute()); break;
+            case 0x3F: Rla(AbsoluteX()); break;
+            case 0x3B: Rla(AbsoluteY()); break;
+            case 0x23: Rla(IndirectX()); break;
+            case 0x33: Rla(IndirectY()); break;
+
+            // SRE: shift right, then EOR into A.
+            case 0x47: Sre(ZeroPage()); break;
+            case 0x57: Sre(ZeroPageX()); break;
+            case 0x4F: Sre(Absolute()); break;
+            case 0x5F: Sre(AbsoluteX()); break;
+            case 0x5B: Sre(AbsoluteY()); break;
+            case 0x43: Sre(IndirectX()); break;
+            case 0x53: Sre(IndirectY()); break;
+
+            // RRA: rotate right, then add to A.
+            case 0x67: Rra(ZeroPage()); break;
+            case 0x77: Rra(ZeroPageX()); break;
+            case 0x6F: Rra(Absolute()); break;
+            case 0x7F: Rra(AbsoluteX()); break;
+            case 0x7B: Rra(AbsoluteY()); break;
+            case 0x63: Rra(IndirectX()); break;
+            case 0x73: Rra(IndirectY()); break;
+
+            // DCP: decrement, then compare with A.
+            case 0xC7: Dcp(ZeroPage()); break;
+            case 0xD7: Dcp(ZeroPageX()); break;
+            case 0xCF: Dcp(Absolute()); break;
+            case 0xDF: Dcp(AbsoluteX()); break;
+            case 0xDB: Dcp(AbsoluteY()); break;
+            case 0xC3: Dcp(IndirectX()); break;
+            case 0xD3: Dcp(IndirectY()); break;
+
+            // --- undocumented: loads and stores ---
+            // LAX: load A and X together. SAX: store A AND X.
+            case 0xA7: Lax(Read(ZeroPage())); break;
+            case 0xB7: Lax(Read(ZeroPageY())); break;
+            case 0xAF: Lax(Read(Absolute())); break;
+            case 0xBF: Lax(Read(AbsoluteY())); break;
+            case 0xA3: Lax(Read(IndirectX())); break;
+            case 0xB3: Lax(Read(IndirectY())); break;
+
+            case 0x87: Write(ZeroPage(), A & X); break;
+            case 0x97: Write(ZeroPageY(), A & X); break;
+            case 0x8F: Write(Absolute(), A & X); break;
+            case 0x83: Write(IndirectX(), A & X); break;
+
+            // --- undocumented: immediate operations ---
+            case 0x0B: case 0x2B: A &= Immediate(); SetZn(A); Carry = Negative; break;    // ANC
+            case 0x4B: A = Lsr(A & Immediate()); break;                                      // ALR
+            case 0x6B: Arr(Immediate()); break;                                              // ARR
+            case 0xCB: Sbx(Immediate()); break;                                              // SBX (AXS)
+            case 0xEB: Sbc(Immediate()); break;                                              // SBC, again
+
+            // --- undocumented, unstable: as a C64 usually behaves. ANE and LXA's "magic constant" is
+            // chip and temperature dependent; $EE is the common one, and the safe uses (immediate 0,
+            // or A = $FF) do not depend on it. See "No More Secrets" (groepaz, 2025). ---
+            case 0x8B: A = (A | 0xEE) & X & Immediate(); SetZn(A); break;                   // ANE
+            case 0xAB: Lax((A | 0xEE) & Immediate()); break;                                 // LXA
+            case 0xBB: Las(Read(AbsoluteY())); break;                                        // LAS
+            case 0x9F: StoreHigh(FetchWord(), Y, A & X); break;                              // SHA abs,y
+            case 0x93: StoreHigh(IndirectBase(), Y, A & X); break;                           // SHA (zp),y
+            case 0x9E: StoreHigh(FetchWord(), Y, X); break;                                  // SHX
+            case 0x9C: StoreHigh(FetchWord(), X, Y); break;                                  // SHY
+            case 0x9B: SP = A & X; StoreHigh(FetchWord(), Y, SP); break;                     // TAS
+
+            // --- undocumented NOPs: they still take their operand bytes ---
+            case 0x1A: case 0x3A: case 0x5A: case 0x7A: case 0xDA: case 0xFA: break;
+            case 0x80: case 0x82: case 0x89: case 0xC2: case 0xE2: Fetch(); break;
+            case 0x04: case 0x44: case 0x64: Fetch(); break;
+            case 0x14: case 0x34: case 0x54: case 0x74: case 0xD4: case 0xF4: Fetch(); break;
+            case 0x0C: FetchWord(); break;
+            case 0x1C: case 0x3C: case 0x5C: case 0x7C: case 0xDC: case 0xFC: FetchWord(); break;
+
+            // JAM: the CPU halts and only a reset brings it back.
+            case 0x02: case 0x12: case 0x22: case 0x32: case 0x42: case 0x52:
+            case 0x62: case 0x72: case 0x92: case 0xB2: case 0xD2: case 0xF2:
                 throw new SidPlaybackException(
-                    $"Opcode ${opcode:X2} at ${PC - 1:X4} is not implemented. This player covers the " +
-                    "documented instruction set plus ISC; a tune using other undocumented opcodes " +
-                    "needs them added rather than guessed at.");
+                    $"Opcode ${opcode:X2} at ${PC - 1:X4} halts the 6510 (JAM) - the tune has run into " +
+                    "something that is not code.");
+
+            default:
+                throw new SidPlaybackException($"Opcode ${opcode:X2} at ${PC - 1:X4} is not implemented.");
         }
     }
 
@@ -512,6 +606,120 @@ public sealed class Mos6502
         int value = (Read(address) + 1) & 0xFF;
         Write(address, value);
         Sbc(value);
+    }
+
+    private void Slo(int address)
+    {
+        int value = Asl(Read(address));
+        Write(address, value);
+        A |= value;
+        SetZn(A);
+    }
+
+    private void Rla(int address)
+    {
+        int value = Rol(Read(address));
+        Write(address, value);
+        A &= value;
+        SetZn(A);
+    }
+
+    private void Sre(int address)
+    {
+        int value = Lsr(Read(address));
+        Write(address, value);
+        A ^= value;
+        SetZn(A);
+    }
+
+    private void Rra(int address)
+    {
+        int value = Ror(Read(address));
+        Write(address, value);
+        Adc(value);
+    }
+
+    private void Dcp(int address)
+    {
+        int value = (Read(address) - 1) & 0xFF;
+        Write(address, value);
+        Compare(A, value);
+    }
+
+    private void Lax(int value)
+    {
+        A = X = value & 0xFF;
+        SetZn(A);
+    }
+
+    private void Las(int value)
+    {
+        A = X = SP = value & SP;
+        SetZn(A);
+    }
+
+    /// <summary>SBX: X = (A AND X) - operand, without borrow; the carry as a compare sets it.</summary>
+    private void Sbx(int value)
+    {
+        int and = A & X;
+        Carry = and >= value;
+        X = (and - value) & 0xFF;
+        SetZn(X);
+    }
+
+    /// <summary>
+    /// ARR: AND, then rotate right. In binary mode the carry is bit 6 of the result and the overflow
+    /// bit 6 xor bit 5. In decimal mode N is the carry going in, V whether bit 6 changed, and each
+    /// nibble gets a BCD fixup - the high one setting the carry - as "No More Secrets" gives it.
+    /// </summary>
+    private void Arr(int value)
+    {
+        int and = A & value;
+        int rotated = ((and >> 1) | (Carry ? 0x80 : 0)) & 0xFF;
+
+        if (!Decimal)
+        {
+            A = rotated;
+            SetZn(A);
+            Carry = (A & 0x40) != 0;
+            Overflow = (((A >> 6) ^ (A >> 5)) & 1) != 0;
+            return;
+        }
+
+        Negative = Carry;
+        Zero = rotated == 0;
+        Overflow = ((rotated ^ and) & 0x40) != 0;
+        if ((and & 0x0F) + (and & 0x01) > 0x05)
+            rotated = (rotated & 0xF0) | ((rotated + 0x06) & 0x0F);
+        if ((and & 0xF0) + (and & 0x10) > 0x50)
+        {
+            rotated = (rotated & 0x0F) | ((rotated + 0x60) & 0xF0);
+            Carry = true;
+        }
+        else
+        {
+            Carry = false;
+        }
+
+        A = rotated & 0xFF;
+    }
+
+    /// <summary>SHA, SHX, SHY, TAS: store a value ANDed with the high byte of the base address plus
+    /// one - and if indexing crossed a page, that value is the high byte the store goes to.</summary>
+    private void StoreHigh(int baseAddress, int index, int value)
+    {
+        int address = (baseAddress + index) & 0xFFFF;
+        int stored = value & ((baseAddress >> 8) + 1) & 0xFF;
+        if ((baseAddress & 0xFF00) != (address & 0xFF00))
+            address = (stored << 8) | (address & 0xFF);
+        Write(address, stored);
+    }
+
+    /// <summary>The (zp) pointer an (indirect),Y store adds Y to, without adding it.</summary>
+    private int IndirectBase()
+    {
+        int pointer = Fetch();
+        return _memory[pointer] | (_memory[(pointer + 1) & 0xFF] << 8);
     }
 
     private void Jsr()
