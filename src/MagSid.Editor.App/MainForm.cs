@@ -1332,6 +1332,8 @@ public sealed class MainForm : Form
             _jamEngine = null;
 
             var engine = new SongPlaybackEngine(_session.Song, _chipModel, resume);
+            _heardSample = 0;
+            _heardAt = 0;
             ApplyCycle(engine);
             StartLiveRaster(resume?.Frame ?? 0);
             ApplyChannelMutes(engine);
@@ -1496,8 +1498,30 @@ public sealed class MainForm : Form
             return 0L;
         }
 
-        return AuditionClock.SamplesPlayed(_waveOut, _playbackEngine) ?? 0L;
+        // Never backwards within one playback, and a failed read carries on from the last good one
+        // at the audio's own rate rather than reading as sample 0. Either of those sent the DAW's
+        // playhead back a frame or to the oldest position held - across a pattern's end that is the
+        // previous clip, which autoscroll then turned the roll back to: a playhead that flickered.
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (AuditionClock.SamplesPlayed(_waveOut, _playbackEngine) is { } reported && reported >= _heardSample)
+        {
+            _heardSample = reported;
+            _heardAt = now;
+            return reported;
+        }
+
+        if (_heardAt == 0)
+            return _heardSample;
+
+        double since = (now - _heardAt) / (double)System.Diagnostics.Stopwatch.Frequency;
+        long carried = _heardSample + (long)(since * SongPlaybackEngine.SampleRate);
+        return Math.Clamp(carried, _heardSample, Math.Max(_heardSample, _playbackEngine.SamplesProduced));
     }
+
+    /// <summary>The last sample LivePlaybackSample reported as heard, and when - reset with each
+    /// new playback.</summary>
+    private long _heardSample;
+    private long _heardAt;
 
     /// <summary>
     /// Where the next Play should begin.

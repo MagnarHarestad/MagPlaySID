@@ -81,4 +81,29 @@ public class EditWhilePlayingTests
         for (int frame = 0; frame < 16; frame++)
             sequencer.Frame();
     }
+
+    [Fact]
+    public void An_instrument_deleted_and_replaced_while_playing_plays_the_replacement()
+    {
+        // As reported: an Arp from the sound bank added as instrument 2, deleted, and a Bass added
+        // in its place - the song kept playing the Arp, because the deleted object still carries
+        // the number 2 and the sequencer's table still held it.
+        var (song, writes, sequencer) = Playing();
+        var arp = new Instrument { Number = 2, Waveform = 0x11, AttackDecay = 0x00, SustainRelease = 0xF0 };
+        song.Instruments.Add(arp);
+        song.Patterns[0].Rows[4] = new NoteRow(NoteName.Parse("E-4"), 2);
+        for (int frame = 0; frame < 16; frame++)
+            sequencer.Frame();
+
+        song.Instruments.Remove(arp);
+        song.Instruments.Add(new Instrument { Number = 2, Waveform = 0x41, AttackDecay = 0x00, SustainRelease = 0xF0 });
+
+        writes.Clear();
+        for (int frame = 0; frame < 16; frame++)
+            sequencer.Frame();
+
+        // The E-4 on voice 1 is struck on the Bass's pulse, not the Arp's triangle.
+        Assert.Contains((4, 0x41), writes);
+        Assert.DoesNotContain((4, 0x11), writes);
+    }
 }

@@ -653,13 +653,15 @@ public sealed class SongSequencer
 
     /// <summary>
     /// The song is edited while it plays - an instrument loaded, a pattern drawn - so the tables
-    /// built at the start can fall behind it. A number they do not have, or have under an object
-    /// since renumbered, re-reads the song; before, the lookup threw on the audio thread, and the
-    /// output stopped the moment a note named an instrument loaded after Play.
+    /// built at the start can fall behind it. A number they do not have, have under an object since
+    /// renumbered, or have under an object no longer in the song re-reads it. Before, the lookup
+    /// threw on the audio thread and the output stopped; and a deleted instrument keeps its number,
+    /// so one deleted and replaced while the song played went on sounding in its replacement's place.
     /// </summary>
     private Instrument? InstrumentFor(int number)
     {
-        if (_instrumentsByNumber.TryGetValue(number, out var instrument) && instrument.Number == number)
+        if (_instrumentsByNumber.TryGetValue(number, out var instrument) && instrument.Number == number
+            && _song.Instruments.Contains(instrument))
             return instrument;
 
         _instrumentsByNumber = ByNumber(_song.Instruments, i => i.Number);
@@ -668,7 +670,8 @@ public sealed class SongSequencer
 
     private Pattern? PatternFor(int number)
     {
-        if (_patternsByNumber.TryGetValue(number, out var pattern) && pattern.Number == number)
+        if (_patternsByNumber.TryGetValue(number, out var pattern) && pattern.Number == number
+            && _song.Patterns.Contains(pattern))
             return pattern;
 
         _patternsByNumber = ByNumber(_song.Patterns, p => p.Number);
