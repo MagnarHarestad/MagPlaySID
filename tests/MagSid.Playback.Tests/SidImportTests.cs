@@ -343,6 +343,24 @@ public class SidImportTests
         Assert.Equal(["C-3", "D#7"], instrument.Arpeggio.Skip(instrument.ArpeggioLoopPoint).Select(n => n.ToString()));
     }
 
+    [Theory]
+    [InlineData(16)]
+    [InlineData(12)]
+    public void A_noise_strike_ringing_on_pulse_on_the_backbeat_is_a_snare(int barRows)
+    {
+        // Most GoatTracker snares never go back to noise: noise at C-7, then pulse at G-3 - which,
+        // with nothing else to go by, was a lead. Half a bar in, every bar, it is the snare: rows
+        // 4 and 12 of sixteen, or row 6 of twelve in a 12/8 tune, as in MSI-FrogBog.
+        // The song starts on its first note, the bass on the one.
+        Func<int, int?> snare = barRows == 16 ? row => row % 16 is 4 or 12 ? 1 : null : row => row % 12 == 6 ? 1 : null;
+        int beat = barRows == 16 ? 8 : 12;
+        var result = Tune(4,
+            (0, snare, Sound((0x81, "C-7"), (0x41, "G-3"), (0x41, "G-3"), (0x41, "G-3"), (0x41, "G-3"))),
+            (1, row => row % beat == 0 ? Frequency("C-2") : null, Sound((0x41, null), (0x41, null), (0x41, null))));
+
+        Assert.Single(result.Song.Instruments, i => i.Name == "Snare");
+    }
+
     [Fact]
     public void The_first_note_is_on_the_first_row()
     {

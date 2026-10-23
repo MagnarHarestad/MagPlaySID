@@ -90,9 +90,18 @@ public static partial class SidTranscriber
         if (startsOnNoise && !tonal && onBackbeat >= 0.7)
             return SoundRole.Snare;
 
+        // Most GoatTracker snares strike noise and ring on pulse without going back to it: told
+        // from a kick by where they fall - half a bar in, and hardly ever on the one.
+        if (startsOnNoise && tonal && family.Count >= 4 && OnTheBackbeat(family))
+            return SoundRole.Snare;
+
         // A drum: struck on noise, its program on fixed notes to the end and never the row's -
         // a clap, a tom. Rooted low it would otherwise pass for a bass.
         if (startsOnNoise && sound.GateOffInProgram && sound.Notes is not null && sound.Ending == ArpeggioEnding.Hold)
+            return SoundRole.Other;
+
+        // A hihat: a short strike on noise, high, its gate off inside its first row.
+        if (startsOnNoise && sound.GateOffInProgram && root >= 5 * 12)
             return SoundRole.Other;
 
         // Kick-bass: a strike on noise at a high fixed note, falling to a root at C-3 or below.
@@ -157,6 +166,17 @@ public static partial class SidTranscriber
 
         double Best(int bar) => rows.GroupBy(r => r % bar).Max(g => g.Count()) / (double)rows.Count;
         return Math.Max(Best(8), Best(6));
+    }
+
+    /// <summary>Most of a sound's notes half a bar in and next to none on the one, for some bar:
+    /// 4 of eight rows (4 and 12 of sixteen), 8 of sixteen, 3 of six, 6 of twelve (a 12/8 tune's
+    /// snare, as MSI-FrogBog's). The song starts on its first note, which is taken for the one:
+    /// counting the one from where most notes fall instead got 52% of 115 GoatTracker songs'
+    /// snares, against 64% - a bass on every beat puts more notes on the backbeat.</summary>
+    private static bool OnTheBackbeat(List<int> rows)
+    {
+        double Share(int bar, int step) => rows.Count(r => r % bar == step) / (double)rows.Count;
+        return new[] { 6, 8, 12, 16, 24, 32 }.Any(bar => Share(bar, bar / 2) >= 0.6 && Share(bar, 0) < 0.2);
     }
 
     private static string RoleName(SoundRole role, Sound sound) => role switch
