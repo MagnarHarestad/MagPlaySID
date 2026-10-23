@@ -396,6 +396,13 @@ public sealed class MainWindow : Window
 
         _daw.InstrumentAddRequested += AddInstrument;
         _daw.InstrumentFromBankRequested += AddFromBank;
+        _daw.InstrumentSoundChangeRequested += (target, sound) =>
+        {
+            // The sound bank's swap button: the sound onto that instrument, its number kept.
+            _session.ReplaceInstrumentSound(target, sound.Instrument);
+            SelectInstrumentNumber(target.Number);
+            ShowNotice($"Instrument {target.Number:00} is now {target.Name} from the sound bank ({sound.Origin})");
+        };
         _daw.InstrumentLoadRequested += () => _ = LoadInstrumentsAsync();
         _daw.SoundAuditionRequested += AuditionSound;
         _daw.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
