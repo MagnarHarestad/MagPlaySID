@@ -215,4 +215,108 @@ public class SidImportTests
         Assert.InRange(fits.Value, 50 * 4, analysis.FrameCount - 1);
         SidTranscriber.Import(analysis, options with { FrameCount = fits.Value });
     }
+
+    // ------------------------------------------------------------------------------ roles
+
+    /// <summary>A tune of 16-row bars at 6 frames a row: each note a voice, a row, and its frames as
+    /// (control, frequency) while the gate is on - the gate goes off after them.</summary>
+    private static SidImportResult Tune(int bars, params (int Voice, Func<int, int?> Row, (int Control, int Frequency)[] Frames)[] parts)
+    {
+        const int framesPerRow = 6;
+        int frameCount = bars * 16 * framesPerRow;
+        var frames = Enumerable.Range(0, frameCount).Select(_ => new List<(int, int)>()).ToList();
+        foreach (var (voice, rowOf, sound) in parts)
+        {
+            for (int bar = 0; bar < bars; bar++)
+            {
+                for (int step = 0; step < 16; step++)
+                {
+                    if (rowOf(bar * 16 + step) is not { } frequencyOverride)
+                        continue;
+
+                    int start = (bar * 16 + step) * framesPerRow;
+                    for (int i = 0; i < sound.Length && start + i < frameCount; i++)
+                    {
+                        int frequency = sound[i].Frequency == 0 ? frequencyOverride : sound[i].Frequency;
+                        var writes = frames[start + i];
+                        writes.AddRange([(voice * 7, frequency & 0xFF), (voice * 7 + 1, frequency >> 8), (voice * 7 + 4, sound[i].Control)]);
+                        if (i == 0)
+                            writes.AddRange([(voice * 7 + 5, 0x00), (voice * 7 + 6, 0xA9)]);
+                    }
+                    if (start + sound.Length < frameCount)
+                        frames[start + sound.Length].Add((voice * 7 + 4, sound[^1].Control & 0xFE));
+                }
+            }
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], [.. frames]));
+        return SidTranscriber.Import(analysis, new SidImportOptions(framesPerRow, 0, analysis.FrameCount));
+    }
+
+    private static (int, int)[] Sound(params (int Control, string? Note)[] frames) =>
+        [.. frames.Select(f => (f.Control, f.Note is null ? 0 : Frequency(f.Note)))];
+
+    private static readonly (int, int)[] SnareSound = Sound((0x81, "B-7"), (0x41, "A#3"), (0x41, "G#3"), (0x81, "C-7"), (0x81, "C-7"));
+
+    [Fact]
+    public void A_snare_on_the_backbeat_is_found_and_comes_first()
+    {
+        var result = Tune(4,
+            (1, row => row % 16 is 4 or 12 ? 1 : null, SnareSound),
+            (0, row => row % 4 == 0 ? Frequency("C-2") : null, Sound((0x41, null), (0x41, null), (0x41, null))),
+            (2, row => row % 8 == 2 ? Frequency("A-4") : null, Sound((0x21, null), (0x21, null), (0x21, null), (0x21, null))));
+
+        Assert.Equal("Snare", result.Song.Instruments[0].Name);
+        Assert.Contains(result.Song.Instruments, i => i.Name == "Bass");
+        Assert.Contains(result.Song.Instruments, i => i.Name == "Lead");
+        Assert.Contains("1 snare", result.Report.Roles);
+    }
+
+    [Fact]
+    public void A_bass_with_a_click_is_one_instrument_whatever_its_notes()
+    {
+        // A frame of pulse at B-7, then the bass note - BellaCiao's bass. The click and the note had
+        // a frame each, and every bass note became an instrument of its own.
+        string[] notes = ["E-1", "G-1", "A-1", "B-1", "D-2", "E-2", "G-2", "A-2"];
+        var result = Tune(4, (0, row => row % 2 == 0 ? Frequency(notes[row / 2 % notes.Length]) : null,
+            Sound((0x09, "B-7"), (0x41, "B-7"), (0x41, null))));
+
+        var bass = Assert.Single(result.Song.Instruments);
+        Assert.Equal("Bass", bass.Name);
+        Assert.Equal(ArpeggioEnding.Root, bass.ArpeggioEnding);
+        Assert.Equal(notes.Length, result.Song.Patterns.SelectMany(p => p.Rows).OfType<NoteRow>().Select(r => r.Note).Distinct().Count());
+    }
+
+    [Fact]
+    public void A_noise_strike_falling_to_a_low_root_is_a_kick_bass()
+    {
+        var result = Tune(4, (0, row => row % 4 == 0 ? Frequency(row % 8 == 0 ? "C-2" : "G-1") : null,
+            Sound((0x81, "B-7"), (0x41, "C-4"), (0x41, "C-3"), (0x41, null), (0x41, null), (0x41, null))));
+
+        Assert.Equal("KickBass", Assert.Single(result.Song.Instruments).Name);
+    }
+
+    [Fact]
+    public void Past_sixteen_sounds_the_snare_and_the_bass_keep_their_places()
+    {
+        // Twenty lead sounds - saw for 1, 2, 3... frames, then pulse - each played four times, and a
+        // snare and a bass played less than any of them: by use alone both would have been dropped.
+        var parts = new List<(int, Func<int, int?>, (int, int)[])>
+        {
+            (1, row => row % 256 == 12 ? 1 : null, SnareSound),
+            (0, row => row % 512 == 0 ? Frequency("C-2") : null, Sound((0x41, null), (0x41, null), (0x41, null))),
+        };
+        for (int lead = 0; lead < 20; lead++)
+        {
+            int which = lead;
+            parts.Add((2, row => row % 128 == which * 6 ? Frequency("A-4") : null,
+                [.. Enumerable.Repeat((0x21, 0), which + 1), (0x41, 0), (0x41, 0)]));
+        }
+
+        var result = Tune(32, [.. parts]);
+
+        Assert.Equal(16, result.Song.Instruments.Count);
+        Assert.Contains(result.Song.Instruments, i => i.Name == "Snare");
+        Assert.Contains(result.Song.Instruments, i => i.Name == "Bass");
+    }
 }

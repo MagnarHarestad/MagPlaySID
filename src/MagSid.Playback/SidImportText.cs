@@ -54,6 +54,8 @@ public static class SidImportText
             ? $"{report.SoundsFound} different sounds, an instrument each."
             : $"{report.SoundsFound} different sounds: the {report.InstrumentsMade} used most are instruments, " +
               $"and {report.NotesOnNearSound} notes play on the nearest of them.");
+        if (report.Roles.Length > 0)
+            lines.Add($"Instruments by role: {report.Roles}. Snares come first, then bass and kick-bass, then leads, then arpeggios.");
         if (report.UsesFilter)
             lines.Add("The filter comes over as filter programs, set up again by each note that uses it.");
 
@@ -69,7 +71,8 @@ public static class SidImportText
         "A .sid holds a program, not notes: the import plays it and writes down what it does to the SID chip. " +
         "A note is a gate going on - or, with the gate held, a pitch that moves to another note and stays - and " +
         "its sound becomes an instrument: the waveform frame by frame, steps of pitch, pulse width, vibrato, filter " +
-        "and envelope. Notes that sound alike share one; MagSID has 16, so the rest play on the nearest. Slides, " +
+        "and envelope. Notes that sound alike share one. MagSID has 16, handed out by role in turns - snare, " +
+        "kick-bass, bass, lead, arpeggio - and a sound without one plays on the nearest of its own role. Slides, " +
         "tempo changes and a filter sweeping across notes come out as the nearest thing MagSID can say. The share " +
         "of notes above is measured, not estimated: the imported song is played through MagSID's player and its " +
         "notes compared with the tune's.";

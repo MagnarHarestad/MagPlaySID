@@ -29,7 +29,8 @@ public sealed record SidImportReport(
     int SoundsFound,
     int InstrumentsMade,
     int NotesOnNearSound,
-    bool UsesFilter);
+    bool UsesFilter,
+    string Roles = "");
 
 public sealed record SidImportResult(Song Song, SidImportReport Report);
 
@@ -49,7 +50,7 @@ public sealed class SidImportException(string message) : Exception(message);
 /// slide, a filter sweeping across notes, a player called several times a frame - is heard the
 /// way the nearest thing it can say sounds.
 /// </summary>
-public static class SidTranscriber
+public static partial class SidTranscriber
 {
     /// <summary>Frames of a note looked at for its sound. The player's tables are one byte a frame,
     /// and a sound that has not settled in this long is near enough to one that has.</summary>
@@ -275,6 +276,7 @@ public static class SidTranscriber
 
         var stats = new Stats();
         var groups = new Dictionary<string, List<Sound>>();
+        var usage = new Dictionary<Sound, Usage>();
         var placed = new List<(int Voice, int Row, Sound Sound, NoteName Note, int? OffRow)>();
 
         foreach (var voiceNotes in notes)
@@ -293,19 +295,29 @@ public static class SidTranscriber
 
                 int? offRow = sound.GateOffInProgram || note.GateOff is not { } off ? null : RowOf(off);
                 placed.Add((note.Voice, row, known, root, offRow));
+
+                if (!usage.TryGetValue(known, out var used))
+                    usage[known] = used = new Usage();
+                used.Rows.Add(row);
+                used.Roots.Add(root.TableIndex);
+                used.Lengths.Add(note.SoundEnd - note.Start);
             }
         }
 
         // A sound's settings - where its pulse starts and how it sweeps, its vibrato, its cutoff -
-        // are what most of its notes do. The sixteen sounds used most become instruments; the rest
-        // play on the nearest of them.
+        // are what most of its notes do. The sixteen places go by role - snares, then the bass and
+        // kick-bass, then leads, then arpeggios - and within a role to the sounds used most. The rest
+        // play on the nearest sound of their own role, so a snare is never played on a lead.
         var sounds = groups.Values.ToDictionary(g => g[0], Sound.Typical);
-        var kept = sounds.OrderByDescending(s => s.Value.Uses).Take(SongValidator.MaxInstrumentNumber).Select(s => s.Key).ToList();
+        var families = sounds.Keys.GroupBy(FamilyOf)
+            .ToDictionary(g => g.Key, g => g.SelectMany(k => usage[k].Rows).ToList());
+        var roles = sounds.ToDictionary(s => s.Key, s => RoleOf(s.Value, usage[s.Key], families[FamilyOf(s.Key)]));
+        var kept = TakeInTurn(sounds, roles);
         var instruments = new List<Instrument>();
         var numberOf = new Dictionary<Sound, int>();
         foreach (var sound in kept)
         {
-            var instrument = sounds[sound].ToInstrument(instruments.Count + 1, NameFor(sounds[sound], instruments));
+            var instrument = sounds[sound].ToInstrument(instruments.Count + 1, NameFor(sounds[sound], roles[sound], instruments));
             instruments.Add(instrument);
             numberOf[sound] = instrument.Number;
         }
@@ -314,7 +326,13 @@ public static class SidTranscriber
         {
             if (numberOf.TryGetValue(sound, out int number))
                 return number;
-            var nearest = kept.MinBy(k => sounds[k].Distance(sounds[sound]))!;
+            // Only onto an instrument that plays the row's note: one whose note program loops or holds
+            // fixed notes plays those whatever the row says - Viva Las Vegas's bass came out as F-4.
+            var own = sounds[sound].Notes;
+            var candidates = kept.Where(k => sounds[k].Notes is null || sounds[k].Ending == ArpeggioEnding.Root
+                                             || (own is not null && sounds[k].Notes!.SequenceEqual(own))).ToList();
+            var nearest = (candidates.Count > 0 ? candidates : kept)
+                .MinBy(k => sounds[k].Distance(sounds[sound]) + (roles[k] == roles[sound] ? 0 : 800))!;
             return numberOf[sound] = numberOf[nearest];
         }
         var keptSet = kept.ToHashSet();
@@ -376,7 +394,8 @@ public static class SidTranscriber
                     count, framesPerRow, rowCount, rowsPerPattern, song.Patterns.Count, size,
                     stats.Placed, stats.Moved, stats.Dropped, stats.Shifted,
                     sounds.Count, instruments.Count, stats.NearSound,
-                    instruments.Any(i => i.Filter.Count > 0)));
+                    instruments.Any(i => i.Filter.Count > 0),
+                    DescribeRoles(kept.Select(k => roles[k]))));
             }
         }
 
@@ -566,7 +585,7 @@ public static class SidTranscriber
         // slide passes between notes, and the nearest note flickering under it is not a program.
         var pitched = window.Take(Math.Clamp(note.SoundEnd - note.Start, 1, window.Length)).ToArray();
         int[] index = [.. pitched.Select(f => OnNote(f.Frequency))];
-        int rootIndex = RootOf(index.Any(i => i >= 0) ? index : [.. pitched.Select(f => NearestNote(f.Frequency))]);
+        int rootIndex = RootOf(pitched);
         int played = rootIndex;
         while (played < 0) played += 12;
         while (played >= NoteName.AllNotes.Count) played -= 12;
@@ -628,9 +647,25 @@ public static class SidTranscriber
     private static int RootOf(Analysis analysis, NoteEvent note)
     {
         int length = Math.Max(1, Math.Min(note.SoundEnd - note.Start, ProgramFrames));
-        var frames = Enumerable.Range(note.Start, length).Select(f => analysis.Voices[note.Voice][f].Frequency).ToArray();
-        int[] on = [.. frames.Select(OnNote)];
-        return RootOf(on.Any(i => i >= 0) ? on : [.. frames.Select(NearestNote)]);
+        return RootOf([.. Enumerable.Range(note.Start, length).Select(f => analysis.Voices[note.Voice][f])]);
+    }
+
+    /// <summary>
+    /// The note a sound plays, from its frames while the gate is on. The tonal frames decide it -
+    /// pulse, saw, triangle - when there are any: a drum's strike on noise, or a click a frame long
+    /// before the bass, is colour, not the note. Without that a bass with a one-frame click had as
+    /// many frames on the click as on its note, and every bass note became an instrument of its own.
+    /// </summary>
+    private static int RootOf(VoiceFrame[] frames)
+    {
+        static bool Tonal(byte control) => (control & 0x70) != 0 && (control & 0x80) == 0;
+
+        int[] tonal = [.. frames.Where(f => Tonal(f.Control)).Select(f => OnNote(f.Frequency)).Where(i => i >= 0)];
+        if (tonal.Length > 0)
+            return RootOf(tonal);
+
+        int[] on = [.. frames.Select(f => OnNote(f.Frequency))];
+        return RootOf(on.Any(i => i >= 0) ? on : [.. frames.Select(f => NearestNote(f.Frequency))]);
     }
 
     // ------------------------------------------------------------------------------------ check
@@ -724,9 +759,9 @@ public static class SidTranscriber
 
         NoteName At(int offset) => NoteName.AllNotes[Math.Clamp(root + offset, 0, NoteName.AllNotes.Count - 1)];
 
-        // Comes back to the root and stays: a strike, then the note.
+        // Comes back to the root at the end: a strike, then the note.
         int lastAway = Array.FindLastIndex(offsets, o => o != 0);
-        if (lastAway < offsets.Length - 1 && offsets.Length - lastAway >= 3)
+        if (lastAway < offsets.Length - 1)
             return ([.. offsets.Take(lastAway + 1).Select(At)], ArpeggioEnding.Root, 0);
 
         // A cycle, seen at least twice round.
@@ -823,21 +858,9 @@ public static class SidTranscriber
         return [.. steps];
     }
 
-    private static string NameFor(Sound sound, List<Instrument> made)
+    private static string NameFor(Sound sound, SoundRole role, List<Instrument> made)
     {
-        int waveform = sound.Controls.Select(c => c & 0xF0).GroupBy(w => w).OrderByDescending(g => g.Count()).First().Key;
-        string kind = sound.Notes is not null && sound.Ending == ArpeggioEnding.Loop ? "Arp"
-            : (sound.Controls[0] & 0x80) != 0 && sound.Controls.Length > 1 ? "Drum"
-            : waveform switch
-            {
-                0x10 => "Triangle",
-                0x20 => "Saw",
-                0x40 => "Pulse",
-                0x80 => "Noise",
-                0x50 or 0x60 or 0x70 => "Pulse mix",
-                0x30 => "Tri-saw",
-                _ => "Sound",
-            };
+        string kind = RoleName(role, sound);
         if (sound.Filter.Length > 0)
             kind += " filter";
 
