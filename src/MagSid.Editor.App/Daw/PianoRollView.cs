@@ -751,6 +751,15 @@ internal sealed class PianoRollView : Control
             _labelTimer.Start();
     }
 
+    private void ShowInstrumentLabel(NoteBlock note, int x)
+    {
+        _labelTimer.Stop();
+        _labelNote = note;
+        _labelX = x;
+        _labelShown = true;
+        Invalidate();
+    }
+
     private void HideInstrumentLabel()
     {
         _labelTimer.Stop();
@@ -1551,7 +1560,8 @@ internal sealed class PianoRollView : Control
             Invalidate();
         }
 
-        HoverNote(at.Item1 >= 0 && e.Button == MouseButtons.None ? NoteAt(at) : null, e.X);
+        // Held down, the wheel button's label stays while the pointer stays on its note.
+        HoverNote(at.Item1 >= 0 && e.Button is MouseButtons.None or MouseButtons.Middle ? NoteAt(at) : null, e.X);
 
         // Only over the handle itself, so the cursor says which few pixels do the resizing.
         var under = at.Item1 >= 0
@@ -1806,6 +1816,10 @@ internal sealed class PianoRollView : Control
         {
             _selectedRow = existing.Row;
             Audition(existing.Note, existing.InstrumentNumber);
+            // The wheel button names the instrument at once, without the wait.
+            if (e.Button == MouseButtons.Middle)
+                ShowInstrumentLabel(existing, e.X);
+
             Invalidate();
             return;
         }
