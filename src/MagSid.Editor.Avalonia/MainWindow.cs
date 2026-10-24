@@ -248,25 +248,31 @@ public sealed partial class MainWindow : Window
             RefreshInstrumentNames();
         };
 
-        var left = new DockPanel { Width = 420, Margin = new Thickness(8, 4, 8, 8) };
+        var left = new DockPanel { Width = InstrumentColumnWidth, Margin = new Thickness(8, 4, 4, 8) };
         DockPanel.SetDock(listHeader, Dock.Top);
         DockPanel.SetDock(_instruments, Dock.Top);
         left.Children.Add(listHeader);
         left.Children.Add(_instruments);
         left.Children.Add(new ScrollViewer { Content = _instrumentEditor, Margin = new Thickness(0, 8, 0, 0) });
 
-        // The grid's columns are fixed pixel widths; it keeps its own width, left-aligned.
+        // The grid's columns are fixed pixel widths; it keeps its own width.
         _grid.Width = TrackerGridControl.ContentWidth;
         var gridHost = new Border
         {
             Child = _grid,
-            HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 4, 8, 8),
         };
 
-        var retro = new DockPanel();
+        // Instruments and the grid side by side, a splitter between them, as in the Windows
+        // editor: the pair is centred and a wide window's spare width is margin either side of
+        // it. Dragging the splitter gives the instrument column more room or less; the grid
+        // keeps its width, so a channel is never sliced off.
+        var retro = new DockPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        var splitter = InstrumentSplitter(left);
         DockPanel.SetDock(left, Dock.Left);
+        DockPanel.SetDock(splitter, Dock.Left);
         retro.Children.Add(left);
+        retro.Children.Add(splitter);
         retro.Children.Add(gridHost);
         _retroView = retro;
 
@@ -288,6 +294,49 @@ public sealed partial class MainWindow : Window
         root.Children.Add(_status);
         root.Children.Add(centre);
         return root;
+    }
+
+    /// <summary>The instrument column's width to start with, and how narrow and wide the splitter
+    /// can make it.</summary>
+    private const double InstrumentColumnWidth = 420;
+    private const double NarrowestInstrumentColumn = 260;
+    private const double WidestInstrumentColumn = 900;
+
+    /// <summary>The bar between the instrument column and the grid: a drag sets the column's width.</summary>
+    private static Control InstrumentSplitter(Control column)
+    {
+        var bar = new Border
+        {
+            Width = 5,
+            Margin = new Thickness(0, 4, 4, 8),
+            Background = new SolidColorBrush(AvColor.FromRgb(0x2A, 0x2A, 0x44)),
+            Cursor = new Cursor(StandardCursorType.SizeWestEast),
+        };
+
+        double? grabbedAt = null;
+        double startWidth = 0;
+        bar.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(bar).Properties.IsLeftButtonPressed)
+                return;
+            grabbedAt = e.GetPosition(null).X;
+            startWidth = column.Bounds.Width;
+            e.Pointer.Capture(bar);
+            e.Handled = true;
+        };
+        bar.PointerMoved += (_, e) =>
+        {
+            if (grabbedAt is not { } from)
+                return;
+            column.Width = Math.Clamp(startWidth + e.GetPosition(null).X - from, NarrowestInstrumentColumn, WidestInstrumentColumn);
+        };
+        bar.PointerReleased += (_, e) =>
+        {
+            grabbedAt = null;
+            e.Pointer.Capture(null);
+        };
+        bar.PointerCaptureLost += (_, _) => grabbedAt = null;
+        return bar;
     }
 
     private static TextBlock Label(string text) => new()
