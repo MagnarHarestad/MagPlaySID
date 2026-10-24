@@ -450,13 +450,22 @@ public sealed partial class MainWindow : Window
         _midiMenu.Items.Add(new MenuItem { Header = "No MIDI inputs found", IsEnabled = false });
         _midiMenu.SubmenuOpened += (_, _) => BuildMidiMenu();
 
+        var tools = new MenuItem
+        {
+            Header = "_Tools",
+            ItemsSource = new Control[]
+            {
+                Item("Signal Path", () => new SignalPathWindow(_session.Song.Instruments).Show(this)),
+            },
+        };
+
         var help = new MenuItem
         {
             Header = "_Help",
             ItemsSource = new Control[] { Item("About MagSID Editor", () => _ = new AboutWindow().ShowDialog(this)) },
         };
 
-        return new Menu { ItemsSource = new[] { file, edit, play, _midiMenu, _viewToggle, help } };
+        return new Menu { ItemsSource = new[] { file, edit, play, tools, _midiMenu, _viewToggle, help } };
     }
 
     // ------------------------------------------------------------------------------------ wiring
