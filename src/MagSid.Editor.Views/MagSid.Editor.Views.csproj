@@ -35,6 +35,7 @@
     <Compile Include="..\MagSid.Editor.App\Daw\*.cs" Link="Linked\Daw\%(Filename)%(Extension)" />
     <Compile Include="..\MagSid.Editor.App\Midi\MidiKnobBindings.cs" Link="Linked\Midi\MidiKnobBindings.cs" />
     <Compile Include="..\MagSid.Editor.App\AutosaveManager.cs" Link="Linked\AutosaveManager.cs" />
+    <Compile Include="..\MagSid.Editor.App\AboutDocument.cs" Link="Linked\AboutDocument.cs" />
     <Compile Include="..\MagSid.Editor.App\Player\LiveRasterTime.cs" Link="Linked\Player\LiveRasterTime.cs" />
   </ItemGroup>
 
