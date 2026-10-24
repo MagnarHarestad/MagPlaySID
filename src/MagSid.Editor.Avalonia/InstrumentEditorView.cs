@@ -78,6 +78,13 @@ internal sealed class InstrumentEditorView : StackPanel
     /// <summary>The instrument changed - the song is dirty and the list's names may differ.</summary>
     public event Action? Edited;
 
+    /// <summary>Puts the caret in the name, all of it selected - a new instrument is named first.</summary>
+    public void FocusName()
+    {
+        _name.Focus();
+        _name.SelectAll();
+    }
+
     public void Load(Instrument? instrument)
     {
         _instrument = instrument;

@@ -32,7 +32,7 @@ namespace MagSid.Editor.Avalonia;
 /// in MagSid.Editor.Views; what is here is the part MainForm does there, rebuilt in Avalonia:
 /// menus, transport, and wiring the views' events to the session and the engines.
 /// </summary>
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     private static readonly IBrush WindowBackground = new SolidColorBrush(AvColor.FromRgb(0x10, 0x10, 0x20));
     private static readonly IBrush Field = new SolidColorBrush(AvColor.FromRgb(0x1C, 0x1C, 0x30));
@@ -233,17 +233,7 @@ public sealed class MainWindow : Window
                 new Setter(HeightProperty, 22.0),
             },
         });
-        _instruments.SelectionChanged += (_, _) => ShowSelectedInstrument();
-
-        var add = new Button { Content = "+ New" };
-        add.Click += (_, _) => AddInstrument();
-        var delete = new Button { Content = "Delete" };
-        delete.Click += (_, _) => DeleteInstrument();
-        var listHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-        var listButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { add, delete } };
-        DockPanel.SetDock(listButtons, Dock.Right);
-        listHeader.Children.Add(listButtons);
-        listHeader.Children.Add(new TextBlock { Text = "Instruments", Foreground = Accent, VerticalAlignment = VerticalAlignment.Center });
+        var listHeader = BuildInstrumentListHeader();
 
         _instrumentEditor.Edited += () =>
         {
@@ -325,6 +315,9 @@ public sealed class MainWindow : Window
                 Item("Save", () => _ = SaveAsync(saveAs: false), $"{command}+S"),
                 Item("Save As...", () => _ = SaveAsync(saveAs: true), $"{command}+Shift+S"),
                 new Separator(),
+                Item("Load Instrument...", () => _ = LoadInstrumentsAsync()),
+                Item("Save Instrument...", () => _ = SaveInstrumentAsync()),
+                new Separator(),
                 Item("Export to .sid...", () => _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this), "F9"),
                 Item("Load and Play .sid...", () => new SidPlayerWindow().Show()),
                 new Separator(),
@@ -374,6 +367,7 @@ public sealed class MainWindow : Window
     private void WireEvents()
     {
         _session.StructureChanged += RefreshAll;
+        WireInstrumentList();
         _session.DirtyChanged += RefreshStatus;
         _session.HistoryChanged += RefreshStatus;
 
@@ -426,13 +420,7 @@ public sealed class MainWindow : Window
 
         _daw.InstrumentAddRequested += AddInstrument;
         _daw.InstrumentFromBankRequested += AddFromBank;
-        _daw.InstrumentSoundChangeRequested += (target, sound) =>
-        {
-            // The sound bank's swap button: the sound onto that instrument, its number kept.
-            _session.ReplaceInstrumentSound(target, sound.Instrument);
-            SelectInstrumentNumber(target.Number);
-            ShowNotice($"Instrument {target.Number:00} is now {target.Name} from the sound bank ({sound.Origin})");
-        };
+        _daw.InstrumentSoundChangeRequested += ChangeSound;
         _daw.InstrumentLoadRequested += () => _ = LoadInstrumentsAsync();
         _daw.SoundAuditionRequested += AuditionSound;
         _daw.InstrumentCopyRequested += instrument => _session.CopyInstrument(instrument);
@@ -629,16 +617,6 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void RefreshInstrumentNames()
-    {
-        int selected = Math.Max(0, _instruments.SelectedIndex);
-        _instruments.ItemsSource = _session.Song.Instruments
-            .Select(i => $"{i.Number:00}  {InstrumentNames.Display(i)}")
-            .ToList();
-        if (_session.Song.Instruments.Count > 0)
-            _instruments.SelectedIndex = Math.Min(selected, _session.Song.Instruments.Count - 1);
-    }
-
     private void ShowSelectedInstrument() => _instrumentEditor.Load(SelectedInstrument);
 
     private void RefreshStatus()
@@ -692,6 +670,8 @@ public sealed class MainWindow : Window
         SelectInstrumentNumber(added.Number);
         if (_dawShowing)
             _daw.RenameSelectedInstrument();
+        else
+            _instrumentEditor.FocusName();
     }
 
     /// <summary>A copy of one of the GM bank's sounds, as it is in the bank, added after the
