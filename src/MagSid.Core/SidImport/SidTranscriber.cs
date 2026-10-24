@@ -971,6 +971,68 @@ public static partial class SidTranscriber
 
     // ------------------------------------------------------------------------------------ check
 
+    /// <summary>Frames of the tune with a tone sounding, and how many of them the import sounds
+    /// at the same pitch.</summary>
+    public readonly record struct HeardScore(int Matched, int Total)
+    {
+        public double Share => Total == 0 ? 1 : Matched / (double)Total;
+    }
+
+    /// <summary>
+    /// How much of the tune the import sounds as the tune does, judged by ear rather than by the
+    /// importer's own reading of it: every frame in the imported stretch where a voice of the
+    /// original sounds a tone - gate on, pulse, saw or triangle - and whether the imported song's
+    /// voice sounds the same pitch then, within half a semitone, each in its own tuning. An octave
+    /// the import had to fold into C-0..B-7 counts as the same. <paramref name="imported"/> is the
+    /// imported song played through MagSID's own player from its first frame. Unlike
+    /// <see cref="Agreement"/>, which compares the importer's notes with themselves and so called
+    /// Viva Las Vegas 98% while half its notes were wrong, this one cannot agree with its own mistakes.
+    /// </summary>
+    public static HeardScore Heard(Analysis original, SidImportOptions options, Analysis imported)
+    {
+        int first = Math.Clamp(options.FirstFrame, 0, Math.Max(0, original.FrameCount - 1));
+        int count = Math.Clamp(options.FrameCount, 1, original.FrameCount - first);
+        int origin = GridOf(original, first, count, Math.Clamp(options.FramesPerRow, 1, 64),
+                            Math.Clamp(options.FunkFramesPerRow ?? options.FramesPerRow, 1, 64)).Origin;
+
+        static bool Sounds(VoiceFrame frame) =>
+            (frame.Control & 1) != 0 && Tonal(frame.Control) && frame.Frequency > 0x40;
+        static double Pitch(int frequency, double tuning) => 12 * Math.Log2(frequency / NoteFrequencies[0]) - tuning;
+
+        int total = 0;
+        for (int v = 0; v < 3; v++)
+            for (int f = first; f < first + count; f++)
+                if (Sounds(original.Voices[v][f]))
+                    total++;
+
+        // MagSID's player starts a note a frame or two into its row: the best offset is found.
+        int best = 0;
+        for (int delay = -4; delay <= 8; delay++)
+        {
+            int matched = 0;
+            for (int v = 0; v < 3; v++)
+            {
+                for (int f = first; f < first + count; f++)
+                {
+                    int g = f - origin + delay;
+                    if (g < 0 || g >= imported.FrameCount)
+                        continue;
+                    VoiceFrame want = original.Voices[v][f], got = imported.Voices[v][g];
+                    if (!Sounds(want) || !Sounds(got))
+                        continue;
+                    double d = Pitch(want.Frequency, original.Tuning) - Pitch(got.Frequency, imported.Tuning);
+                    d -= 12 * Math.Round(d / 12);
+                    if (Math.Abs(d) < 0.5)
+                        matched++;
+                }
+            }
+
+            best = Math.Max(best, matched);
+        }
+
+        return new HeardScore(best, total);
+    }
+
     /// <summary>
     /// How much of the tune the import kept: the share of the original's notes, in the imported
     /// stretch, that the imported song plays too - same voice, same note, within half a row of the

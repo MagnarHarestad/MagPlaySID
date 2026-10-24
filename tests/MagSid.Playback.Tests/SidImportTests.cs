@@ -178,6 +178,37 @@ public class SidImportTests
     }
 
     [Fact]
+    public void Heard_is_what_the_import_sounds_not_what_it_thinks()
+    {
+        // A-4 notes imported right sound right; the same song a semitone up sounds wrong on every
+        // frame, whatever notes it believes it plays.
+        var analysis = Notes(4, _ => Frequency("A-4"));
+        var options = new SidImportOptions(24, 0, analysis.FrameCount);
+        var result = SidTranscriber.Import(analysis, options);
+        var right = SidTranscriber.Heard(analysis, options, SidTranscriber.Analyze(SidImportTrace.Replay(result.Song, analysis.FrameCount)));
+        Assert.True(right.Share >= 0.9, $"{right.Share:P0}");
+
+        foreach (var pattern in result.Song.Patterns)
+            for (int r = 0; r < pattern.Rows.Count; r++)
+                if (pattern.Rows[r] is NoteRow note)
+                    pattern.Rows[r] = note with { Note = NoteName.Parse("A#4") };
+        var wrong = SidTranscriber.Heard(analysis, options, SidTranscriber.Analyze(SidImportTrace.Replay(result.Song, analysis.FrameCount)));
+        Assert.True(wrong.Share < 0.1, $"{wrong.Share:P0}");
+    }
+
+    [Fact]
+    public void The_measured_choice_keeps_a_swing_that_sounds_as_well_and_costs_less()
+    {
+        // Rows of 8 and 5 frames: one frame a row would follow them too, at about twice the bytes.
+        var analysis = Swinging(8, 5, 96);
+        var choice = SidImportChoice.Best(analysis, 0, analysis.FrameCount);
+
+        Assert.NotNull(choice);
+        Assert.Equal((8, (int?)5), (choice.Options.FramesPerRow, choice.Options.FunkFramesPerRow));
+        Assert.True(choice.Heard.Share >= 0.9, $"{choice.Heard.Share:P0}");
+    }
+
+    [Fact]
     public void A_real_vibrato_is_kept()
     {
         // A-4, wobbling a little either side every two frames after the first four.

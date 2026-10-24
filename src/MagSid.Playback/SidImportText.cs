@@ -45,12 +45,12 @@ public static class SidImportText
             : $" (the notes suggest {Frames(suggested.FramesPerRow, suggested.Funk)} frames a row)");
     }
 
-    public static string Report(SidImportReport report, double agreement, double callsPerFrame)
+    public static string Report(SidImportReport report, SidTranscriber.HeardScore heard, double callsPerFrame)
     {
         var lines = new List<string>
         {
             $"{report.Rows} rows in {report.Patterns} patterns of {report.RowsPerPattern} rows - {report.TotalBytes} bytes with the player.",
-            $"It plays {agreement:P0} of the tune's notes as the tune does: the same note, on the same voice, within half a row.",
+            $"It sounds {heard.Share:P0} of the tune as the tune does: frame by frame, the pitch each voice plays, within half a semitone.",
         };
 
         var bent = new List<string> { $"{report.NotesPlaced} notes placed" };
@@ -86,9 +86,10 @@ public static class SidImportText
         "and envelope. Notes that sound alike share one. MagSID has 16, handed out by role in turns - snare, " +
         "kick-bass, bass, lead, arpeggio - and a sound without one plays on the nearest of its own role. A tune " +
         "that swings, rows of two lengths in turn, keeps its swing as funk speed. Slides, tempo changes and a " +
-        "filter sweeping across notes come out as the nearest thing MagSID can say. The share " +
-        "of notes above is measured, not estimated: the imported song is played through MagSID's player and its " +
-        "notes compared with the tune's.";
+        "filter sweeping across notes come out as the nearest thing MagSID can say. The share above is measured, " +
+        "not estimated: the imported song is played through MagSID's player and what each voice sounds is compared " +
+        "with the tune, frame by frame. Where the import has more than one good guess - one row length or two - it " +
+        "starts from the one that sounds most of the tune.";
 
     private static string Clock(TimeSpan time) => time.TotalHours >= 1 ? time.ToString(@"h\:mm\:ss") : time.ToString(@"m\:ss");
 }
