@@ -22,6 +22,7 @@ public sealed class SidImportForm : Form
     private readonly Label _speed = new() { AutoSize = true, Margin = new Padding(6, 8, 18, 3), ForeColor = EditorPalette.Subtitle };
     private readonly CheckBox _filter = new() { Text = "Filter", Checked = true, AutoSize = true, Margin = new Padding(18, 6, 3, 3) };
     private readonly CheckBox _vibrato = new() { Text = "Vibrato", Checked = true, AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
+    private readonly CheckBox _slides = new() { Text = "Slides", Checked = true, AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
     private readonly Label _report = new() { AutoSize = true, MaximumSize = new Size(720, 0), Margin = new Padding(3, 10, 3, 3) };
     private readonly Button _import = new() { Text = "Import", DialogResult = DialogResult.OK, AutoSize = true };
 
@@ -56,7 +57,7 @@ public sealed class SidImportForm : Form
         root.Controls.Add(Heading(SidImportText.Heading(file, fileName)));
         root.Controls.Add(Row(Caption("Subtune"), _subtune, Caption($"of {Math.Max(1, file.Songs)}"),
                               Caption("From"), _from, Caption("s,"), _length, Caption("s long"), _tuneLength));
-        root.Controls.Add(Row(Caption("Frames a row"), _framesPerRow, Caption("then"), _funkFramesPerRow, _speed, _filter, _vibrato));
+        root.Controls.Add(Row(Caption("Frames a row"), _framesPerRow, Caption("then"), _funkFramesPerRow, _speed, _filter, _vibrato, _slides));
         root.Controls.Add(_report);
         root.Controls.Add(Hint(SidImportText.Hint));
         root.Controls.Add(BuildButtons());
@@ -67,6 +68,7 @@ public sealed class SidImportForm : Form
             number.ValueChanged += (_, _) => Recalculate();
         _filter.CheckedChanged += (_, _) => Recalculate();
         _vibrato.CheckedChanged += (_, _) => Recalculate();
+        _slides.CheckedChanged += (_, _) => Recalculate();
 
         Trace();
     }
@@ -117,7 +119,8 @@ public sealed class SidImportForm : Form
 
     private SidImportOptions Options(int frames) => new(
         (int)_framesPerRow.Value, (int)Math.Round(_from.Value * 50), frames, _filter.Checked, _vibrato.Checked,
-        FunkFramesPerRow: _funkFramesPerRow.Value == _framesPerRow.Value ? null : (int)_funkFramesPerRow.Value);
+        FunkFramesPerRow: _funkFramesPerRow.Value == _framesPerRow.Value ? null : (int)_funkFramesPerRow.Value,
+        Slides: _slides.Checked);
 
     private void Recalculate()
     {

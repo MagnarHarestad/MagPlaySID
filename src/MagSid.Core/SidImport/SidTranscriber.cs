@@ -14,8 +14,9 @@ public sealed record SidTrace(IReadOnlyList<(int Register, int Value)> Init, IRe
 /// <param name="Filter">Carry the filter over as filter programs.</param>
 /// <param name="Vibrato">Carry vibrato over.</param>
 /// <param name="FunkFramesPerRow">With funk speed, every second row's length; null for one speed.</param>
+/// <param name="Slides">Glides between held notes as slide rows.</param>
 public sealed record SidImportOptions(int FramesPerRow, int FirstFrame, int FrameCount, bool Filter = true, bool Vibrato = true,
-                                      int? FunkFramesPerRow = null);
+                                      int? FunkFramesPerRow = null, bool Slides = true);
 
 public sealed record SidImportReport(
     int Frames,
@@ -32,7 +33,8 @@ public sealed record SidImportReport(
     int InstrumentsMade,
     int NotesOnNearSound,
     bool UsesFilter,
-    string Roles = "");
+    string Roles = "",
+    int Slides = 0);
 
 public sealed record SidImportResult(Song Song, SidImportReport Report);
 
@@ -105,7 +107,9 @@ public static partial class SidTranscriber
     /// <param name="LegatoNext">The note after it is legato.</param>
     /// <param name="HardRestart">Where the tune's hard restart for the next note begins, if it
     /// has one - the note's own sound ends there.</param>
-    internal sealed record NoteEvent(int Voice, int Start, int End, int? GateOff, bool Legato = false, bool LegatoNext = false, int? HardRestart = null)
+    /// <param name="GlideFrom">For a legato note the pitch glided to: the frame the glide began.</param>
+    internal sealed record NoteEvent(int Voice, int Start, int End, int? GateOff, bool Legato = false, bool LegatoNext = false,
+                                     int? HardRestart = null, int? GlideFrom = null)
     {
         /// <summary>Where the note's own sound ends: its gate-off, the next note's hard restart, or
         /// the next note.</summary>
@@ -194,14 +198,16 @@ public static partial class SidTranscriber
                 // With the gate held, a pitch that moves to another note and stays is a new note.
                 int from = start;
                 bool legato = false;
-                foreach (int change in LegatoChanges(voices[v], start, off ?? hardRestart ?? end, tuning))
+                int? glide = null;
+                foreach (var (change, glideFrom) in Glides(voices[v], start, off ?? hardRestart ?? end, tuning))
                 {
-                    notes[v].Add(new NoteEvent(v, from, change, null, legato, LegatoNext: true));
+                    notes[v].Add(new NoteEvent(v, from, change, null, legato, LegatoNext: true, GlideFrom: glide));
                     from = change;
                     legato = true;
+                    glide = glideFrom;
                 }
 
-                notes[v].Add(new NoteEvent(v, from, end, off, legato, HardRestart: hardRestart));
+                notes[v].Add(new NoteEvent(v, from, end, off, legato, HardRestart: hardRestart, GlideFrom: glide));
             }
         }
 
@@ -249,20 +255,59 @@ public static partial class SidTranscriber
     /// <summary>Silent this frame: the test bit holds the oscillator, or no waveform is chosen.</summary>
     private static bool Silent(byte control) => (control & 0x08) != 0 || (control & 0xF0) == 0;
 
-    private static IEnumerable<int> LegatoChanges(VoiceFrame[] frames, int start, int end, double tuning)
-    {
-        for (int f = start + LegatoHold; f + LegatoHold <= end; f++)
-        {
-            int now = NearestNote(frames[f].Frequency, tuning);
-            int before = NearestNote(frames[f - 1].Frequency, tuning);
-            if (now < 0 || before < 0 || now == before)
-                continue;
+    /// <summary>The longest glide looked for, in frames.</summary>
+    private const int LongestGlide = 64;
 
-            bool held = true;
-            for (int k = 1; k < LegatoHold && held; k++)
-                held = NearestNote(frames[f + k].Frequency, tuning) == now && NearestNote(frames[f - 1 - k].Frequency, tuning) == before;
-            if (held)
-                yield return f;
+    /// <summary>Frames the note a glide reaches has to hold: a glide inside an instrument's own
+    /// pitch program - a zoom, a bend that settles for a moment - is no new note, and arriving held
+    /// three frames, 800 of them came out on 71 GoatTracker songs; held six, the import is right
+    /// more often than without glides at all.</summary>
+    private const int GlideArrivalHold = 6;
+
+    /// <summary>
+    /// New notes with the gate held: a pitch held <see cref="LegatoHold"/> frames that moves to
+    /// another note and holds there - at once, or gliding steadily one way, frame by frame, as
+    /// GoatTracker's tone portamento (3xx) and a player's slide do. A glide passes through the
+    /// notes between, never holding one, and was missed: the glide and the note it reached stayed
+    /// part of the note it left.
+    /// </summary>
+    private static IEnumerable<(int Change, int? GlideFrom)> Glides(VoiceFrame[] frames, int start, int end, double tuning)
+    {
+        // Runs of frames on one note, as long as a pitch must hold to be a note of its own.
+        var runs = new List<(int From, int To, int Note)>();
+        int runStart = start;
+        for (int f = start + 1; f <= end; f++)
+        {
+            if (f < end && NearestNote(frames[f].Frequency, tuning) == NearestNote(frames[runStart].Frequency, tuning))
+                continue;
+            if (f - runStart >= LegatoHold && NearestNote(frames[runStart].Frequency, tuning) >= 0)
+                runs.Add((runStart, f, NearestNote(frames[runStart].Frequency, tuning)));
+            runStart = f;
+        }
+
+        for (int i = 1; i < runs.Count; i++)
+        {
+            var (_, leftAt, before) = runs[i - 1];
+            var (arrives, _, now) = runs[i];
+            if (now == before)
+                continue;
+            if (arrives == leftAt)
+            {
+                yield return (arrives, null);
+                continue;
+            }
+
+            // Between them, every frame a step the same way - toward the new note.
+            if (arrives - leftAt > LongestGlide)
+                continue;
+            if (runs[i].To - arrives < GlideArrivalHold)
+                continue;
+            int way = Math.Sign(now - before);
+            bool steady = true;
+            for (int f = leftAt; f <= arrives && steady; f++)
+                steady = Math.Sign(frames[f].Frequency - frames[f - 1].Frequency) == way;
+            if (steady)
+                yield return (arrives, leftAt);
         }
     }
 
@@ -484,7 +529,7 @@ public static partial class SidTranscriber
         var stats = new Stats();
         var groups = new Dictionary<string, List<Sound>>();
         var usage = new Dictionary<Sound, Usage>();
-        var placed = new List<(int Voice, int Row, Sound Sound, NoteName Note, int? OffRow)>();
+        var placed = new List<(int Voice, int Row, Sound Sound, NoteName Note, int? OffRow, int? GlideRow)>();
 
         var heard = notes.SelectMany(n => n)
             .Select(note => (Note: note, Sound: SoundOf(analysis, note, options, framesPerRow, volume, out var root, stats), Root: root))
@@ -507,7 +552,8 @@ public static partial class SidTranscriber
                 stats.Moved++;
 
             int? offRow = sound.GateOffInProgram || note.GateOff is not { } off ? null : RowOf(off);
-            placed.Add((note.Voice, row, known, root, offRow));
+            int? glideRow = note.GlideFrom is { } glideFrom && options.Slides ? RowOf(glideFrom) : null;
+            placed.Add((note.Voice, row, known, root, offRow, glideRow));
 
             if (!usage.TryGetValue(known, out var used))
                 usage[known] = used = new Usage();
@@ -565,7 +611,7 @@ public static partial class SidTranscriber
             Array.Fill(rows, new HoldRow());
             for (int i = 0; i < mine.Count; i++)
             {
-                var (_, row, sound, note, offRow) = mine[i];
+                var (_, row, sound, note, offRow, glideRow) = mine[i];
                 if (row >= rowCount)
                     continue;
                 if (rows[row] is NoteRow)
@@ -576,6 +622,25 @@ public static partial class SidTranscriber
 
                 rows[row] = new NoteRow(note, NumberFor(sound));
                 stats.Placed++;
+
+                // A glide to this note: a slide row where it starts, at the rate that takes the
+                // note before to this one by this row. The player moves the pitch from a slide
+                // row's second frame on, and a note starts unslid, so the slide ends here.
+                if (glideRow is { } g && i > 0 && rows[mine[i - 1].Row] is NoteRow from)
+                {
+                    int slideRow = Math.Max(g, mine[i - 1].Row + 1);
+                    int frames = grid.FrameOf(row) - grid.FrameOf(slideRow) - 1;
+                    if (slideRow < row && frames > 0 && rows[slideRow] is HoldRow)
+                    {
+                        int rate = (int)Math.Round((Frequency(note) - Frequency(from.Note)) / (double)frames);
+                        rate = Math.Clamp(rate, SlideRow.MinRate, SlideRow.MaxRate);
+                        if (rate != 0)
+                        {
+                            rows[slideRow] = new SlideRow(rate);
+                            stats.Slides++;
+                        }
+                    }
+                }
                 if (!keptSet.Contains(sound))
                     stats.NearSound++;
 
@@ -611,7 +676,7 @@ public static partial class SidTranscriber
                     stats.Placed, stats.Moved, stats.Dropped, stats.Shifted,
                     sounds.Count, instruments.Count, stats.NearSound,
                     instruments.Any(i => i.Filter.Count > 0),
-                    DescribeRoles(kept.Select(k => roles[k]))));
+                    DescribeRoles(kept.Select(k => roles[k])), stats.Slides));
             }
         }
 
@@ -661,7 +726,7 @@ public static partial class SidTranscriber
 
     private sealed class Stats
     {
-        public int Placed, Moved, Dropped, Shifted, NearSound;
+        public int Placed, Moved, Dropped, Shifted, NearSound, Slides;
     }
 
     // ------------------------------------------------------------------------------------ sounds
@@ -1376,6 +1441,13 @@ public static partial class SidTranscriber
         }
 
         return [.. steps];
+    }
+
+    /// <summary>The 16-bit SID frequency MagSID's player sets for a note.</summary>
+    private static int Frequency(NoteName note)
+    {
+        var (lo, hi) = NotePalTable.GetFreq(note);
+        return lo | (hi << 8);
     }
 
     private static string NameFor(Sound sound, SoundRole role, List<Instrument> made)

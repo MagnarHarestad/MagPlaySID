@@ -68,6 +68,8 @@ public static class SidImportText
               $"and {report.NotesOnNearSound} notes play on the nearest of them.");
         if (report.Roles.Length > 0)
             lines.Add($"Instruments by role: {report.Roles}. Snares come first, then bass and kick-bass, then leads, then arpeggios.");
+        if (report.Slides > 0)
+            lines.Add($"{report.Slides} glides between notes come over as slide rows - the slide costs the player 71 bytes once.");
         if (report.UsesFilter)
             lines.Add("The filter comes over as filter programs, set up again by each note that uses it.");
 

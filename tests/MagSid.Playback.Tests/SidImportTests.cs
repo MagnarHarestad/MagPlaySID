@@ -101,6 +101,39 @@ public class SidImportTests
     }
 
     [Fact]
+    public void A_glide_to_a_held_note_is_a_legato_note_and_a_slide()
+    {
+        // GoatTracker's tone portamento: C-4 held, nine frames gliding steadily up, G-4 held. The
+        // glide passes E-4 and F-4 without holding them, and the whole of it stayed part of C-4.
+        int c4 = Frequency("C-4"), g4 = Frequency("G-4");
+        var frames = new List<IReadOnlyList<(int, int)>>();
+        for (int bar = 0; bar < 4; bar++)
+        {
+            for (int i = 0; i < 48; i++)
+            {
+                int f = i < 12 ? c4 : i < 21 ? c4 + (g4 - c4) * (i - 11) / 10 : g4;
+                var writes = new List<(int, int)> { (0, f & 0xFF), (1, f >> 8) };
+                if (i == 0) writes.AddRange([(5, 0x00), (6, 0xF0), (4, 0x41)]);
+                if (i == 46) writes.Add((4, 0x40));
+                frames.Add(writes);
+            }
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], frames));
+        Assert.Equal([0, 21], analysis.Notes[0].Take(2).Select(n => n.Start));
+        Assert.True(analysis.Notes[0][1].Legato);
+
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(6, 0, analysis.FrameCount));
+        var rows = result.Song.Patterns.SelectMany(p => p.Rows).ToList();
+        Assert.Contains(rows, r => r is NoteRow { Note: var n } && n.ToString() == "G-4");
+        Assert.Contains(rows, r => r is SlideRow { Rate: > 0 });
+        Assert.True(result.Report.Slides >= 1);
+
+        var off = SidTranscriber.Import(analysis, new SidImportOptions(6, 0, analysis.FrameCount, Slides: false));
+        Assert.DoesNotContain(off.Song.Patterns.SelectMany(p => p.Rows), r => r is SlideRow);
+    }
+
+    [Fact]
     public void A_hard_restart_before_the_next_note_is_not_a_note_off()
     {
         // Gate on 8 frames, off for 2 (the tune's hard restart), on again.
