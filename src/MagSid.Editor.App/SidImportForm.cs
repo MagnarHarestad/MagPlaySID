@@ -16,6 +16,9 @@ public sealed class SidImportForm : Form
     private readonly NumericUpDown _length = Seconds();
     private readonly Label _tuneLength = new() { AutoSize = true, Margin = new Padding(6, 8, 18, 3), ForeColor = EditorPalette.Subtitle };
     private readonly NumericUpDown _framesPerRow = Number(1, 32);
+
+    // Every second row's length - funk speed. The same as the first: one speed.
+    private readonly NumericUpDown _funkFramesPerRow = Number(1, 32);
     private readonly Label _speed = new() { AutoSize = true, Margin = new Padding(6, 8, 18, 3), ForeColor = EditorPalette.Subtitle };
     private readonly CheckBox _filter = new() { Text = "Filter", Checked = true, AutoSize = true, Margin = new Padding(18, 6, 3, 3) };
     private readonly CheckBox _vibrato = new() { Text = "Vibrato", Checked = true, AutoSize = true, Margin = new Padding(6, 6, 3, 3) };
@@ -23,7 +26,7 @@ public sealed class SidImportForm : Form
     private readonly Button _import = new() { Text = "Import", DialogResult = DialogResult.OK, AutoSize = true };
 
     private SidTranscriber.Analysis? _analysis;
-    private int _suggested = 6;
+    private (int FramesPerRow, int? Funk) _suggested = (6, null);
     private bool _updating;
 
     /// <summary>The song as the report describes it - set while the choices make one.</summary>
@@ -53,14 +56,14 @@ public sealed class SidImportForm : Form
         root.Controls.Add(Heading(SidImportText.Heading(file, fileName)));
         root.Controls.Add(Row(Caption("Subtune"), _subtune, Caption($"of {Math.Max(1, file.Songs)}"),
                               Caption("From"), _from, Caption("s,"), _length, Caption("s long"), _tuneLength));
-        root.Controls.Add(Row(Caption("Frames a row"), _framesPerRow, _speed, _filter, _vibrato));
+        root.Controls.Add(Row(Caption("Frames a row"), _framesPerRow, Caption("then"), _funkFramesPerRow, _speed, _filter, _vibrato));
         root.Controls.Add(_report);
         root.Controls.Add(Hint(SidImportText.Hint));
         root.Controls.Add(BuildButtons());
         Controls.Add(root);
 
         _subtune.ValueChanged += (_, _) => Trace();
-        foreach (var number in new[] { _from, _length, _framesPerRow })
+        foreach (var number in new[] { _from, _length, _framesPerRow, _funkFramesPerRow })
             number.ValueChanged += (_, _) => Recalculate();
         _filter.CheckedChanged += (_, _) => Recalculate();
         _vibrato.CheckedChanged += (_, _) => Recalculate();
@@ -78,13 +81,14 @@ public sealed class SidImportForm : Form
             int song = (int)_subtune.Value;
             var length = SidImportText.Length(_file, song);
             _analysis = SidTranscriber.Analyze(SidImportTrace.Record(_file, song, length.Frames));
-            _suggested = SidTranscriber.SuggestFramesPerRow(_analysis);
+            _suggested = SidTranscriber.SuggestGrid(_analysis);
             _tuneLength.Text = length.Describe;
 
             _updating = true;
             _from.Maximum = _length.Maximum = (decimal)(_analysis.FrameCount / 50.0);
             _from.Value = 0;
-            _framesPerRow.Value = _suggested;
+            _framesPerRow.Value = _suggested.FramesPerRow;
+            _funkFramesPerRow.Value = _suggested.Funk ?? _suggested.FramesPerRow;
             int fits = SidTranscriber.LongestThatFits(_analysis, Options(_analysis.FrameCount)) ?? _analysis.FrameCount;
             _length.Value = Math.Min(_length.Maximum, (decimal)(fits / 50.0));
             _updating = false;
@@ -107,15 +111,16 @@ public sealed class SidImportForm : Form
     }
 
     private SidImportOptions Options(int frames) => new(
-        (int)_framesPerRow.Value, (int)Math.Round(_from.Value * 50), frames, _filter.Checked, _vibrato.Checked);
+        (int)_framesPerRow.Value, (int)Math.Round(_from.Value * 50), frames, _filter.Checked, _vibrato.Checked,
+        FunkFramesPerRow: _funkFramesPerRow.Value == _framesPerRow.Value ? null : (int)_funkFramesPerRow.Value);
 
     private void Recalculate()
     {
         if (_updating || _analysis is not { } analysis)
             return;
 
-        int speed = (int)_framesPerRow.Value - 1;
-        _speed.Text = $"= speed {speed}{((int)_framesPerRow.Value == _suggested ? ", as the tune's notes suggest" : $" (the notes suggest {_suggested})")}";
+        int a = (int)_framesPerRow.Value, b = (int)_funkFramesPerRow.Value;
+        _speed.Text = SidImportText.Grid(a, a == b ? null : b, _suggested);
 
         var options = Options(Math.Max(1, (int)Math.Round(_length.Value * 50)));
         try

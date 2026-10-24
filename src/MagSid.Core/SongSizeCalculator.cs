@@ -52,6 +52,9 @@ public static class SongSizeCalculator
     /// flag and the switch has not already made every hard restart soft.</summary>
     private const int SoftHardRestartBytes = 10;
 
+    /// <summary>Funk speed's reload (lda/eor/sta/eor/sta) in place of move8's lda/sta.</summary>
+    private const int FunkBytes = 6;
+
     private const int CmdDuration = 0x80;
     private const int CmdInstrument = 0xC0;
     private const int CmdNoteOff = 0xD0;
@@ -78,6 +81,9 @@ public static class SongSizeCalculator
 
         if (!HardRestart.KeepsWaveform && song.Instruments.Any(i => i.SoftHardRestart))
             player += SoftHardRestartBytes;
+
+        if (song.HasFunk)
+            player += FunkBytes;
 
         int patternBytes = song.Patterns.Sum(p => EncodedLength(p.Rows));
 

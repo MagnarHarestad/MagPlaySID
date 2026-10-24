@@ -538,7 +538,7 @@ public sealed class TrackerGridControl : Control
     /// at one row a tick - and how far into the next, from the audio clock.</summary>
     private double RowsInto(PlaybackAnchor anchor, long currentSamples)
     {
-        double tickSeconds = _song is null ? 0.12 : Math.Max(0.02, (_song.Speed + 1) / 50.0);
+        double tickSeconds = _song is null ? 0.12 : Math.Max(0.02, _song.AverageFramesPerRow / 50.0);
         int ticks = Math.Max(1, anchor.Ticks);
         double rowSamples = tickSeconds * ticks * SongPlaybackEngine.SampleRate;
         double fraction = rowSamples > 0 ? (currentSamples - anchor.SampleIndex) / rowSamples : 1.0;

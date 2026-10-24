@@ -22,7 +22,8 @@ public static class SongImageBuilder
         var features = new PlayerFeatures(
             Vibrato: song.Instruments.Any(i => i.HasVibrato),
             Slide: Core.SongSizeCalculator.UsesSlide(song),
-            SoftHardRestart: song.Instruments.Any(i => i.SoftHardRestart));
+            SoftHardRestart: song.Instruments.Any(i => i.SoftHardRestart),
+            Funk: song.HasFunk);
 
         var notes = NoteDictionary.Build(song);
         var instrumentTables = InstrumentTables.Build(song, notes);
@@ -58,7 +59,7 @@ public static class SongImageBuilder
 
         PlayerProgram.Emit(
             asm, tables,
-            new PlayerParameters(song.Speed, order.Start1, order.Start2, order.Start3),
+            new PlayerParameters(song.Speed, order.Start1, order.Start2, order.Start3) { FunkSpeed = song.FunkSpeed ?? song.Speed },
             features, new ZeroPageLayout(features));
 
         // --- song data, in the order a real build puts it ---

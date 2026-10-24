@@ -35,6 +35,9 @@ public sealed class SongTableLabels
 /// v_ord_startN values that seed voice_orderpos.</summary>
 public sealed record PlayerParameters(int SongSpeed, int OrderStart1, int OrderStart2, int OrderStart3)
 {
+    /// <summary>v_Song_Funk: the speed every second tick has, with PlayerFeatures.Funk.</summary>
+    public int FunkSpeed { get; init; }
+
     /// <summary>v_channels. Three throughout this project; named rather than inlined because the
     /// assembly writes "ldx #v_channels-1" and reading 2 there invites the off-by-one.</summary>
     public int Channels { get; init; } = 3;
@@ -116,7 +119,7 @@ public static class PlayerProgram
         EmitVoiceAutomation(asm, tables, features, zp, voiceAutomation, voiceSetFreq, sidChannelOffset);
         EmitMusicInit(asm, parameters, zp, musicInit, voiceAdvanceOrder);
         EmitPlayerData(asm, parameters, voiceOrderPos, sidChannelOffset);
-        EmitMusicPlay(asm, tables, parameters, zp, musicPlay, voiceAutomation, voiceTick, onBeatPlaySong);
+        EmitMusicPlay(asm, tables, parameters, features, zp, musicPlay, voiceAutomation, voiceTick, onBeatPlaySong);
         EmitVoiceTick(asm, tables, features, zp, voiceTick, voicePlayCurrent, voiceAdvanceOrder);
     }
 
@@ -560,7 +563,7 @@ public static class PlayerProgram
     }
 
     private static void EmitMusicPlay(
-        Emitter6502 asm, SongTableLabels tables, PlayerParameters parameters, ZeroPageLayout zp,
+        Emitter6502 asm, SongTableLabels tables, PlayerParameters parameters, PlayerFeatures features, ZeroPageLayout zp,
         Label entry, Label voiceAutomation, Label voiceTick, Label onBeatPlaySong)
     {
         asm.Define(entry);
@@ -578,7 +581,20 @@ public static class PlayerProgram
 
         // --- ONbeat.PlaySong ---
         asm.Define(onBeatPlaySong);
-        asm.Move8(Imm(parameters.SongSpeed), Mem(zp.SongSpeed));
+        if (features.Funk)
+        {
+            // Funk speed: Song_Shuffle starts at 0 and flips with the speeds' difference every
+            // tick, so the tick lengths run v_Song_Speed, v_Song_Funk, ... - no init code needed.
+            asm.Lda(Mem(zp.SongShuffle));
+            asm.Eor(Imm(parameters.SongSpeed ^ parameters.FunkSpeed));
+            asm.Sta(Mem(zp.SongShuffle));
+            asm.Eor(Imm(parameters.FunkSpeed));
+            asm.Sta(Mem(zp.SongSpeed));
+        }
+        else
+        {
+            asm.Move8(Imm(parameters.SongSpeed), Mem(zp.SongSpeed));
+        }
 
         // Tick all channels. Filter_Play above ran by fallthrough, not a jsr, so the trailing rts
         // below is this routine's own.

@@ -62,6 +62,21 @@ public class SongImageTests
         AssertMatchesGolden(Path.Combine(FixtureDirectory, songFile), songFile, golden, 0x1000);
     }
 
+    /// <summary>No song in SongData swings either. Funk speed changes only the tick reload and adds
+    /// the shuffle byte after everything else in zero page - after the slide state too, which is
+    /// what the second fixture is for.</summary>
+    [Theory]
+    [InlineData("funk_bellaciao.s", "funk_bellaciao")]
+    [InlineData("funk_slide.s", "funk_slide")]
+    public void Whole_image_matches_for_the_funk_fixtures(string songFile, string golden)
+    {
+        AssertMatchesGolden(Path.Combine(FixtureDirectory, songFile), songFile, golden, 0x1000);
+
+        var song = LoadSong(Path.Combine(FixtureDirectory, songFile), songFile);
+        Assert.True(song.HasFunk);
+        Assert.Equal(SongSizeCalculator.Measure(song).TotalBytes, SongImageBuilder.Build(song).Length);
+    }
+
     /// <summary>Relocation on a whole real song rather than the toy program EmitterTests uses. This
     /// is what the export dialog's load-address field rests on.</summary>
     [Theory]

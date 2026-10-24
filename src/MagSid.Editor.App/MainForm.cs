@@ -52,6 +52,17 @@ public sealed class MainForm : Form
         ForeColor = EditorPalette.Body,
         BorderStyle = BorderStyle.FixedSingle,
     };
+    // Funk speed: every second row lasts this speed instead. The same value as Song Speed is no
+    // funk at all - which is what it shows, and follows the speed, until it is set to another.
+    private readonly NumericUpDown _funkSpeed = new()
+    {
+        Minimum = 0,
+        Maximum = 255,
+        Width = 50,
+        BackColor = EditorPalette.FieldBackground,
+        ForeColor = EditorPalette.Body,
+        BorderStyle = BorderStyle.FixedSingle,
+    };
     private readonly ToolStripStatusLabel _pathLabel = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly ToolStripStatusLabel _dirtyLabel = new();
     private readonly ToolStripStatusLabel _noticeLabel = new() { ForeColor = Color.FromArgb(0xC8, 0xC2, 0xF4) };
@@ -472,6 +483,10 @@ public sealed class MainForm : Form
 
         var speedHost = new ToolStripControlHost(_speed);
         toolbar.Items.Add(speedHost);
+        const string funkTip = "Funk speed: every second row lasts this speed instead - a swing, " +
+                               "as GoatTracker's funktempo. The same as Song Speed: no funk. Costs 6 bytes.";
+        toolbar.Items.Add(new ToolStripLabel("Funk:") { ToolTipText = funkTip });
+        toolbar.Items.Add(new ToolStripControlHost(_funkSpeed) { ToolTipText = funkTip });
 
         toolbar.Items.Add(new ToolStripSeparator());
         toolbar.Items.Add(_playStopButton);
@@ -935,7 +950,27 @@ public sealed class MainForm : Form
             if (_suppressSpeedEvent)
                 return;
             _session.Song.Speed = (int)_speed.Value;
+            if (_session.Song.FunkSpeed is null)
+            {
+                _suppressSpeedEvent = true;
+                _funkSpeed.Value = _speed.Value;
+                _suppressSpeedEvent = false;
+            }
+            else if (_session.Song.FunkSpeed == _session.Song.Speed)
+            {
+                _session.Song.FunkSpeed = null;
+            }
             _session.MarkDirty();
+        };
+
+        _funkSpeed.ValueChanged += (_, _) =>
+        {
+            if (_suppressSpeedEvent)
+                return;
+            int funk = (int)_funkSpeed.Value;
+            _session.Song.FunkSpeed = funk == _session.Song.Speed ? null : funk;
+            _session.MarkDirty();
+            RefreshSongLength();
         };
 
         _prevPosition.Click += (_, _) => _trackerGrid.MoveCursorRowPage(-RowsPerPage);
@@ -1292,7 +1327,7 @@ public sealed class MainForm : Form
         }
 
         // A bar is 16 rows, as the piano roll counts; a beat is 4.
-        int framesPerBeat = 4 * (song.Speed + 1);
+        int framesPerBeat = (int)Math.Round(4 * song.AverageFramesPerRow);
         int punchInFrame = punchIn?.Frame ?? 0;
         var start = _dawView.PreRollOn && punchInFrame > 0
             ? SongSequencer.PositionAtFrame(song, Math.Max(0, punchInFrame - (4 * framesPerBeat)))
@@ -1425,7 +1460,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        var preview = new Song { Speed = _session.Song.Speed };
+        var preview = new Song { Speed = _session.Song.Speed, FunkSpeed = _session.Song.FunkSpeed };
         preview.Instruments.AddRange(_session.Song.Instruments);
 
         var seenNumbers = new HashSet<int>();
@@ -1616,7 +1651,7 @@ public sealed class MainForm : Form
             // tick countdown rather than its raw row index, which jumps a note at a time. The
             // part of a frame comes from the audio clock, so the line moves between frames too.
             double subFrame = (heard - capturedAt) / SongPlaybackEngine.SamplesPerFrame;
-            int speed = _session.Song.Speed;
+            int speed = position.TickSpeed(_session.Song);
 
             var at = new (int Pattern, int Row, double Fraction, double Ticks)[3];
             for (int ch = 0; ch < 3; ch++)
@@ -1698,6 +1733,7 @@ public sealed class MainForm : Form
 
         _suppressSpeedEvent = true;
         _speed.Value = Math.Clamp(song.Speed, (int)_speed.Minimum, (int)_speed.Maximum);
+        _funkSpeed.Value = Math.Clamp(song.FunkSpeed ?? song.Speed, (int)_funkSpeed.Minimum, (int)_funkSpeed.Maximum);
         _suppressSpeedEvent = false;
 
         _instrumentList.SetInstruments(song.Instruments);

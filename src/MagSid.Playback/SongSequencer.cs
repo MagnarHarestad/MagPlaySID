@@ -35,6 +35,10 @@ public sealed class SongSequencer
 
     private int _speedCounter;
 
+    /// <summary>Song_Shuffle: with funk speed, flipped by the two speeds' difference every tick -
+    /// the tick lengths it gives are what ONbeat.PlaySong's lda/eor/sta/eor/sta gives.</summary>
+    private int _shuffle;
+
     /// <summary>Frames played since the top of the song - carried through a resume, so it counts
     /// the music rather than this sequencer's own lifetime.</summary>
     private int _frame;
@@ -93,6 +97,7 @@ public sealed class SongSequencer
         // order before the first tick (mirrors ONbeat.PlaySong's "trigger on first frame"
         // idiom via Song_Speed starting the countdown already expired).
         _speedCounter = resumeFrom?.SpeedCounter ?? -1;
+        _shuffle = resumeFrom?.Shuffle ?? 0;
         _frame = resumeFrom?.Frame ?? 0;
 
         for (int ch = 0; ch < 3; ch++)
@@ -484,7 +489,15 @@ public sealed class SongSequencer
         _speedCounter--;
         if (_speedCounter < 0)
         {
-            _speedCounter = _song.Speed;
+            if (_song.HasFunk)
+            {
+                _shuffle ^= _song.Speed ^ _song.FunkSpeed!.Value;
+                _speedCounter = _shuffle ^ _song.FunkSpeed.Value;
+            }
+            else
+            {
+                _speedCounter = _song.Speed;
+            }
 
             for (int ch = 0; ch < 3; ch++)
             {
@@ -744,7 +757,15 @@ public sealed class SongSequencer
     /// <param name="Frame">How many frames the song had played to get here, from its top - what
     /// anything that has to replay the song in step from the beginning, such as the 6502 player
     /// behind the live rastertime, needs to know.</param>
-    public sealed record SequencerPosition(int SpeedCounter, IReadOnlyList<ChannelPlaybackState> Channels, int Frame = 0);
+    /// <param name="Shuffle">Song_Shuffle at that instant - which of a funk song's two speeds the
+    /// tick in progress has.</param>
+    public sealed record SequencerPosition(int SpeedCounter, IReadOnlyList<ChannelPlaybackState> Channels, int Frame = 0, int Shuffle = 0)
+    {
+        /// <summary>The speed of the tick in progress: the song's own, or with funk speed the one
+        /// this tick was reloaded with.</summary>
+        public int TickSpeed(MagSid.Core.Model.Song song) =>
+            song.HasFunk ? Shuffle ^ song.FunkSpeed!.Value : song.Speed;
+    }
 
     /// <summary>The exact instant this sequencer is at. Taken by the playback engine once per
     /// frame so a resume can be lined up with what the listener had actually heard.</summary>
@@ -759,7 +780,7 @@ public sealed class SongSequencer
                 s.LoopStartRowIndex, s.LoopRepeatCounter, s.Duration, s.TicksIntoEntry);
         }
 
-        return new SequencerPosition(_speedCounter, channels, _frame);
+        return new SequencerPosition(_speedCounter, channels, _frame, _shuffle);
     }
 
     private sealed class ChannelState

@@ -8,7 +8,7 @@
  
  		; $00 terminates both the note stream and the song-order stream, and costs nothing
  		; to test for - the lda that fetches the byte already sets Z, so a bare beq does it.
-@@ -78,6 +79,15 @@
+@@ -78,24 +79,29 @@
  		}
  		endif
  
@@ -24,7 +24,14 @@
  		m_ZP.b "filter_pos"
  		m_ZP.b "filter_phase"
  		m_ZP.b "filter_delta"
-@@ -87,15 +97,6 @@
+ 
++		; Funk speed: the song alternates two tick lengths. music.init clears it with the rest.
++		if def v_Song_Funk
++		m_ZP.b "Song_Shuffle"
++		endif
++
+ 		m_CreateZPs "up", addr.music.zp, "Zero Page MusicPlayer"
+ 		lua asm('const ZP_Player_Start = ', ZPstart)
  		lua asm('const ZP_Player_Amount = ', ZPamount)
  
  
@@ -40,7 +47,7 @@
  
  		; --- MUSIC PLAYER LOCATION --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  		org addr.music.loc, "M_Music Player - JMPs for Init and Play"
-@@ -114,10 +115,9 @@
+@@ -114,10 +120,9 @@
  		lda voice_last_waveform,x
  		and #$fe                               ; clear gate bit only - keep the waveform-select
  		sta $d404,y                            ; bits set, or the oscillator goes instantly
@@ -54,7 +61,7 @@
  
  Voice_AdvanceOrder:
  .read:
-@@ -212,20 +212,17 @@
+@@ -212,20 +217,17 @@
  		ldy arp_start,x                        ; 0 for an instrument with no arpeggio
  		ldx ZP_ch
  		sta voice_wt_pos,x
@@ -78,7 +85,7 @@
  		sta voice_vib_cnt,x
  		lda #0
  		sta voice_vib_dir,x
-@@ -238,6 +235,9 @@
+@@ -238,6 +240,9 @@
  		sta voice_off_lo,x                     ; vibrato and slide both start from the bare note
  		sta voice_off_hi,x
  		endif
@@ -88,7 +95,7 @@
  		pla
  		tay                                    ; park pw_init while testing it - Y is free from
  		sta voice_prev_pw,x                    ; here to the end of this routine. Stashed for the
-@@ -344,17 +344,15 @@
+@@ -344,17 +349,15 @@
  		; rewrites the bare note every frame. Both move one signed 16-bit offset; slide adds
  		; slide_rate a frame, vibrato traces a triangle from vib_ds (delay/speed) and vib_depth.
  .freqmod:
@@ -113,7 +120,7 @@
  		endif
  		; offset += rate, sign-extended. None of pla/and/beq/lda touches the carry the adc
  		; produced, the same idiom the pulse-width sweep uses.
-@@ -402,8 +400,7 @@
+@@ -402,8 +405,7 @@
  		lda voice_vib_dir,x                    ; run finished: turn round and reload the speed
  		eor #$ff
  		sta voice_vib_dir,x
@@ -123,7 +130,25 @@
  		and #$0f
  		sta voice_vib_cnt,x
  		endif
-@@ -557,10 +554,11 @@
+@@ -529,7 +531,17 @@
+ 		bmi ONbeat.PlaySong
+ 		rts                                     ; between ticks: the filter already stepped above
+ ONbeat.PlaySong:
++		if def v_Song_Funk
++		; Funk speed: Song_Shuffle starts at 0 and flips with the speeds' difference every tick, so
++		; the tick lengths run v_Song_Speed, v_Song_Funk, v_Song_Speed... - no init code needed.
++		lda Song_Shuffle
++		eor #v_Song_Speed ^ v_Song_Funk
++		sta Song_Shuffle
++		eor #v_Song_Funk
++		sta Song_Speed
++		else
+ 		move8 #v_Song_Speed, Song_Speed
++		endif
+ 
+ ; Tick all channels. Filter_Play above ran by fallthrough, not a jsr, so the trailing rts
+ ; below is this routine's own.
+@@ -557,10 +569,11 @@
  		rts
  
  .fetch:
@@ -139,7 +164,7 @@
  .fetchrow:
  		ldy voice_event,x
  .nextcmd:
-@@ -572,7 +570,12 @@
+@@ -572,7 +585,12 @@
  		cmp #CMD_OFF
  		bcc .setinstrument                     ; $C0..$CF
  		cmp #LOOP_END
@@ -152,7 +177,7 @@
  		                                       ; command byte itself, which is what NOTE_OFF/ROW_WAIT
  		                                       ; are defined to be. Falls through on $D2 into .loopend,
  		                                       ; which is why that block has to stay right here.
-@@ -604,6 +607,17 @@
+@@ -604,6 +622,17 @@
  		tay                                    ; same reasoning - jump straight in with Y set
  		jmp .nextcmd
  
@@ -253,13 +278,31 @@
  end
  
  -- Song-order resolution per channel: a list of pattern numbers, optionally followed by
-@@ -1064,8 +1072,8 @@
+@@ -1053,6 +1061,7 @@
+     local f = io.open("SongData/" .. (v_songfile or "Patterns.s"), "r")
+     v_vibrato_scan = false
+     v_slide_scan = false
++    local funk = nil
+     if f then
+         local in_instruments = false
+         for line in f:lines() do
+@@ -1064,8 +1073,10 @@
                  in_instruments = false
              elseif in_instruments and t:match("^%d+%s*,") then
                  if t:upper():match(",%s*VIB%s") then v_vibrato_scan = true end
 -                if t:upper():match(",%s*SLIDE%s") then v_slide_scan = true end
              end
 +            if not in_instruments and t:match('^"[12]%x%x"') then v_slide_scan = true end
++            -- Funk speed: a second speed the ticks alternate with. Absent, the song keeps one.
++            funk = funk or t:match("^var%s+v_Song_Funk%s*=%s*(%d+)$")
          end
          f:close()
      end
+@@ -1078,4 +1089,7 @@
+     if v_vibrato_scan or v_slide_scan then
+         asm("var v_freqmod = 1")
+     end
++    if funk then
++        asm("var v_Song_Funk = " .. funk)
++    end
+ }

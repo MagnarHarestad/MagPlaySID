@@ -2758,7 +2758,7 @@ internal sealed class PianoRollView : Control
         if (_song is null || note.Row >= _slideRates.Length)
             return;
 
-        int framesPerRow = _song.Speed + 1;
+        int framesPerRow = (int)Math.Round(_song.AverageFramesPerRow);    // a funk pair drawn evenly
         var (lo, hi) = MagSid.Core.NotePalTable.GetFreq(note.Note);
         double baseFrequency = (hi << 8) | lo;
         if (baseFrequency <= 0)

@@ -74,6 +74,10 @@ public sealed class ZeroPageLayout
         FilterPhase = Scalar();
         FilterDelta = Scalar();
 
+        // Funk speed's shuffle byte, last - so a song without it keeps every address it had.
+        if (features.Funk)
+            SongShuffle = Scalar();
+
         End = _next;
     }
 
@@ -118,6 +122,10 @@ public sealed class ZeroPageLayout
     public int VoiceVibDelay { get; }
     public int VoiceSlide { get; }
 
+    /// <summary>Song_Shuffle: zero unless the song has funk speed. music.init clears it, and every
+    /// tick flips it with the two speeds' difference.</summary>
+    public int SongShuffle { get; }
+
     public int FilterPos { get; }
     public int FilterPhase { get; }
     public int FilterDelta { get; }
@@ -142,7 +150,7 @@ public sealed class ZeroPageLayout
 /// scanning the song's INSTRUMENTS block.</summary>
 /// <param name="SoftHardRestart">Some instrument has SOFTHR, so the hard restart has to look at
 /// the outgoing instrument's flag; without one the test is left out of the player.</param>
-public sealed record PlayerFeatures(bool Vibrato, bool Slide, bool SoftHardRestart = false)
+public sealed record PlayerFeatures(bool Vibrato, bool Slide, bool SoftHardRestart = false, bool Funk = false)
 {
     public static readonly PlayerFeatures None = new(false, false);
 

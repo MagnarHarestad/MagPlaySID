@@ -39,7 +39,7 @@ public static class SongPruning
             renumbered[kept[i].Number] = i + 1;
         }
 
-        var result = new Song { Speed = song.Speed };
+        var result = new Song { Speed = song.Speed, FunkSpeed = song.FunkSpeed };
 
         foreach (var instrument in song.Instruments)
         {

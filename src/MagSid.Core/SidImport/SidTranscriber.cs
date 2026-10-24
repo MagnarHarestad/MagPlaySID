@@ -13,7 +13,9 @@ public sealed record SidTrace(IReadOnlyList<(int Register, int Value)> Init, IRe
 /// <param name="FrameCount">How many frames it takes.</param>
 /// <param name="Filter">Carry the filter over as filter programs.</param>
 /// <param name="Vibrato">Carry vibrato over.</param>
-public sealed record SidImportOptions(int FramesPerRow, int FirstFrame, int FrameCount, bool Filter = true, bool Vibrato = true);
+/// <param name="FunkFramesPerRow">With funk speed, every second row's length; null for one speed.</param>
+public sealed record SidImportOptions(int FramesPerRow, int FirstFrame, int FrameCount, bool Filter = true, bool Vibrato = true,
+                                      int? FunkFramesPerRow = null);
 
 public sealed record SidImportReport(
     int Frames,
@@ -263,9 +265,47 @@ public static partial class SidTranscriber
 
     /// <summary>
     /// The row grid that puts the most note starts on a row: the longest one that still puts
-    /// nine in ten there, from the phase that fits best. A tune with swing (rows of 6 and 5 frames
-    /// in turn) has none that fits, and gets the finest that does.
+    /// nine in ten there, from the phase that fits best. A tune with swing - rows of 6 and 5 frames
+    /// in turn, GoatTracker's funktempo - fits a grid of two row lengths, which MagSID's funk
+    /// speed plays; at the same average length one row length is preferred. One that fits neither
+    /// gets the finest grid that does.
     /// </summary>
+    public static (int FramesPerRow, int? FunkFramesPerRow) SuggestGrid(Analysis analysis, int firstFrame = 0, int? frameCount = null)
+    {
+        var starts = Starts(analysis, firstFrame, frameCount ?? analysis.FrameCount - firstFrame);
+        if (starts.Count == 0)
+            return (6, null);
+
+        // A swing has to be heard often enough to be told from chance: fifteen notes that a
+        // straight 6 fits fit some pair of 18 frames as well, and EmpireApproved became 11/7.
+        bool swingShows = starts.Count >= MinStartsForFunk;
+
+        // Longest pair of rows first; at each length one row length before two. A pair has to put
+        // nine starts in ten on a row or a frame after it, not only within a frame either side:
+        // through that tolerance a straight 6 passed as 11/7 and 8/5 as 9/4. Of the pairs that
+        // fit, the one with most starts that close is the tune's.
+        for (int pair = 32; pair >= 4; pair--)
+        {
+            if (pair % 2 == 0 && pair / 2 <= 16 && BestPhase(starts, pair / 2, pair / 2).Aligned >= starts.Count * 0.9)
+                return (pair / 2, null);
+            if (!swingShows)
+                continue;
+
+            var funk = Enumerable.Range(2, pair - 3)
+                .Select(a => (A: a, B: pair - a))
+                .Where(g => g.A != g.B && g.A <= 16 && g.B <= 16 && Math.Abs(g.A - g.B) <= MaxFunkDifference)
+                .Select(g => (g.A, g.B, Fit: BestPhase(starts, g.A, g.B)))
+                .Where(g => g.Fit.Aligned >= starts.Count * 0.9 && g.Fit.Exact >= starts.Count * 0.9)
+                .OrderByDescending(g => g.Fit.Exact).ThenByDescending(g => g.A)
+                .FirstOrDefault();
+            if (funk.A != 0)
+                return (funk.A, funk.B);
+        }
+
+        return (1, null);
+    }
+
+    /// <summary>The longest single row length: <see cref="SuggestGrid"/> without funk speed.</summary>
     public static int SuggestFramesPerRow(Analysis analysis, int firstFrame = 0, int? frameCount = null)
     {
         var starts = Starts(analysis, firstFrame, frameCount ?? analysis.FrameCount - firstFrame);
@@ -274,56 +314,112 @@ public static partial class SidTranscriber
 
         for (int framesPerRow = 16; framesPerRow > 1; framesPerRow--)
         {
-            var (_, aligned) = BestPhase(starts, framesPerRow);
-            if (framesPerRow < 4 && aligned < starts.Count * 0.9)
-                continue;
-            if (aligned >= starts.Count * 0.9)
+            if (BestPhase(starts, framesPerRow, framesPerRow).Aligned >= starts.Count * 0.9)
                 return framesPerRow;
         }
 
         return 1;
     }
 
+    /// <summary>GoatTracker songs swing by a frame or a few - 6/5, 8/7, 9/6, 8/4 in Magnar's own;
+    /// a wider pair would mostly be a straight grid seen through the one-frame tolerance.</summary>
+    private const int MaxFunkDifference = 5;
+
+    /// <summary>Note starts it takes to tell a swing from chance.</summary>
+    private const int MinStartsForFunk = 64;
+
     private static List<int> Starts(Analysis analysis, int firstFrame, int frameCount) =>
         [.. analysis.Notes.SelectMany(n => n).Select(n => n.Start)
             .Where(s => s >= firstFrame && s < firstFrame + frameCount).Select(s => s - firstFrame)];
 
-    /// <summary>The phase of the grid that puts most starts on a row. From 4 frames a row up a start
-    /// a frame either side counts as on it: a player's own hard restart moves a gate-on by a frame,
-    /// depending on what played before.</summary>
-    private static (int Phase, int Aligned) BestPhase(List<int> starts, int framesPerRow)
+    /// <summary>The phase of the grid - rows of <paramref name="a"/> frames, or of a and
+    /// <paramref name="b"/> in turn - that puts most starts on a row. From 4 frames a row up a
+    /// start a frame either side counts as on it: a player's own hard restart moves a gate-on by a
+    /// frame, depending on what played before.</summary>
+    private static (int Phase, int Aligned, int Exact) BestPhase(List<int> starts, int a, int b)
     {
-        var counts = new int[framesPerRow];
+        int period = a == b ? a : a + b;
+        int[] rows = a == b ? [0] : [0, a];
+        bool tolerant = Math.Min(a, b) >= 4;
+        var counts = new int[period];
         foreach (int s in starts)
-            counts[s % framesPerRow]++;
+            counts[s % period]++;
 
-        int Near(int phase) => framesPerRow < 4
-            ? counts[phase]
-            : counts[phase] + counts[(phase + 1) % framesPerRow] + counts[(phase + framesPerRow - 1) % framesPerRow];
+        int Near(int phase) => rows.Sum(r => tolerant
+            ? counts[(phase + r) % period] + counts[(phase + r + 1) % period] + counts[(phase + r + period - 1) % period]
+            : counts[(phase + r) % period]);
+        int On(int phase) => rows.Sum(r => counts[(phase + r) % period]);
+        // On the row or a frame after it, never before: GoatTracker plays some of a row's notes a
+        // frame late - Game of Chance's every one of them on its first frame or its second.
+        int OnOrLate(int phase) => rows.Sum(r => counts[(phase + r) % period] + counts[(phase + r + 1) % period]);
 
-        int best = Enumerable.Range(0, framesPerRow).MaxBy(p => (Near(p), counts[p]));
-        return (best, Near(best));
+        // A pair's phase is the one that puts its rows at the front of those late clusters.
+        int best = a == b
+            ? Enumerable.Range(0, period).MaxBy(p => (Near(p), On(p)))
+            : Enumerable.Range(0, period).MaxBy(p => (OnOrLate(p), Near(p), On(p)));
+        return (best, Near(best), OnOrLate(best));
     }
 
-    /// <summary>The frame the song's first row is: on the grid's best phase, at the row the first
-    /// note starts on. Counted from the stretch's own start, the phase put Viva Las Vegas's first
-    /// kick, seven frames in, on the second row.</summary>
-    private static int Origin(Analysis analysis, int first, int count, int framesPerRow)
+    /// <summary>Where the song's rows fall: a row of <see cref="A"/> frames and then, with funk
+    /// speed, one of <see cref="B"/>, in turn from <see cref="Origin"/> - the first row is an A
+    /// row, as the player's first tick is v_Song_Speed's.</summary>
+    private readonly record struct RowGrid(int A, int B, int Origin)
+    {
+        public bool Funk => A != B;
+
+        public int Shortest => Math.Min(A, B);
+
+        public int FrameOf(int row) => Funk ? Origin + row / 2 * (A + B) + (row & 1) * A : Origin + row * A;
+
+        /// <summary>The row whose start is nearest the frame.</summary>
+        public int RowOf(int frame)
+        {
+            if (!Funk)
+                return (int)Math.Floor((frame - Origin) / (double)A + 0.5);
+
+            int row = 2 * (int)Math.Floor((frame - Origin) / (double)(A + B));
+            int nearest = row;
+            for (int next = row + 1; next <= row + 2; next++)
+            {
+                if (Math.Abs(FrameOf(next) - frame) <= Math.Abs(FrameOf(nearest) - frame))
+                    nearest = next;
+            }
+
+            return nearest;
+        }
+
+        /// <summary>Rows from the first until one starts at or past <paramref name="end"/>.</summary>
+        public int RowsTo(int end)
+        {
+            int rows = Funk ? 2 * Math.Max(0, (end - Origin) / (A + B)) : Math.Max(0, (end - Origin) / A);
+            while (FrameOf(rows) < end)
+                rows++;
+            return Math.Max(1, rows);
+        }
+    }
+
+    /// <summary>The song's grid: on the best phase, its first row the one the first note starts
+    /// on. Counted from the stretch's own start, the phase put Viva Las Vegas's first kick, seven
+    /// frames in, on the second row. With funk speed a first note on a B row swaps the pair, so the
+    /// song still starts on its first note, on a tick of the length it has.</summary>
+    private static RowGrid GridOf(Analysis analysis, int first, int count, int a, int b)
     {
         var starts = Starts(analysis, first, count);
-        var (phase, _) = BestPhase(starts, framesPerRow);
+        var (phase, _, _) = BestPhase(starts, a, b);
+        var grid = new RowGrid(a, b, first + phase);
         if (starts.Count == 0)
-            return first + phase;
+            return grid;
 
-        int rows = (int)Math.Floor((starts.Min() - phase) / (double)framesPerRow + 0.5);
-        return first + phase + Math.Max(0, rows) * framesPerRow;
+        int row = Math.Max(0, grid.RowOf(first + starts.Min()));
+        return grid.Funk && (row & 1) == 1
+            ? new RowGrid(b, a, grid.FrameOf(row))
+            : grid with { Origin = grid.FrameOf(row) };
     }
 
     // ------------------------------------------------------------------------------------ import
 
     public static SidImportResult Import(Analysis analysis, SidImportOptions options)
     {
-        int framesPerRow = Math.Clamp(options.FramesPerRow, 1, 64);
         int first = Math.Clamp(options.FirstFrame, 0, Math.Max(0, analysis.FrameCount - 1));
         int count = Math.Clamp(options.FrameCount, 1, analysis.FrameCount - first);
 
@@ -333,9 +429,11 @@ public static partial class SidTranscriber
         if (notes.All(n => n.Count == 0))
             throw new SidImportException("No notes start in this stretch of the tune - the gates never go on.");
 
-        int origin = Origin(analysis, first, count, framesPerRow);
-        int rowCount = Math.Max(1, (first + count - origin + framesPerRow - 1) / framesPerRow);
-        int RowOf(int frame) => (int)Math.Floor((frame - origin) / (double)framesPerRow + 0.5);
+        var grid = GridOf(analysis, first, count, Math.Clamp(options.FramesPerRow, 1, 64),
+                          Math.Clamp(options.FunkFramesPerRow ?? options.FramesPerRow, 1, 64));
+        int framesPerRow = grid.Shortest;
+        int rowCount = grid.RowsTo(first + count);
+        int RowOf(int frame) => grid.RowOf(frame);
 
         // The master volume is the song's, not a sound's: a tune that fades in sets it again on
         // every note, and as part of each filter setup it made five of every filtered sound.
@@ -363,7 +461,7 @@ public static partial class SidTranscriber
             var known = members[0];
 
             int row = Math.Max(0, RowOf(note.Start));
-            if (Math.Abs(note.Start - origin - row * framesPerRow) > (framesPerRow < 4 ? 0 : 1))
+            if (Math.Abs(note.Start - grid.FrameOf(row)) > (framesPerRow < 4 ? 0 : 1))
                 stats.Moved++;
 
             int? offRow = sound.GateOffInProgram || note.GateOff is not { } off ? null : RowOf(off);
@@ -452,7 +550,9 @@ public static partial class SidTranscriber
             if (rowsPerPattern > MaxRowsPerPattern)
                 break;
 
-            var song = MidiImporter.Build(lines, instruments, framesPerRow - 1, rowsPerPattern);
+            var song = MidiImporter.Build(lines, instruments, grid.A - 1, rowsPerPattern);
+            if (grid.Funk)
+                song.FunkSpeed = grid.B - 1;
             if (MidiImporter.Problem(song) is { } problem)
             {
                 lastProblem = problem;
@@ -463,7 +563,7 @@ public static partial class SidTranscriber
             if (best is null || size < best.Report.TotalBytes)
             {
                 best = new SidImportResult(song, new SidImportReport(
-                    count, framesPerRow, rowCount, rowsPerPattern, song.Patterns.Count, size,
+                    count, grid.A, rowCount, rowsPerPattern, song.Patterns.Count, size,
                     stats.Placed, stats.Moved, stats.Dropped, stats.Shifted,
                     sounds.Count, instruments.Count, stats.NearSound,
                     instruments.Any(i => i.Filter.Count > 0),
@@ -840,11 +940,13 @@ public static partial class SidTranscriber
     {
         int first = Math.Clamp(options.FirstFrame, 0, Math.Max(0, original.FrameCount - 1));
         int count = Math.Clamp(options.FrameCount, 1, original.FrameCount - first);
-        int tolerance = Math.Max(1, options.FramesPerRow / 2);
+        int shortest = Math.Min(options.FramesPerRow, options.FunkFramesPerRow ?? options.FramesPerRow);
+        int tolerance = Math.Max(1, shortest / 2);
 
         var want = new List<(int Voice, int Frame, int Note)>();
         var got = new List<(int Voice, int Frame, int Note)>();
-        int origin = Origin(original, first, count, Math.Clamp(options.FramesPerRow, 1, 64)) - first;
+        int origin = GridOf(original, first, count, Math.Clamp(options.FramesPerRow, 1, 64),
+                            Math.Clamp(options.FunkFramesPerRow ?? options.FramesPerRow, 1, 64)).Origin - first;
         for (int v = 0; v < 3; v++)
         {
             want.AddRange(original.Notes[v].Where(n => n.Start >= first && n.Start < first + count)

@@ -125,6 +125,12 @@ public static partial class PatternsFileReader
                     break;
 
                 case Mode.None:
+                    if (SongFunkRegex().Match(trimmed) is { Success: true } funkMatch)
+                    {
+                        song.FunkSpeed = int.Parse(funkMatch.Groups[1].Value);
+                        break;
+                    }
+
                     var speedMatch = SongSpeedRegex().Match(trimmed);
                     if (!speedMatch.Success)
                         throw Error(sourceName, lineNumber, $"Unexpected line outside any block: '{trimmed}'.");
@@ -590,6 +596,10 @@ public static partial class PatternsFileReader
 
     [GeneratedRegex(@"^var\s+v_Song_Speed\s*=\s*(\d+)$")]
     private static partial Regex SongSpeedRegex();
+
+    /// <summary>Funk speed, the second speed the ticks alternate with - see Song.FunkSpeed.</summary>
+    [GeneratedRegex(@"^var\s+v_Song_Funk\s*=\s*(\d+)$")]
+    private static partial Regex SongFunkRegex();
 
     [GeneratedRegex(@"^;\s*Instrument\s+(\d+)\s*:\s*(.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex InstrumentNameCommentRegex();

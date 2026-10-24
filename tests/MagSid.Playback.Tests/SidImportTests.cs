@@ -361,6 +361,51 @@ public class SidImportTests
         Assert.Single(result.Song.Instruments, i => i.Name == "Snare");
     }
 
+    /// <summary>Notes on every row of a grid whose rows are <paramref name="a"/> and
+    /// <paramref name="b"/> frames in turn - a different pitch each, some a frame late, as
+    /// GoatTracker plays them.</summary>
+    private static SidTranscriber.Analysis Swinging(int a, int b, int rows)
+    {
+        var frames = Enumerable.Range(0, rows / 2 * (a + b) + a).Select(_ => new List<(int, int)>()).ToList();
+        string[] tune = ["C-3", "E-3", "G-3", "C-4", "A-3", "F-3"];
+        int frame = 0;
+        for (int row = 0; row < rows; row++)
+        {
+            int at = frame + (row % 3 == 2 ? 1 : 0);
+            int f = Frequency(tune[row % tune.Length]);
+            frames[at].AddRange([(0, f & 0xFF), (1, f >> 8), (5, 0x00), (6, 0xF0), (4, 0x41)]);
+            frames[at + 3].Add((4, 0x40));
+            frame += row % 2 == 0 ? a : b;
+        }
+
+        return SidTranscriber.Analyze(new SidTrace([], [.. frames]));
+    }
+
+    [Fact]
+    public void A_tune_that_swings_is_imported_with_funk_speed()
+    {
+        // Rows of 8 and 5 frames, as Drax50yrsBday: one row length fits none of it but a frame.
+        var analysis = Swinging(8, 5, 96);
+        Assert.Equal((8, (int?)5), SidTranscriber.SuggestGrid(analysis));
+
+        var options = new SidImportOptions(8, 0, analysis.FrameCount, FunkFramesPerRow: 5);
+        var result = SidTranscriber.Import(analysis, options);
+        Assert.Equal(7, result.Song.Speed);
+        Assert.Equal(4, result.Song.FunkSpeed);
+        Assert.Equal((96, 0, 0), (result.Report.NotesPlaced, result.Report.NotesDropped, result.Report.NotesMoved));
+
+        var replayed = SidTranscriber.Analyze(SidImportTrace.Replay(result.Song, analysis.FrameCount));
+        Assert.True(SidTranscriber.Agreement(analysis, options, replayed) >= 0.95);
+    }
+
+    [Fact]
+    public void A_straight_tune_keeps_one_speed()
+    {
+        // Through a frame's tolerance a straight 6 once passed for 11/7.
+        var analysis = Swinging(6, 6, 96);
+        Assert.Equal((6, (int?)null), SidTranscriber.SuggestGrid(analysis));
+    }
+
     [Fact]
     public void The_first_note_is_on_the_first_row()
     {

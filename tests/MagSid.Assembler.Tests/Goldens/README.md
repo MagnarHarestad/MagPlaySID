@@ -56,8 +56,17 @@ before nor after that change, which went unnoticed because the tests read it onl
 `KeepsWaveform` on. It was rebuilt from the same player with its one-instruction edit, then checked
 against the emitter with `KeepsWaveform` switched on: all 25 image tests passed.
 
-`player.patch` beside this file is every change the scratch player carries - pattern slides, SOFTHR
-and the release - against commit `6221867`'s `Code/musicplayer.s` and `Startup/Tables.s` (apply with
+`funk_bellaciao.bin` and `funk_slide.bin` (and their `GateOff\` twins) were added on **2026-10-24**
+with funk speed: `var v_Song_Funk = N` beside `v_Song_Speed` makes the ticks alternate between the two
+speeds. `ONbeat.PlaySong` reloads from `lda Song_Shuffle / eor #v_Song_Speed^v_Song_Funk / sta
+Song_Shuffle / eor #v_Song_Funk / sta Song_Speed` in place of `move8 #v_Song_Speed, Song_Speed` - six
+bytes more - and `Song_Shuffle` is one zero-page byte after `filter_delta`, cleared by music.init.
+`Tables.s` emits `v_Song_Funk` from its include-time scan, as it does `v_slide`. The fixtures beside
+this folder are BellaCiao and slide_only.s with a funk speed added. Same procedure; all eleven images
+without funk speed, and the eleven in `GateOff\`, came out byte for byte as before.
+
+`player.patch` beside this file is every change the scratch player carries - pattern slides, SOFTHR,
+the release and funk speed - against commit `6221867`'s `Code/musicplayer.s` and `Startup/Tables.s` (apply with
 `patch -p0 --binary`; the sources are CRLF). Rebuilding any golden means applying it first.
 
 `opcodes.txt` is the emitter's opcode table, one `mnemonic mode hex` line each, frozen after

@@ -33,6 +33,18 @@ public static class SidImportText
         return (frames, $"(the tune plays {Clock(measured.Total)}{loop})");
     }
 
+    /// <summary>What the row grid is as the song's speed: "= speed 5", or with every second row
+    /// <paramref name="funk"/> frames long "= speed 5, funk 4" - and whether the notes suggest it.</summary>
+    public static string Grid(int framesPerRow, int? funk, (int FramesPerRow, int? Funk) suggested)
+    {
+        static string Speed(int a, int? b) => b is { } f ? $"speed {a - 1}, funk {f - 1}" : $"speed {a - 1}";
+        static string Frames(int a, int? b) => b is { } f ? $"{a}/{f}" : $"{a}";
+
+        return $"= {Speed(framesPerRow, funk)}" + ((framesPerRow, funk) == suggested
+            ? ", as the tune's notes suggest"
+            : $" (the notes suggest {Frames(suggested.FramesPerRow, suggested.Funk)} frames a row)");
+    }
+
     public static string Report(SidImportReport report, double agreement, double callsPerFrame)
     {
         var lines = new List<string>
@@ -72,8 +84,9 @@ public static class SidImportText
         "A note is a gate going on - or, with the gate held, a pitch that moves to another note and stays - and " +
         "its sound becomes an instrument: the waveform frame by frame, steps of pitch, pulse width, vibrato, filter " +
         "and envelope. Notes that sound alike share one. MagSID has 16, handed out by role in turns - snare, " +
-        "kick-bass, bass, lead, arpeggio - and a sound without one plays on the nearest of its own role. Slides, " +
-        "tempo changes and a filter sweeping across notes come out as the nearest thing MagSID can say. The share " +
+        "kick-bass, bass, lead, arpeggio - and a sound without one plays on the nearest of its own role. A tune " +
+        "that swings, rows of two lengths in turn, keeps its swing as funk speed. Slides, tempo changes and a " +
+        "filter sweeping across notes come out as the nearest thing MagSID can say. The share " +
         "of notes above is measured, not estimated: the imported song is played through MagSID's player and its " +
         "notes compared with the tune's.";
 

@@ -30,6 +30,8 @@ public static class PatternsFileWriter
         void Line(string text = "") => sb.Append(text).Append('\n');
 
         Line($"var v_Song_Speed = {song.Speed}");
+        if (song.HasFunk)
+            Line($"var v_Song_Funk = {song.FunkSpeed}");
         Line();
 
         Line("INSTRUMENTS:");

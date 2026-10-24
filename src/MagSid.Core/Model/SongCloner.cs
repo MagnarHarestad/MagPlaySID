@@ -11,7 +11,7 @@ public static class SongCloner
 {
     public static Song Clone(Song song)
     {
-        var copy = new Song { Speed = song.Speed };
+        var copy = new Song { Speed = song.Speed, FunkSpeed = song.FunkSpeed };
 
         foreach (var instrument in song.Instruments)
             copy.Instruments.Add(Clone(instrument));
