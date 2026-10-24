@@ -33,6 +33,7 @@ internal sealed class SidImportWindow : Window
     private readonly TextBlock _speed = new() { Foreground = Dim, VerticalAlignment = VerticalAlignment.Center };
     private readonly CheckBox _filter = new() { Content = "Filter", IsChecked = true };
     private readonly CheckBox _vibrato = new() { Content = "Vibrato", IsChecked = true };
+    private readonly CheckBox _slides = new() { Content = "Slides", IsChecked = true };
     private readonly TextBlock _report = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
     private readonly Button _import = new() { Content = "Import", MinWidth = 90, IsDefault = true };
 
@@ -70,7 +71,7 @@ internal sealed class SidImportWindow : Window
                 new TextBlock { Text = SidImportText.Heading(file, fileName), Foreground = Heading, TextWrapping = TextWrapping.Wrap },
                 Row(Caption("Subtune"), _subtune, Caption($"of {Math.Max(1, file.Songs)}"),
                     Caption("From"), _from, Caption("s,"), _length, Caption("s long"), _tuneLength),
-                Row(Caption("Frames a row"), _framesPerRow, Caption("then"), _funkFramesPerRow, _speed, _filter, _vibrato),
+                Row(Caption("Frames a row"), _framesPerRow, Caption("then"), _funkFramesPerRow, _speed, _filter, _vibrato, _slides),
                 _report,
                 new TextBlock
                 {
@@ -96,6 +97,7 @@ internal sealed class SidImportWindow : Window
             number.ValueChanged += (_, _) => Recalculate();
         _filter.IsCheckedChanged += (_, _) => Recalculate();
         _vibrato.IsCheckedChanged += (_, _) => Recalculate();
+        _slides.IsCheckedChanged += (_, _) => Recalculate();
 
         Trace();
     }
@@ -149,7 +151,8 @@ internal sealed class SidImportWindow : Window
     private SidImportOptions Options(int frames) => new(
         Value(_framesPerRow), (int)Math.Round((_from.Value ?? 0) * 50), frames,
         _filter.IsChecked == true, _vibrato.IsChecked == true,
-        FunkFramesPerRow: Value(_funkFramesPerRow) == Value(_framesPerRow) ? null : Value(_funkFramesPerRow));
+        FunkFramesPerRow: Value(_funkFramesPerRow) == Value(_framesPerRow) ? null : Value(_funkFramesPerRow),
+        Slides: _slides.IsChecked == true);
 
     private void Recalculate()
     {
