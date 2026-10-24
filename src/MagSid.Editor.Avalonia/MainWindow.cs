@@ -52,6 +52,10 @@ public sealed class MainWindow : Window
     private readonly Button _play = new();
     private readonly Button _chip = new();
     private readonly NumericUpDown _speed = new();
+
+    // Funk speed: every second row lasts this speed instead. The same value as Song Speed is no
+    // funk at all - which is what it shows, and follows the speed, until it is set to another.
+    private readonly NumericUpDown _funkSpeed = new();
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(15) };
 
     private ChipModel _chipModel = ChipModel.Mos6581;
@@ -142,7 +146,32 @@ public sealed class MainWindow : Window
             if (_refreshing || e.NewValue is not { } value)
                 return;
             _session.Song.Speed = (int)value;
+            if (_session.Song.FunkSpeed is null)
+            {
+                _refreshing = true;
+                _funkSpeed.Value = value;
+                _refreshing = false;
+            }
+            else if (_session.Song.FunkSpeed == _session.Song.Speed)
+            {
+                _session.Song.FunkSpeed = null;
+            }
             _session.MarkDirty();
+        };
+
+        _funkSpeed.Minimum = 0;
+        _funkSpeed.Maximum = 31;
+        _funkSpeed.Width = 110;
+        _funkSpeed.FormatString = "0";
+        ToolTip.SetTip(_funkSpeed, "Funk speed: every second row lasts this speed instead - a swing, as " +
+                                   "GoatTracker's funktempo. The same as Song Speed: no funk. Costs 6 bytes.");
+        _funkSpeed.ValueChanged += (_, e) =>
+        {
+            if (_refreshing || e.NewValue is not { } value)
+                return;
+            _session.Song.FunkSpeed = (int)value == _session.Song.Speed ? null : (int)value;
+            _session.MarkDirty();
+            RefreshStatus();
         };
 
         _editMode.VerticalAlignment = VerticalAlignment.Center;
@@ -184,6 +213,7 @@ public sealed class MainWindow : Window
             {
                 _play,
                 Label("Song Speed:"), _speed,
+                Label("Funk:"), _funkSpeed,
                 _editMode,
                 _chip,
                 _songLength,
@@ -588,6 +618,7 @@ public sealed class MainWindow : Window
             // Undo restores a whole-song snapshot, so the DAW is pointed at the new object too.
             _daw.LoadSong(_session.Song);
             _speed.Value = _session.Song.Speed;
+            _funkSpeed.Value = _session.Song.FunkSpeed ?? _session.Song.Speed;
             RefreshInstrumentNames();
             ShowSelectedInstrument();
             RefreshStatus();
@@ -942,7 +973,7 @@ public sealed class MainWindow : Window
         }
 
         // A bar is 16 rows, as the piano roll counts; a beat is 4.
-        int framesPerBeat = 4 * (song.Speed + 1);
+        int framesPerBeat = (int)Math.Round(4 * song.AverageFramesPerRow);
         int punchInFrame = punchIn?.Frame ?? 0;
         var start = _daw.PreRollOn && punchInFrame > 0
             ? SongSequencer.PositionAtFrame(song, Math.Max(0, punchInFrame - (4 * framesPerBeat)))
@@ -993,7 +1024,7 @@ public sealed class MainWindow : Window
         if (Array.TrueForAll(patterns, p => p is null))
             return;
 
-        var preview = new Song { Speed = _session.Song.Speed };
+        var preview = new Song { Speed = _session.Song.Speed, FunkSpeed = _session.Song.FunkSpeed };
         preview.Instruments.AddRange(_session.Song.Instruments);
         var seen = new HashSet<int>();
         foreach (var pattern in patterns)
@@ -1122,7 +1153,7 @@ public sealed class MainWindow : Window
                 position.Channels[0].PlayingEntry, position.Channels[1].PlayingEntry, position.Channels[2].PlayingEntry);
 
             double subFrame = (heard - capturedAt) / SongPlaybackEngine.SamplesPerFrame;
-            int speed = _session.Song.Speed;
+            int speed = position.TickSpeed(_session.Song);
 
             var at = new (int Pattern, int Row, double Fraction, double Ticks)[3];
             var lanes = new (int Entry, double Ticks)?[3];
