@@ -298,7 +298,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The instrument column's width to start with, and how narrow and wide the splitter
     /// can make it.</summary>
-    private const double InstrumentColumnWidth = 420;
+    private const double InstrumentColumnWidth = 620;
     private const double NarrowestInstrumentColumn = 260;
     private const double WidestInstrumentColumn = 900;
 
@@ -393,6 +393,12 @@ public sealed partial class MainWindow : Window
                 new Separator(),
                 // Space and F5 are a pair: one plays and stops, the other flips Edit and Jam,
                 // and which is which depends on the tracker a musician learnt on.
+                // GoatTracker's forms in the instrument editor: $80+ notes, 9x filter modes.
+                Setting("Show High Hex-Values", EditorSettings.ShowHighHex, on =>
+                {
+                    EditorSettings.ShowHighHex = on;
+                    _instrumentEditor.RefreshHighHexDisplay();
+                }),
                 Setting("Swap Spacebar Behavior", EditorSettings.SwapSpacebar, on =>
                 {
                     EditorSettings.SwapSpacebar = on;
@@ -1244,6 +1250,7 @@ public sealed partial class MainWindow : Window
         output?.Dispose();
         if (output is not null)
             StopLiveRaster();
+        _instrumentEditor.SetPlaybackCoverage(null);
 
         // A take ends with the song: a held key is let go where it got to, and the take becomes
         // one edit - one undo step.
@@ -1264,6 +1271,14 @@ public sealed partial class MainWindow : Window
 
         if (_output is { } heard && engine.PositionAt(heard.SamplesPlayed, out _) is { } position)
             ShowLiveRaster(position.Frame);
+
+        // The engine gathers which steps played frame by frame, so this poll's rate cannot miss
+        // one; the playhead is taken against the device's play position, not the sequencer's.
+        if (_output is { } playing && SelectedInstrument is { } shown)
+        {
+            engine.PlayheadAt(playing.SamplesPlayed, shown.Number, out int wave, out int arp, out int filter);
+            _instrumentEditor.SetPlaybackCoverage(engine.CoverageFor(shown.Number), wave, arp, filter);
+        }
 
         if (_dawShowing && _output is { } output)
             DrainToDaw(engine, output.SamplesPlayed);
