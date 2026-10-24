@@ -489,6 +489,7 @@ public static partial class SidTranscriber
         var heard = notes.SelectMany(n => n)
             .Select(note => (Note: note, Sound: SoundOf(analysis, note, options, framesPerRow, volume, out var root, stats), Root: root))
             .ToList();
+        heard = FixedDrums(heard);
         var relative = RelativeTransients(heard.Select(h => (h.Sound, h.Root)));
 
         foreach (var (note, heardSound, root) in heard)
@@ -756,6 +757,25 @@ public static partial class SidTranscriber
         }
 
         /// <summary>The same sound playing only the row's note.</summary>
+        /// <summary>The same sound with another note program.</summary>
+        public Sound WithProgram(NoteName[]? notes, ArpeggioEnding ending, int loopPoint) => new()
+        {
+            AttackDecay = AttackDecay,
+            SustainRelease = SustainRelease,
+            Controls = Controls,
+            Notes = notes,
+            Ending = ending,
+            LoopPoint = loopPoint,
+            PulseWidth = PulseWidth,
+            PulseSweep = PulseSweep,
+            VibratoDelaySpeed = VibratoDelaySpeed,
+            VibratoDepth = VibratoDepth,
+            Filter = Filter,
+            GateOffInProgram = GateOffInProgram,
+            NoHardRestart = NoHardRestart,
+            Uses = Uses,
+        };
+
         public Sound WithoutNotes() => new()
         {
             AttackDecay = AttackDecay,
@@ -805,6 +825,47 @@ public static partial class SidTranscriber
             instrument.Filter.AddRange(Filter);
             return instrument;
         }
+    }
+
+    /// <summary>
+    /// Drums on fixed notes: a family - one waveform program and envelope - whose every note runs
+    /// the same steps of pitch, a note cut short by the next one only stopping sooner. GoatTracker
+    /// writes such a kick on any note, and it sounds the same on all of them; read note by note,
+    /// a cut one took its row note from whichever step it ended on, and We-Come-in-Peace's kick
+    /// came out on E-3 one time and A#1 the next. Every note of the family gets the longest
+    /// one's program and row note. A family whose steps move with the note is left as it is.
+    /// </summary>
+    private static List<(NoteEvent Note, Sound Sound, NoteName Root)> FixedDrums(List<(NoteEvent Note, Sound Sound, NoteName Root)> heard)
+    {
+        // The pitch a note's program plays frame by frame: its steps, then the row note.
+        static int[] Steps(Sound sound, NoteName root) =>
+            [.. sound.Notes!.Select(n => n.TableIndex), .. sound.Ending == ArpeggioEnding.Root ? new[] { root.TableIndex } : []];
+
+        var replace = new Dictionary<int, (Sound Sound, NoteName Root)>();
+        foreach (var family in Enumerable.Range(0, heard.Count)
+                     .Where(i => heard[i].Sound.Notes is { Length: >= 2 })
+                     .GroupBy(i => FamilyOf(heard[i].Sound)))
+        {
+            var members = family.ToList();
+            if (members.Select(i => heard[i].Root).Distinct().Count() < 2)
+                continue;
+
+            int longest = members.MaxBy(i => Steps(heard[i].Sound, heard[i].Root).Length);
+            var full = Steps(heard[longest].Sound, heard[longest].Root);
+            bool fixedNotes = members.All(i =>
+            {
+                var steps = Steps(heard[i].Sound, heard[i].Root);
+                return steps.Length <= full.Length && steps.Zip(full).All(pair => pair.First == pair.Second);
+            });
+            if (!fixedNotes)
+                continue;
+
+            foreach (int i in members)
+                replace[i] = (heard[i].Sound.WithProgram(heard[longest].Sound.Notes, heard[longest].Sound.Ending,
+                                                         heard[longest].Sound.LoopPoint), heard[longest].Root);
+        }
+
+        return [.. heard.Select((h, i) => replace.TryGetValue(i, out var r) ? (h.Note, r.Sound, r.Root) : h)];
     }
 
     /// <summary>

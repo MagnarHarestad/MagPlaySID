@@ -354,6 +354,39 @@ public class SidImportTests
     }
 
     [Fact]
+    public void A_kick_on_fixed_notes_keeps_one_row_note_when_a_note_is_cut_short()
+    {
+        // We-Come-in-Peace's kick: noise at C-6, then fixed notes falling to A#1 - the same on
+        // every note. Cut after six frames by the next kick, a note's longest step was E-3 or
+        // G#2 instead, and it was written on that.
+        string[] kick = ["C-6", "E-3", "E-3", "G#2", "G#2", "A#1", "A#1", "A#1", "A#1", "A#1", "A#1", "A#1", "A#1", "A#1"];
+        var frames = Enumerable.Range(0, 8 * 24).Select(_ => new List<(int, int)>()).ToList();
+        for (int bar = 0; bar < 8; bar++)
+        {
+            // One kick of five frames and a frame of hard restart, then one of all fourteen.
+            foreach (var (start, length) in new[] { (bar * 24, 5), (bar * 24 + 6, kick.Length) })
+            {
+                for (int i = 0; i < length; i++)
+                {
+                    int f = Frequency(kick[i]);
+                    frames[start + i].AddRange([(0, f & 0xFF), (1, f >> 8), (4, i == 0 ? 0x81 : 0x41)]);
+                    if (i == 0)
+                        frames[start].AddRange([(5, 0x00), (6, 0xA9)]);
+                }
+
+                frames[start + length].Add((4, 0x40));
+            }
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], [.. frames]));
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(6, 0, analysis.FrameCount));
+
+        var notes = result.Song.Patterns.SelectMany(p => p.Rows).OfType<NoteRow>().Select(r => r.Note.ToString()).Distinct();
+        Assert.Equal(["A#1"], notes);
+        Assert.Single(result.Song.Instruments);
+    }
+
+    [Fact]
     public void A_noise_strike_falling_to_a_low_root_is_a_kick_bass()
     {
         var result = Tune(4, (0, row => row % 4 == 0 ? Frequency(row % 8 == 0 ? "C-2" : "G-1") : null,
