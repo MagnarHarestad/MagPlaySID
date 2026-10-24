@@ -169,6 +169,9 @@ public static partial class SidTranscriber
             global[f] = new GlobalFrame((registers[0x15] & 7) | (registers[0x16] << 3), registers[0x17], registers[0x18]);
         }
 
+        for (int v = 0; v < 3; v++)
+            rises[v] = [.. rises[v].Concat(Retriggers(voices[v], rises[v])).Distinct().Order()];
+
         double tuning = TuningOf(voices);
         var notes = new List<NoteEvent>[3];
         for (int v = 0; v < 3; v++)
@@ -260,6 +263,44 @@ public static partial class SidTranscriber
                 held = NearestNote(frames[f + k].Frequency, tuning) == now && NearestNote(frames[f - 1 - k].Frequency, tuning) == before;
             if (held)
                 yield return f;
+        }
+    }
+
+    /// <summary>
+    /// Notes a player starts without touching the gate: the gate stays on, the voice goes silent
+    /// for a frame or more - the test bit, or no waveform - and sounds again on another pitch.
+    /// SIDdump counts a note there; Laxity's player plays its notes so. On the same pitch it is a
+    /// drum resetting its noise with the test bit, and stays one note. The note starts on its
+    /// first silent frame, as a gated one does on the frame its hard restart's test bit is written.
+    /// Measured over 202 tunes: Laxity's Hawalt +5.9 points of pitch heard, the mean unchanged.
+    /// </summary>
+    private static IEnumerable<int> Retriggers(VoiceFrame[] frames, List<int> rises)
+    {
+        bool sounding = false;
+        int silentFrom = -1;
+        for (int f = 0; f < frames.Length; f++)
+        {
+            var frame = frames[f];
+            bool gate = (frame.Control & 1) != 0;
+            if (!gate)
+            {
+                sounding = false;
+                silentFrom = -1;
+                continue;
+            }
+
+            if (Silent(frame.Control))
+            {
+                if (sounding && silentFrom < 0)
+                    silentFrom = f;
+                continue;
+            }
+
+            if (silentFrom >= 0 && !rises.Any(r => r >= silentFrom && r <= f)
+                && frames[f].Frequency != frames[silentFrom - 1].Frequency)
+                yield return silentFrom;
+            silentFrom = -1;
+            sounding = true;
         }
     }
 

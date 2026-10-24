@@ -65,6 +65,41 @@ public class SidImportTests
         Assert.Contains(result.Song.Instruments, i => i.NoHardRestart);
     }
 
+    /// <summary>One voice with the gate on throughout: C-4 for 10 frames, a frame with the test bit,
+    /// then <paramref name="after"/> for 10 - as Laxity's player starts a note without the gate.</summary>
+    private static SidTranscriber.Analysis HeldThroughATestBit(string after)
+    {
+        var frames = new List<IReadOnlyList<(int, int)>>();
+        for (int i = 0; i < 21; i++)
+        {
+            var (lo, hi) = MagSid.Core.NotePalTable.GetFreq(NoteName.Parse(i < 11 ? "C-4" : after));
+            var writes = new List<(int, int)> { (0, lo), (1, hi), (5, 0x00), (6, 0xF0) };
+            if (i == 0) writes.Add((4, 0x41));
+            if (i == 10) writes.Add((4, 0x49));
+            if (i == 11) writes.Add((4, 0x41));
+            frames.Add(writes);
+        }
+
+        return SidTranscriber.Analyze(new SidTrace([], frames));
+    }
+
+    [Fact]
+    public void A_note_restarted_with_the_test_bit_and_the_gate_held_is_a_new_note()
+    {
+        var analysis = HeldThroughATestBit("G-4");
+
+        Assert.Equal([0, 10], analysis.Notes[0].Select(n => n.Start));
+    }
+
+    [Fact]
+    public void A_test_bit_on_the_same_pitch_is_no_new_note()
+    {
+        // A drum resetting its noise: the pitch goes on where it was.
+        var analysis = HeldThroughATestBit("C-4");
+
+        Assert.Single(analysis.Notes[0]);
+    }
+
     [Fact]
     public void A_hard_restart_before_the_next_note_is_not_a_note_off()
     {
