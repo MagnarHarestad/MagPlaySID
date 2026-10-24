@@ -108,8 +108,10 @@ public static partial class SidTranscriber
     /// <param name="HardRestart">Where the tune's hard restart for the next note begins, if it
     /// has one - the note's own sound ends there.</param>
     /// <param name="GlideFrom">For a legato note the pitch glided to: the frame the glide began.</param>
+    /// <param name="Restrike">A gate-on that may be the note before striking again in its own
+    /// program - see <see cref="Restrikes"/>.</param>
     internal sealed record NoteEvent(int Voice, int Start, int End, int? GateOff, bool Legato = false, bool LegatoNext = false,
-                                     int? HardRestart = null, int? GlideFrom = null)
+                                     int? HardRestart = null, int? GlideFrom = null, bool Restrike = false)
     {
         /// <summary>Where the note's own sound ends: its gate-off, the next note's hard restart, or
         /// the next note.</summary>
@@ -181,6 +183,7 @@ public static partial class SidTranscriber
         for (int v = 0; v < 3; v++)
         {
             notes[v] = [];
+            var restrikes = Restrikes(voices[v], rises[v], falls[v]);
             for (int i = 0; i < rises[v].Count; i++)
             {
                 int start = rises[v][i];
@@ -201,13 +204,15 @@ public static partial class SidTranscriber
                 int? glide = null;
                 foreach (var (change, glideFrom) in Glides(voices[v], start, off ?? hardRestart ?? end, tuning))
                 {
-                    notes[v].Add(new NoteEvent(v, from, change, null, legato, LegatoNext: true, GlideFrom: glide));
+                    notes[v].Add(new NoteEvent(v, from, change, null, legato, LegatoNext: true, GlideFrom: glide,
+                                               Restrike: !legato && restrikes.Contains(start)));
                     from = change;
                     legato = true;
                     glide = glideFrom;
                 }
 
-                notes[v].Add(new NoteEvent(v, from, end, off, legato, HardRestart: hardRestart, GlideFrom: glide));
+                notes[v].Add(new NoteEvent(v, from, end, off, legato, HardRestart: hardRestart, GlideFrom: glide,
+                                           Restrike: !legato && restrikes.Contains(start)));
             }
         }
 
@@ -254,6 +259,70 @@ public static partial class SidTranscriber
 
     /// <summary>Silent this frame: the test bit holds the oscillator, or no waveform is chosen.</summary>
     private static bool Silent(byte control) => (control & 0x08) != 0 || (control & 0xF0) == 0;
+
+    /// <summary>Frames a strike inside a program holds the gate on, and then off.</summary>
+    private const int RestrikeFrames = 2;
+
+    /// <summary>
+    /// Gate-ons that can be the note before striking again: its gate on a frame or two, then off
+    /// as briefly with the waveform running and the envelope as it was - no hard restart, which
+    /// sets the test bit or the envelope. Parrot Disco's chord strikes twice in its wavetable;
+    /// GoatTracker's gate timer lets the second through only on its 8-frame rows, three frames in,
+    /// where no grid has a row. A strike that is on a row stays a note: rows of two or three
+    /// frames play real notes that close.
+    /// </summary>
+    private static HashSet<int> Restrikes(VoiceFrame[] frames, List<int> rises, List<int> falls)
+    {
+        var found = new HashSet<int>();
+        int next = 0;
+        for (int i = 1; i < rises.Count; i++)
+        {
+            int before = rises[i - 1], rise = rises[i];
+            while (next < falls.Count && falls[next] <= before)
+                next++;
+            if (found.Contains(before) || next >= falls.Count || falls[next] >= rise)
+                continue;
+            int fall = falls[next];
+            if (fall - before > RestrikeFrames || rise - fall > RestrikeFrames
+                || (next + 1 < falls.Count && falls[next + 1] < rise))
+                continue;
+
+            var struck = frames[before];
+            bool Same(VoiceFrame f) => f.AttackDecay == struck.AttackDecay && f.SustainRelease == struck.SustainRelease;
+            if (Enumerable.Range(fall, rise - fall).All(f => !Silent(frames[f].Control) && Same(frames[f])) && Same(frames[rise]))
+                found.Add(rise);
+        }
+
+        return found;
+    }
+
+    /// <summary>The voice's notes on the grid: a strike inside the program before that falls
+    /// between rows is part of that note. Its first gate-off puts the gate into the wavetable,
+    /// which plays the off and the on again as they are.</summary>
+    private static List<NoteEvent> WithoutRestrikes(List<NoteEvent> notes, RowGrid grid)
+    {
+        int tolerance = grid.Shortest < 4 ? 0 : 1;
+        var kept = new List<NoteEvent>();
+        foreach (var note in notes)
+        {
+            if (note.Restrike && kept.Count > 0 && Math.Abs(note.Start - grid.FrameOf(grid.RowOf(note.Start))) > tolerance)
+            {
+                var struck = kept[^1];
+                kept[^1] = struck with
+                {
+                    End = note.End,
+                    GateOff = struck.GateOff ?? struck.HardRestart,
+                    HardRestart = note.HardRestart,
+                    LegatoNext = note.LegatoNext,
+                };
+                continue;
+            }
+
+            kept.Add(note);
+        }
+
+        return kept;
+    }
 
     /// <summary>The longest glide looked for, in frames.</summary>
     private const int LongestGlide = 64;
@@ -356,11 +425,21 @@ public static partial class SidTranscriber
     /// speed plays; at the same average length one row length is preferred. One that fits neither
     /// gets the finest grid that does.
     /// </summary>
-    public static (int FramesPerRow, int? FunkFramesPerRow) SuggestGrid(Analysis analysis, int firstFrame = 0, int? frameCount = null)
+    /// <param name="restrikes">False looks for the grid without the gate-ons that may be a strike
+    /// inside the note before's program; Import folds those that fall between its rows.</param>
+    public static (int FramesPerRow, int? FunkFramesPerRow) SuggestGrid(Analysis analysis, int firstFrame = 0, int? frameCount = null,
+                                                                        bool restrikes = true)
     {
-        var starts = Starts(analysis, firstFrame, frameCount ?? analysis.FrameCount - firstFrame);
+        var starts = Starts(analysis, firstFrame, frameCount ?? analysis.FrameCount - firstFrame, restrikes);
         if (starts.Count == 0)
             return (6, null);
+        return GridFitting(starts) ?? (1, null);
+    }
+
+    private static (int FramesPerRow, int? FunkFramesPerRow)? GridFitting(List<int> starts)
+    {
+        if (starts.Count == 0)
+            return null;
 
         // A swing has to be heard often enough to be told from chance: fifteen notes that a
         // straight 6 fits fit some pair of 18 frames as well, and EmpireApproved became 11/7.
@@ -369,7 +448,7 @@ public static partial class SidTranscriber
         // Longest pair of rows first; at each length one row length before two. A pair has to put
         // nine starts in ten on a row or a frame after it, not only within a frame either side:
         // through that tolerance a straight 6 passed as 11/7 and 8/5 as 9/4. Of the pairs that
-        // fit, the one with most starts that close is the tune's.
+        // fit, the one with most starts that close is the tune's, and then most on the row itself.
         for (int pair = 32; pair >= 4; pair--)
         {
             if (pair % 2 == 0 && pair / 2 <= 16 && BestPhase(starts, pair / 2, pair / 2).Aligned >= starts.Count * 0.9)
@@ -382,19 +461,19 @@ public static partial class SidTranscriber
                 .Where(g => g.A != g.B && g.A <= 16 && g.B <= 16 && Math.Abs(g.A - g.B) <= MaxFunkDifference)
                 .Select(g => (g.A, g.B, Fit: BestPhase(starts, g.A, g.B)))
                 .Where(g => g.Fit.Aligned >= starts.Count * 0.9 && g.Fit.Exact >= starts.Count * 0.9)
-                .OrderByDescending(g => g.Fit.Exact).ThenByDescending(g => g.A)
+                .OrderByDescending(g => g.Fit.Exact).ThenByDescending(g => g.Fit.On).ThenByDescending(g => g.A)
                 .FirstOrDefault();
             if (funk.A != 0)
                 return (funk.A, funk.B);
         }
 
-        return (1, null);
+        return null;
     }
 
     /// <summary>The longest single row length: <see cref="SuggestGrid"/> without funk speed.</summary>
-    public static int SuggestFramesPerRow(Analysis analysis, int firstFrame = 0, int? frameCount = null)
+    public static int SuggestFramesPerRow(Analysis analysis, int firstFrame = 0, int? frameCount = null, bool restrikes = true)
     {
-        var starts = Starts(analysis, firstFrame, frameCount ?? analysis.FrameCount - firstFrame);
+        var starts = Starts(analysis, firstFrame, frameCount ?? analysis.FrameCount - firstFrame, restrikes);
         if (starts.Count == 0)
             return 6;
 
@@ -414,15 +493,15 @@ public static partial class SidTranscriber
     /// <summary>Note starts it takes to tell a swing from chance.</summary>
     private const int MinStartsForFunk = 64;
 
-    private static List<int> Starts(Analysis analysis, int firstFrame, int frameCount) =>
-        [.. analysis.Notes.SelectMany(n => n).Select(n => n.Start)
+    private static List<int> Starts(Analysis analysis, int firstFrame, int frameCount, bool restrikes = true) =>
+        [.. analysis.Notes.SelectMany(n => n).Where(n => restrikes || !n.Restrike).Select(n => n.Start)
             .Where(s => s >= firstFrame && s < firstFrame + frameCount).Select(s => s - firstFrame)];
 
     /// <summary>The phase of the grid - rows of <paramref name="a"/> frames, or of a and
     /// <paramref name="b"/> in turn - that puts most starts on a row. From 4 frames a row up a
     /// start a frame either side counts as on it: a player's own hard restart moves a gate-on by a
     /// frame, depending on what played before.</summary>
-    private static (int Phase, int Aligned, int Exact) BestPhase(List<int> starts, int a, int b)
+    private static (int Phase, int Aligned, int Exact, int On) BestPhase(List<int> starts, int a, int b)
     {
         int period = a == b ? a : a + b;
         int[] rows = a == b ? [0] : [0, a];
@@ -443,7 +522,7 @@ public static partial class SidTranscriber
         int best = a == b
             ? Enumerable.Range(0, period).MaxBy(p => (Near(p), On(p)))
             : Enumerable.Range(0, period).MaxBy(p => (OnOrLate(p), Near(p), On(p)));
-        return (best, Near(best), OnOrLate(best));
+        return (best, Near(best), OnOrLate(best), On(best));
     }
 
     /// <summary>Where the song's rows fall: a row of <see cref="A"/> frames and then, with funk
@@ -491,7 +570,7 @@ public static partial class SidTranscriber
     private static RowGrid GridOf(Analysis analysis, int first, int count, int a, int b)
     {
         var starts = Starts(analysis, first, count);
-        var (phase, _, _) = BestPhase(starts, a, b);
+        var (phase, _, _, _) = BestPhase(starts, a, b);
         var grid = new RowGrid(a, b, first + phase);
         if (starts.Count == 0)
             return grid;
@@ -517,6 +596,7 @@ public static partial class SidTranscriber
 
         var grid = GridOf(analysis, first, count, Math.Clamp(options.FramesPerRow, 1, 64),
                           Math.Clamp(options.FunkFramesPerRow ?? options.FramesPerRow, 1, 64));
+        notes = [.. notes.Select(voice => WithoutRestrikes(voice, grid))];
         int framesPerRow = grid.Shortest;
         int rowCount = grid.RowsTo(first + count);
         int RowOf(int frame) => grid.RowOf(frame);

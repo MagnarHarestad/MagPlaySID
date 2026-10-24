@@ -13,13 +13,20 @@ public static class SidImportChoice
     public sealed record Choice(SidImportOptions Options, SidImportResult Result, SidTranscriber.HeardScore Heard);
 
     /// <summary>The row grids worth trying for a stretch: the one the note starts suggest -
-    /// two row lengths with funk speed - and the longest single row length that fits them.</summary>
+    /// two row lengths with funk speed - and the longest single row length that fits them; and
+    /// both again without the gate-ons that may be an instrument striking twice, which a grid
+    /// that fits only without them folds into their notes.</summary>
     public static IReadOnlyList<(int FramesPerRow, int? Funk)> Grids(SidTranscriber.Analysis analysis, int firstFrame, int frameCount)
     {
-        var grids = new List<(int, int?)> { SidTranscriber.SuggestGrid(analysis, firstFrame, frameCount) };
-        var straight = (SidTranscriber.SuggestFramesPerRow(analysis, firstFrame, frameCount), (int?)null);
-        if (!grids.Contains(straight))
-            grids.Add(straight);
+        var grids = new List<(int, int?)>();
+        foreach (bool restrikes in new[] { true, false })
+        {
+            var suggested = SidTranscriber.SuggestGrid(analysis, firstFrame, frameCount, restrikes);
+            var straight = (SidTranscriber.SuggestFramesPerRow(analysis, firstFrame, frameCount, restrikes), (int?)null);
+            foreach (var grid in new[] { suggested, straight })
+                if (!grids.Contains(grid))
+                    grids.Add(grid);
+        }
         return grids;
     }
 

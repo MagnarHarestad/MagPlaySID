@@ -134,6 +134,38 @@ public class SidImportTests
     }
 
     [Fact]
+    public void An_instrument_striking_twice_is_one_note_on_its_swing()
+    {
+        // Parrot Disco: rows of 8 and 5 frames, a chord whose wavetable gates on, off a frame, on
+        // again. GoatTracker's gate timer lets the second strike through on the 8-frame rows only,
+        // three frames in - where no grid has a row, so the tune came in at one frame a row.
+        string[] chords = ["C-4", "E-4", "G-4", "A-3"];
+        var frames = new List<IReadOnlyList<(int, int)>>();
+        for (int row = 0; row < 80; row++)
+        {
+            int length = row % 2 == 0 ? 8 : 5, f = Frequency(chords[row / 2 % chords.Length]);
+            for (int i = 0; i < length; i++)
+            {
+                var writes = new List<(int, int)>();
+                if (row == 0 && i == 0) writes.AddRange([(5, 0x00), (6, 0xA5)]);
+                if (i == 0) writes.AddRange([(0, f & 0xFF), (1, f >> 8)]);
+                writes.Add((4, i == length - 1 ? 0x08 : i == 0 ? 0x11 : i == 1 ? 0x14 : i == 2 && length == 8 ? 0x11 : 0x10));
+                frames.Add(writes);
+            }
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], frames));
+        Assert.Equal(40, analysis.Notes[0].Count(n => n.Restrike));
+        Assert.Equal((1, (int?)null), SidTranscriber.SuggestGrid(analysis));
+        Assert.Contains((8, (int?)5), SidImportChoice.Grids(analysis, 0, analysis.FrameCount));
+
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(8, 0, analysis.FrameCount, FunkFramesPerRow: 5));
+        Assert.Equal(80, result.Report.NotesPlaced);
+        Assert.Equal(0, result.Report.NotesMoved);
+        Assert.Contains(result.Song.Instruments, i => i.Wavetable.Take(3).SequenceEqual(new byte[] { 0x11, 0x14, 0x11 }));
+    }
+
+    [Fact]
     public void A_hard_restart_before_the_next_note_is_not_a_note_off()
     {
         // Gate on 8 frames, off for 2 (the tune's hard restart), on again.
