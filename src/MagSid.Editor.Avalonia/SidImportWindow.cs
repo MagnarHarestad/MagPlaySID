@@ -110,8 +110,13 @@ internal sealed class SidImportWindow : Window
             int song = (int)(_subtune.Value ?? 1);
             var length = SidImportText.Length(_file, song);
             _analysis = SidTranscriber.Analyze(SidImportTrace.Record(_file, song, length.Frames));
-            _suggested = SidTranscriber.SuggestGrid(_analysis);
             _tuneLength.Text = length.Describe;
+
+            // The grid that sounds most of the tune, of those the note starts suggest.
+            var best = SidImportChoice.Best(_analysis, 0, _analysis.FrameCount);
+            _suggested = best is null
+                ? SidTranscriber.SuggestGrid(_analysis)
+                : (best.Options.FramesPerRow, best.Options.FunkFramesPerRow);
 
             decimal seconds = (decimal)(_analysis.FrameCount / 50.0);
             _from.Maximum = seconds;
@@ -119,7 +124,7 @@ internal sealed class SidImportWindow : Window
             _from.Value = 0;
             _framesPerRow.Value = _suggested.FramesPerRow;
             _funkFramesPerRow.Value = _suggested.Funk ?? _suggested.FramesPerRow;
-            int fits = SidTranscriber.LongestThatFits(_analysis, Options(_analysis.FrameCount)) ?? _analysis.FrameCount;
+            int fits = best?.Options.FrameCount ?? _analysis.FrameCount;
             _length.Value = Math.Min(seconds, (decimal)(fits / 50.0));
         }
         catch (Exception ex) when (ex is SidPlaybackException or InvalidOperationException)
@@ -159,8 +164,8 @@ internal sealed class SidImportWindow : Window
         {
             Result = SidTranscriber.Import(analysis, options);
             var replayed = SidTranscriber.Analyze(SidImportTrace.Replay(Result.Song, Result.Report.Frames));
-            double agreement = SidTranscriber.Agreement(analysis, options, replayed);
-            _report.Text = SidImportText.Report(Result.Report, agreement, SidImportTrace.CallsPerFrame(_file, Value(_subtune)));
+            var heard = SidTranscriber.Heard(analysis, options, replayed);
+            _report.Text = SidImportText.Report(Result.Report, heard, SidImportTrace.CallsPerFrame(_file, Value(_subtune)));
             _report.Foreground = Body;
             _import.IsEnabled = true;
         }
