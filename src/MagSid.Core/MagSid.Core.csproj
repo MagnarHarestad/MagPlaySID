@@ -9,6 +9,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="MagSid.Core.Tests" />
     <InternalsVisibleTo Include="MagSid.Playback.Tests" />
+    <InternalsVisibleTo Include="ImportBench" />
   </ItemGroup>
 
   <ItemGroup>

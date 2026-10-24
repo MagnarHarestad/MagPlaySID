@@ -22,3 +22,7 @@ desktop.ini
 # default one.
 publish-latest/
 /out/
+
+# Import SID benchmark: the song lists name local files, and the results are per machine.
+tools/ImportBench/lists/
+tools/ImportBench/results/
