@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window
     private static readonly FontFamily Mono = new("Consolas, Menlo, DejaVu Sans Mono, monospace");
 
     private readonly EditorSession _session = new();
+    private readonly AutosaveManager _autosave;
     private readonly TrackerGridControl _grid = new();
     private readonly DawView _daw = new();
     private readonly ListBox _instruments = new();
@@ -95,6 +96,7 @@ public sealed partial class MainWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         Content = BuildLayout();
+        _autosave = new AutosaveManager(_session);
         WireEvents();
         RefreshAll();
 
@@ -110,6 +112,7 @@ public sealed partial class MainWindow : Window
             StopPatternPreview();
             _jam?.Dispose();
             _midi?.Dispose();
+            _autosave.Dispose();
         };
 
         Opened += (_, _) =>
@@ -203,6 +206,9 @@ public sealed partial class MainWindow : Window
         _songLength.VerticalAlignment = VerticalAlignment.Center;
         _songLength.Foreground = Dim;
         _songLength.FontFamily = Mono;
+        _rasterTime.VerticalAlignment = VerticalAlignment.Center;
+        _rasterTime.Foreground = Dim;
+        _rasterTime.FontFamily = Mono;
 
         var toolbar = new StackPanel
         {
@@ -217,6 +223,7 @@ public sealed partial class MainWindow : Window
                 _editMode,
                 _chip,
                 _songLength,
+                _rasterTime,
             },
         };
 
@@ -397,6 +404,7 @@ public sealed partial class MainWindow : Window
     {
         _session.StructureChanged += RefreshAll;
         WireInstrumentList();
+        WireRasterTime();
         _grid.UnrollLoops = !EditorSettings.CompactLoops;
         _daw.UnrollLoops = !EditorSettings.CompactLoops;
         _session.DirtyChanged += RefreshStatus;
@@ -667,15 +675,7 @@ public sealed partial class MainWindow : Window
         Title = $"MagSID Editor - {name}{(_session.IsDirty ? " *" : "")}";
         _status.Text = $"{_session.FilePath ?? "(unsaved)"}   ·   {(_session.IsDirty ? "Modified" : "Saved")}";
 
-        try
-        {
-            int bytes = MagSid.Core.SongSizeCalculator.Measure(_session.Song.WithUnusedPatternsRemoved()).TotalBytes;
-            _songLength.Text = $"Song Length: ${bytes:X4} ({bytes} bytes)";
-        }
-        catch (Exception)
-        {
-            _songLength.Text = "";
-        }
+        RefreshSongLength();
     }
 
     /// <summary>
@@ -1150,6 +1150,7 @@ public sealed partial class MainWindow : Window
 
             _engine = engine;
             _output = output;
+            StartLiveRaster(resume?.Frame ?? 0);
             output.Play();
 
             _grid.SetPlaybackActive(true);
@@ -1186,6 +1187,8 @@ public sealed partial class MainWindow : Window
         _poll.Stop();
         output?.Stop();
         output?.Dispose();
+        if (output is not null)
+            StopLiveRaster();
 
         // A take ends with the song: a held key is let go where it got to, and the take becomes
         // one edit - one undo step.
@@ -1203,6 +1206,9 @@ public sealed partial class MainWindow : Window
 
         while (engine.TryDequeueRowEvent(out var row))
             _grid.SetChannelPlaybackAnchor(row.Channel, row.PatternNumber, row.RowIndex, row.OrderEntrySequence, row.SampleIndex);
+
+        if (_output is { } heard && engine.PositionAt(heard.SamplesPlayed, out _) is { } position)
+            ShowLiveRaster(position.Frame);
 
         if (_dawShowing && _output is { } output)
             DrainToDaw(engine, output.SamplesPlayed);
