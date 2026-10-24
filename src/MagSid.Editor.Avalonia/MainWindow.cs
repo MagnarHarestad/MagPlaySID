@@ -301,6 +301,20 @@ public sealed partial class MainWindow : Window
             return item;
         }
 
+        // A preference the menu shows ticked or not. Its state is kept here and the tick set from
+        // it, so the item reads right whether or not the menu flips the tick itself.
+        MenuItem Setting(string header, bool on, Action<bool> changed)
+        {
+            var item = new MenuItem { Header = header, ToggleType = MenuItemToggleType.CheckBox, IsChecked = on };
+            item.Click += (_, _) =>
+            {
+                on = !on;
+                item.IsChecked = on;
+                changed(on);
+            };
+            return item;
+        }
+
         string command = OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl";
 
         var file = new MenuItem
@@ -320,6 +334,21 @@ public sealed partial class MainWindow : Window
                 new Separator(),
                 Item("Export to .sid...", () => _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this), "F9"),
                 Item("Load and Play .sid...", () => new SidPlayerWindow().Show()),
+                new Separator(),
+                // Space and F5 are a pair: one plays and stops, the other flips Edit and Jam,
+                // and which is which depends on the tracker a musician learnt on.
+                Setting("Swap Spacebar Behavior", EditorSettings.SwapSpacebar, on =>
+                {
+                    EditorSettings.SwapSpacebar = on;
+                    UpdateEditMode();
+                }),
+                // On by default: a loop drawn as it plays is what keeps the channels in line.
+                Setting("Unroll Loops", !EditorSettings.CompactLoops, on =>
+                {
+                    EditorSettings.CompactLoops = !on;
+                    _grid.UnrollLoops = on;
+                    _daw.UnrollLoops = on;
+                }),
                 new Separator(),
                 Item("Quit", Close),
             },
@@ -368,6 +397,8 @@ public sealed partial class MainWindow : Window
     {
         _session.StructureChanged += RefreshAll;
         WireInstrumentList();
+        _grid.UnrollLoops = !EditorSettings.CompactLoops;
+        _daw.UnrollLoops = !EditorSettings.CompactLoops;
         _session.DirtyChanged += RefreshStatus;
         _session.HistoryChanged += RefreshStatus;
 
@@ -471,6 +502,12 @@ public sealed partial class MainWindow : Window
         if (FocusManager?.GetFocusedElement() is TextBox)
             return;
 
+        if (CommandKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.F1:
@@ -498,8 +535,13 @@ public sealed partial class MainWindow : Window
                 _ = new SidExportWindow(_session.Song, _session.Name ?? "Untitled", _chipModel).ShowDialog(this);
                 break;
             case Key.F5:
-            case Key.Space when e.KeyModifiers == KeyModifiers.None:
                 _grid.ToggleEditMode();
+                break;
+            case Key.Space when e.KeyModifiers == KeyModifiers.None:
+                if (EditorSettings.SwapSpacebar)
+                    ToggleTransport();
+                else
+                    _grid.ToggleEditMode();
                 break;
             default:
                 if (_dawShowing)
@@ -636,9 +678,52 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// The menus' command keys - Cmd on a Mac, Ctrl elsewhere. A menu item's gesture is only the
+    /// words beside it, so without this they did nothing. Open and Save As are F10 and F11 too,
+    /// as in the Windows editor.
+    /// </summary>
+    private bool CommandKey(KeyEventArgs e)
+    {
+        var command = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+        Action? action = (e.Key, e.KeyModifiers) switch
+        {
+            (Key.F10, KeyModifiers.None) => () => _ = OpenAsync(),
+            (Key.F11, KeyModifiers.None) => () => _ = SaveAsync(saveAs: true),
+            (Key.N, var m) when m == command => () => _ = NewAsync(),
+            (Key.O, var m) when m == command => () => _ = OpenAsync(),
+            (Key.S, var m) when m == command => () => _ = SaveAsync(saveAs: false),
+            (Key.S, var m) when m == (command | KeyModifiers.Shift) => () => _ = SaveAsync(saveAs: true),
+            (Key.Z, var m) when m == command => () => StepHistory(undo: true),
+            (Key.Y, var m) when m == command => () => StepHistory(undo: false),
+            (Key.Z, var m) when m == (command | KeyModifiers.Shift) => () => StepHistory(undo: false),
+            _ => null,
+        };
+
+        action?.Invoke();
+        return action is not null;
+    }
+
+    /// <summary>Space plays and stops when the spacebar is swapped - from the project cursor in
+    /// the DAW, from the top in Retro - as F4 and F1 do.</summary>
+    private void ToggleTransport()
+    {
+        if (_output is not null)
+            StopAny();
+        else if (_dawShowing)
+            PlayFromProjectCursor();
+        else
+            StartFromBeginning();
+    }
+
     private void UpdateEditMode()
     {
-        _editMode.Text = _grid.EditMode ? "● EDIT" : "● JAM";
+        // The key is on the label, not only in the menu: Space changes meaning silently when the
+        // switch is flipped, and a song that starts playing because of a setting made weeks ago
+        // reads as a fault.
+        string key = EditorSettings.SwapSpacebar ? "F5" : "Space";
+        ToolTip.SetTip(_editMode, $"Edit/Jam ({key}) - click to flip");
+        _editMode.Text = (_grid.EditMode ? "● EDIT" : "● JAM") + " · " + key;
         _editMode.Foreground = _grid.EditMode
             ? new SolidColorBrush(AvColor.FromRgb(0xFF, 0x66, 0x66))
             : new SolidColorBrush(AvColor.FromRgb(0x66, 0xFF, 0x99));
