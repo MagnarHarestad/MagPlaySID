@@ -131,14 +131,15 @@ public static partial class SidTranscriber
 
     /// <summary>
     /// The sixteen places, handed out in turns: each round the snare, the kick-bass, the bass, the
-    /// lead and the arpeggio take one each, in that order, the sound of the role used most first.
+    /// lead and the arpeggio take one each, in that order, the sound of the role that
+    /// <paramref name="weight"/> puts first - by default the one used most.
     /// So a tune with a dozen snare variants still keeps its bass and its lead, and when places run
     /// out it is the arpeggios' last variants that go.
     /// </summary>
-    private static List<Sound> TakeInTurn(Dictionary<Sound, Sound> sounds, Dictionary<Sound, SoundRole> roles)
+    private static List<Sound> TakeInTurn(Dictionary<Sound, Sound> sounds, Dictionary<Sound, SoundRole> roles, Func<Sound, double>? weight = null)
     {
         var queues = Enum.GetValues<SoundRole>().OrderBy(Priority).ThenBy(r => r)
-            .Select(role => new Queue<Sound>(sounds.Keys.Where(k => roles[k] == role).OrderByDescending(k => sounds[k].Uses)))
+            .Select(role => new Queue<Sound>(sounds.Keys.Where(k => roles[k] == role).OrderByDescending(k => weight?.Invoke(k) ?? sounds[k].Uses)))
             .ToList();
 
         var kept = new List<Sound>();

@@ -387,6 +387,37 @@ public class SidImportTests
     }
 
     [Fact]
+    public void A_note_cut_short_is_the_sound_it_is_the_start_of()
+    {
+        // An arpeggio on C-4, two frames a note, round and round - on notes of four rows and on
+        // notes of one, which show it once and stop on G-4. The short ones' program came out as a
+        // sound of its own; it is the long ones' cut short.
+        string[] cycle = ["C-4", "C-4", "E-4", "E-4", "G-4", "G-4"];
+        var frames = Enumerable.Range(0, 8 * 48).Select(_ => new List<(int, int)>()).ToList();
+        for (int bar = 0; bar < 8; bar++)
+        {
+            foreach (var (start, length) in new[] { (bar * 48, 24), (bar * 48 + 24, 6), (bar * 48 + 30, 18) })
+            {
+                for (int i = 0; i < length - 1; i++)
+                {
+                    int f = Frequency(cycle[i % cycle.Length]);
+                    frames[start + i].AddRange([(0, f & 0xFF), (1, f >> 8), (4, 0x41)]);
+                    if (i == 0)
+                        frames[start].AddRange([(5, 0x00), (6, 0xA9)]);
+                }
+
+                frames[start + length - 1].Add((4, 0x40));    // the hard restart before the next
+            }
+        }
+
+        var analysis = SidTranscriber.Analyze(new SidTrace([], [.. frames]));
+        var result = SidTranscriber.Import(analysis, new SidImportOptions(6, 0, analysis.FrameCount));
+
+        var arpeggio = Assert.Single(result.Song.Instruments);
+        Assert.Equal(ArpeggioEnding.Loop, arpeggio.ArpeggioEnding);
+    }
+
+    [Fact]
     public void A_noise_strike_falling_to_a_low_root_is_a_kick_bass()
     {
         var result = Tune(4, (0, row => row % 4 == 0 ? Frequency(row % 8 == 0 ? "C-2" : "G-1") : null,

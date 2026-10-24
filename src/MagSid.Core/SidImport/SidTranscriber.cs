@@ -489,7 +489,7 @@ public static partial class SidTranscriber
         var heard = notes.SelectMany(n => n)
             .Select(note => (Note: note, Sound: SoundOf(analysis, note, options, framesPerRow, volume, out var root, stats), Root: root))
             .ToList();
-        heard = FixedDrums(heard);
+        heard = SeenShorter(FixedDrums(heard));
         var relative = RelativeTransients(heard.Select(h => (h.Sound, h.Root)));
 
         foreach (var (note, heardSound, root) in heard)
@@ -524,7 +524,9 @@ public static partial class SidTranscriber
         var families = sounds.Keys.GroupBy(FamilyOf)
             .ToDictionary(g => g.Key, g => g.SelectMany(k => usage[k].Rows).ToList());
         var roles = sounds.ToDictionary(s => s.Key, s => RoleOf(s.Value, usage[s.Key], families[FamilyOf(s.Key)]));
-        var kept = TakeInTurn(sounds, roles);
+        // Within a role, the sounds heard longest first: a bass's few long notes outweigh a lead's
+        // many short ones, and it is frames of sound that the tune is heard by.
+        var kept = TakeInTurn(sounds, roles, k => usage[k].Lengths.Sum());
         var instruments = new List<Instrument>();
         var numberOf = new Dictionary<Sound, int>();
         foreach (var sound in kept)
@@ -758,11 +760,11 @@ public static partial class SidTranscriber
 
         /// <summary>The same sound playing only the row's note.</summary>
         /// <summary>The same sound with another note program.</summary>
-        public Sound WithProgram(NoteName[]? notes, ArpeggioEnding ending, int loopPoint) => new()
+        public Sound WithProgram(NoteName[]? notes, ArpeggioEnding ending, int loopPoint, byte[]? controls = null) => new()
         {
             AttackDecay = AttackDecay,
             SustainRelease = SustainRelease,
-            Controls = Controls,
+            Controls = controls ?? Controls,
             Notes = notes,
             Ending = ending,
             LoopPoint = loopPoint,
@@ -867,6 +869,71 @@ public static partial class SidTranscriber
 
         return [.. heard.Select((h, i) => replace.TryGetValue(i, out var r) ? (h.Note, r.Sound, r.Root) : h)];
     }
+
+    /// <summary>
+    /// A note cut short shows only the start of its sound's programs, and its wavetable and note
+    /// program came out as a sound of their own - most of the ninety sounds a GoatTracker song
+    /// averaged, against its dozen instruments. A note whose waveform and pitch frame by frame are
+    /// the start of a longer note's, with the same envelope and settings, is that sound: it takes
+    /// the longer one's programs. It keeps its own row note when that still plays what it played -
+    /// steps that move with the note - and takes the longer one's when its steps are fixed notes.
+    /// </summary>
+    private static List<(NoteEvent Note, Sound Sound, NoteName Root)> SeenShorter(List<(NoteEvent Note, Sound Sound, NoteName Root)> heard)
+    {
+        // Frame by frame what a program plays: the waveform, and the note.
+        static (byte Control, int Note) At(Sound sound, NoteName root, int frame)
+        {
+            byte control = sound.Controls[Math.Min(frame, sound.Controls.Length - 1)];
+            if (sound.Notes is not { Length: > 0 } steps)
+                return (control, root.TableIndex);
+            if (frame < steps.Length)
+                return (control, steps[frame].TableIndex);
+            int note = sound.Ending switch
+            {
+                ArpeggioEnding.Root => root.TableIndex,
+                ArpeggioEnding.Hold => steps[^1].TableIndex,
+                _ => steps[sound.LoopPoint + (frame - sound.LoopPoint) % Math.Max(1, steps.Length - sound.LoopPoint)].TableIndex,
+            };
+            return (control, note);
+        }
+
+        static int Frames(NoteEvent note) => Math.Clamp(note.SoundEnd - note.Start, 1, ProgramFrames);
+
+        // As far as the note was heard, and its own programs go: a gate-off inside the wavetable
+        // is part of the sound, and a longer note's later one is another sound.
+        static bool Plays(Sound sound, NoteName root, NoteEvent note, Sound other, NoteName otherRoot) =>
+            Enumerable.Range(0, Math.Max(Frames(note), Math.Max(sound.Controls.Length, sound.Notes?.Length ?? 0)))
+                .All(f => At(sound, root, f) == At(other, otherRoot, f));
+
+        var result = heard.ToList();
+        foreach (var group in Enumerable.Range(0, heard.Count).GroupBy(i => SettingsOf(heard[i].Sound)))
+        {
+            var representatives = new List<int>();
+            foreach (int i in group.OrderByDescending(i => Frames(heard[i].Note)))
+            {
+                var (note, sound, root) = heard[i];
+                int found = representatives.FindIndex(r => Plays(sound, root, note, heard[r].Sound, root)
+                                                           || Plays(sound, root, note, heard[r].Sound, heard[r].Root));
+                if (found < 0)
+                {
+                    representatives.Add(i);
+                    continue;
+                }
+
+                var longer = heard[representatives[found]];
+                var keepRoot = Plays(sound, root, note, longer.Sound, root) ? root : longer.Root;
+                result[i] = (note, sound.WithProgram(longer.Sound.Notes, longer.Sound.Ending, longer.Sound.LoopPoint,
+                                                     longer.Sound.Controls), keepRoot);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Everything that makes two sounds the same but their programs.</summary>
+    private static string SettingsOf(Sound sound) => string.Join("|",
+        sound.AttackDecay, sound.SustainRelease, sound.VibratoDepth != 0, sound.NoHardRestart, sound.GateOffInProgram,
+        sound.Filter.Length == 0 ? "" : $"{sound.Filter[0].ModeVolume}/{sound.Filter[0].ResonanceRouting}");
 
     /// <summary>
     /// The families whose short strike before the note moves with the note - a GoatTracker bass's
