@@ -38,6 +38,8 @@
     <Compile Include="..\MagSid.Editor.App\AboutDocument.cs" Link="Linked\AboutDocument.cs" />
     <Compile Include="..\MagSid.Editor.App\SignalPathTrace.cs" Link="Linked\SignalPathTrace.cs" />
     <Compile Include="..\MagSid.Editor.App\SignalPathCanvas.cs" Link="Linked\SignalPathCanvas.cs" />
+    <Compile Include="..\MagSid.Editor.App\DigiEncoder.cs" Link="Linked\DigiEncoder.cs" />
+    <Compile Include="..\MagSid.Editor.App\DigiCanvas.cs" Link="Linked\DigiCanvas.cs" />
     <Compile Include="..\MagSid.Editor.App\Player\LiveRasterTime.cs" Link="Linked\Player\LiveRasterTime.cs" />
   </ItemGroup>
 

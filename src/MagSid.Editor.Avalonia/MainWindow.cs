@@ -456,6 +456,7 @@ public sealed partial class MainWindow : Window
             ItemsSource = new Control[]
             {
                 Item("Signal Path", () => new SignalPathWindow(_session.Song.Instruments).Show(this)),
+                Item("Digi to SID-osc", () => new DigiToSidOscWindow(_session).Show(this)),
             },
         };
 
