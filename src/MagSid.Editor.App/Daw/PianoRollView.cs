@@ -693,6 +693,17 @@ internal sealed class PianoRollView : Control
     private double _playFraction;
     private (int Row, int Key) _hovered = (-1, -1);
 
+    /// <summary>How long the pointer rests on a note before its instrument is named above it.</summary>
+    private const int InstrumentLabelDelay = 2000;
+
+    // The note the pointer rests on, the pointer's x over it, and whether its label is up. The
+    // label goes where the pointer is rather than over the note's block, so it names a loop's
+    // linked copy where that copy is drawn.
+    private readonly System.Windows.Forms.Timer _labelTimer = new() { Interval = InstrumentLabelDelay };
+    private NoteBlock? _labelNote;
+    private int _labelX;
+    private bool _labelShown;
+
     public PianoRollView()
     {
         SetStyle(
@@ -702,10 +713,53 @@ internal sealed class PianoRollView : Control
         BackColor = DawPalette.Background;
         TabStop = true;
 
-        _scrollX.Scroll += (_, _) => Invalidate();
-        _scrollY.Scroll += (_, _) => Invalidate();
+        _scrollX.Scroll += (_, _) => { HideInstrumentLabel(); Invalidate(); };
+        _scrollY.Scroll += (_, _) => { HideInstrumentLabel(); Invalidate(); };
         Controls.Add(_scrollX);
         Controls.Add(_scrollY);
+
+        _labelTimer.Tick += (_, _) =>
+        {
+            _labelTimer.Stop();
+            if (_labelNote is null)
+                return;
+
+            _labelShown = true;
+            Invalidate();
+        };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _labelTimer.Dispose();
+
+        base.Dispose(disposing);
+    }
+
+    /// <summary>Starts the wait for a note's label when the pointer comes onto a note, and takes
+    /// the label down when it goes off one - onto another note, the wait starts again.</summary>
+    private void HoverNote(NoteBlock? note, int x)
+    {
+        if (note == _labelNote)
+            return;
+
+        HideInstrumentLabel();
+        _labelNote = note;
+        _labelX = x;
+        if (note is not null)
+            _labelTimer.Start();
+    }
+
+    private void HideInstrumentLabel()
+    {
+        _labelTimer.Stop();
+        _labelNote = null;
+        if (_labelShown)
+        {
+            _labelShown = false;
+            Invalidate();
+        }
     }
 
     /// <summary>An edit landed. The host marks the song dirty, which is what captures the undo
@@ -1497,6 +1551,8 @@ internal sealed class PianoRollView : Control
             Invalidate();
         }
 
+        HoverNote(at.Item1 >= 0 && e.Button == MouseButtons.None ? NoteAt(at) : null, e.X);
+
         // Only over the handle itself, so the cursor says which few pixels do the resizing.
         var under = at.Item1 >= 0
             ? _notes.FirstOrDefault(n => at.Item1 >= n.Row && at.Item1 < n.Row + n.Length)
@@ -1619,6 +1675,7 @@ internal sealed class PianoRollView : Control
         }
 
         _hovered = (-1, -1);
+        HideInstrumentLabel();
         Invalidate();
         base.OnMouseLeave(e);
     }
@@ -1626,6 +1683,7 @@ internal sealed class PianoRollView : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         Focus();
+        HideInstrumentLabel();
 
         // Which pass a click in the grid, the beat bar or the slide lane lands on.
         if (e.X >= KeyboardWidth && e.Y >= BeatBarTop && _pattern is not null)
@@ -1786,6 +1844,7 @@ internal sealed class PianoRollView : Control
 
         int step = bar.SmallChange * 2 * Math.Sign(-e.Delta);
         bar.Value = Math.Clamp(bar.Value + step, bar.Minimum, Math.Max(0, bar.Maximum - bar.LargeChange + 1));
+        HideInstrumentLabel();
         Invalidate();
     }
 
@@ -2104,6 +2163,7 @@ internal sealed class PianoRollView : Control
         DrawBeatBar(g);
         DrawPassTags(g);
         DrawKeyboard(g);
+        DrawInstrumentLabel(g);
         g.Restore(state);
 
         DrawSlideLane(g);
@@ -2501,6 +2561,37 @@ internal sealed class PianoRollView : Control
         }
 
         _ = top;
+    }
+
+    /// <summary>The resting pointer's note named: its instrument's number and name, in the
+    /// instrument's colour, above the note's lane - below it on the top lane, where above is the
+    /// beat bar. A note edited since the pointer came to rest is no longer the one named.</summary>
+    private void DrawInstrumentLabel(Graphics g)
+    {
+        if (!_labelShown || _labelNote is not { } note || !_notes.Contains(note) || KeyForNote(note.Note) is not (var key and >= 0))
+            return;
+
+        var instrument = _song?.Instruments.FirstOrDefault(i => i.Number == note.InstrumentNumber);
+        string text = instrument is null
+            ? $"{note.InstrumentNumber:D2}"
+            : $"{note.InstrumentNumber:D2} {InstrumentNames.Display(instrument)}";
+
+        using var font = new Font("Segoe UI", 8.25f, FontStyle.Bold);
+        var size = Size.Ceiling(g.MeasureString(text, font));
+        int width = size.Width + 8, height = size.Height + 2;
+        int lane = GridTop + (key * KeyHeight) - _scrollY.Value;
+        int right = Math.Max(KeyboardWidth + 2, Width - _scrollY.Width - width - 2);
+        int x = Math.Clamp(_labelX - (width / 2), KeyboardWidth + 2, right);
+        int y = lane - height - 2 >= GridTop ? lane - height - 2 : lane + KeyHeight + 2;
+        var box = new Rectangle(x, y, width, height);
+
+        var colour = DawPalette.ForInstrument(note.InstrumentNumber);
+        using (var fill = new SolidBrush(DawPalette.WithAlpha(DawPalette.Background, 235)))
+            g.FillRectangle(fill, box);
+        using (var border = new Pen(colour))
+            g.DrawRectangle(border, box);
+        using var ink = new SolidBrush(colour);
+        g.DrawString(text, font, ink, x + 4, y + 1);
     }
 
     /// <summary>A release belongs on the lane of whatever it is releasing, which is the last note
