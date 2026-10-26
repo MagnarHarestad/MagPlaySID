@@ -178,8 +178,14 @@ restart now comes its gate timer before the next note wherever that starts - lat
 past held rows, delayed. Grids found: rows of 6 for 149 tunes, 12 for 51, 7 for 46, 8 for 40;
 funk pairs for 73.
 
-Next: patterns found where the music repeats, pitch effects the player runs (vibrato, slides),
-and calls for tunes that play outside an IRQ.
+**Patterns where the music repeats.** Each voice's rows are cut into patterns of 4, 8, 16, 32
+or 64 grid rows - whichever makes the fewest pattern rows and order entries - and a stretch that
+plays again is its pattern again: transposed when only its notes moved, repeated in its order
+entry when it comes again straight after. On the 471: 15,713 patterns hold 71,977 rows for the
+233,665 played (31%), in 36,142 order entries; score items per 100 changes 25.7 to 24.1.
+
+Next: pitch effects the player runs (vibrato, slides), loops in programs, and calls for tunes
+that play outside an IRQ.
 
 ### 4. The Retro view of a score
 

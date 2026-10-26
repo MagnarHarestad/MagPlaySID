@@ -86,7 +86,9 @@ public class TranscriberTests
         Assert.True(Agreement.Measure(recording, score).Exact);
         Assert.Equal(1.0, report.Music);
         Assert.Single(score.Instruments);
-        var played = score.Patterns[0].Rows.Where(r => r.Note.Kind == RowNoteKind.Note).ToList();
+        var played = score.Voices[0].Order
+            .SelectMany(e => Enumerable.Repeat(score.PatternNumber(e.Pattern)!.Rows.Select(r => r.Note.Kind == RowNoteKind.Note ? r with { Note = RowNote.Play(r.Note.Note + e.Transpose) } : r), e.Repeat))
+            .SelectMany(r => r).Where(r => r.Note.Kind == RowNoteKind.Note).ToList();
         Assert.Equal([C4, E4, G4, C5, C4, E4], played.Take(6).Select(r => r.Note.Note));
         Assert.Equal(8, score.Tempo);
         Assert.Null(score.FunkTempo);
@@ -103,11 +105,11 @@ public class TranscriberTests
         var grid = Music.Grid.Of(rises);
 
         Assert.Equal((6, 6, 3), (grid.A, grid.B, grid.Origin));
-        var rows = grid.Lay([.. rises[0].Select(s => (s, Row.Of(C4)))], 60);
+        var rows = grid.Lay([.. rises[0].Select(s => (s, Row.Of(C4)))], 60).Select(r => r.Row).ToList();
         Assert.Equal(3, rows[0].Calls);
         Assert.All(rows.Skip(1), r => Assert.Null(r.Calls));
         Assert.Equal([0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0], rows.Select(Delay));
-        var early = grid.Lay([.. rises[1].Select(s => (s, Row.Of(C4)))], 60);
+        var early = grid.Lay([.. rises[1].Select(s => (s, Row.Of(C4)))], 60).Select(r => r.Row).ToList();
         Assert.Equal((RowNoteKind.Note, 5), (early[1].Note.Kind, Delay(early[1])));
         Assert.Equal(3, early.Count(r => r.Note.Kind == RowNoteKind.Note));
 

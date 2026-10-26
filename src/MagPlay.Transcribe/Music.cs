@@ -14,7 +14,9 @@ namespace MagPlay.Transcribe;
 ///
 /// The rows are on the tune's grid - Import SID's, of the tune's speed or a funk pair - a note
 /// starting a few calls into its row delayed by as many, and a row two notes start in split into
-/// rows of their own lengths.
+/// rows of their own lengths. They are cut into patterns of as many rows as make the fewest rows
+/// and order entries in all: a stretch that plays again is its pattern again, transposed if
+/// its notes are.
 ///
 /// Whatever this gets wrong the transcriber writes raw, so nothing here has to be right - only
 /// right more often, which the raw layer's share measures.
@@ -38,8 +40,10 @@ public static class Music
         var grid = Grid.Of(rises);
         score.Tempo = grid.A;
         score.FunkTempo = grid.Funk ? grid.B : null;
+        var voices = new List<(int GridRow, Row Row)>?[3];
         for (int v = 0; v < 3; v++)
-            Voice(score, v, frames[v], rises[v], sounds, grid);
+            voices[v] = Voice(score, frames[v], rises[v], sounds, grid);
+        Arrange(score, voices, PatternLength(voices));
 
         foreach (var sound in sounds)
             score.Instruments.Add(sound.ToInstrument(score));
@@ -249,11 +253,12 @@ public static class Music
         }
 
         /// <summary>A voice's notes - each its call and its row - laid on the grid up to
-        /// <paramref name="end"/>: held rows between them, a note's delay into its row as an effect.</summary>
-        public List<Row> Lay(List<(int Start, Row Row)> notes, int end)
+        /// <paramref name="end"/>: held rows between them, a note's delay into its row as an effect.
+        /// Each row comes with the grid's row it is in, -1 for the one before the first.</summary>
+        public List<(int GridRow, Row Row)> Lay(List<(int Start, Row Row)> notes, int end)
         {
-            var rows = new List<Row>();
-            int next = 0;
+            var rows = new List<(int GridRow, Row Row)>();
+            int next = 0, gridRow = -1;
             void Region(int from, int to, bool own)
             {
                 var inside = new List<(int Start, Row Row)>();
@@ -261,7 +266,7 @@ public static class Music
                     inside.Add(notes[next++]);
                 if (inside.Count == 0)
                 {
-                    rows.Add(own ? Row.Hold with { Calls = to - from } : Row.Hold);
+                    rows.Add((gridRow, own ? Row.Hold with { Calls = to - from } : Row.Hold));
                     return;
                 }
 
@@ -272,17 +277,81 @@ public static class Music
                     int rowTo = i + 1 < inside.Count ? inside[i + 1].Start : to;
                     int delay = inside[i].Start - rowFrom;
                     var row = delay > 0 ? inside[i].Row with { Effects = [.. inside[i].Row.Effects, new NoteDelay(delay)] } : inside[i].Row;
-                    rows.Add(own || inside.Count > 1 ? row with { Calls = rowTo - rowFrom } : row);
+                    rows.Add((gridRow, own || inside.Count > 1 ? row with { Calls = rowTo - rowFrom } : row));
                 }
             }
 
             if (Origin > 0)
                 Region(0, Origin, own: true);
-            for (int row = 0; CallOf(row) < end; row++)
-                Region(CallOf(row), CallOf(row + 1), own: Funk);
+            for (gridRow = 0; CallOf(gridRow) < end; gridRow++)
+                Region(CallOf(gridRow), CallOf(gridRow + 1), own: Funk);
             return rows;
         }
     }
+
+    // ------------------------------------------------------------------ patterns
+
+    /// <summary>Grid rows a pattern may have.</summary>
+    private static readonly int[] PatternLengths = [4, 8, 16, 32, 64];
+
+    /// <summary>The pattern length that makes the fewest rows and order entries; the longer of
+    /// two that make as few.</summary>
+    private static int PatternLength(List<(int GridRow, Row Row)>?[] voices) =>
+        PatternLengths.OrderBy(length => Arrange(null, voices, length)).ThenByDescending(length => length).First();
+
+    /// <summary>
+    /// Each voice's rows cut into patterns of <paramref name="length"/> grid rows - the row before
+    /// the grid's first a pattern of its own - and each stretch the pattern already made of it, or
+    /// of it transposed, or a new one. Into <paramref name="score"/>, or, without one, only counted:
+    /// the rows of the patterns and the order entries, all told.
+    /// </summary>
+    private static int Arrange(MagPlay.Score.Score? score, List<(int GridRow, Row Row)>?[] voices, int length)
+    {
+        var made = new Dictionary<string, (int Number, int Base)>();
+        int cost = 0;
+        for (int v = 0; v < 3; v++)
+        {
+            if (voices[v] is not { } rows)
+                continue;
+
+            var order = new List<OrderEntry>();
+            foreach (var stretch in rows.GroupBy(r => r.GridRow < 0 ? -1 : r.GridRow / length).Select(g => g.Select(r => r.Row).ToList()))
+            {
+                int based = stretch.FirstOrDefault(r => r.Note.Kind == RowNoteKind.Note)?.Note.Note ?? 0;
+                string shape = string.Join("|", stretch.Select(r => Shape(r, based)));
+                if (!made.TryGetValue(shape, out var pattern))
+                {
+                    pattern = (made.Count + 1, based);
+                    made[shape] = pattern;
+                    cost += stretch.Count;
+                    if (score is not null)
+                    {
+                        var added = new Pattern { Number = pattern.Number };
+                        added.Rows.AddRange(stretch);
+                        score.Patterns.Add(added);
+                    }
+                }
+
+                var entry = new OrderEntry(pattern.Number, based - pattern.Base);
+                if (order.Count > 0 && order[^1] with { Repeat = 1 } == entry)
+                    order[^1] = order[^1] with { Repeat = order[^1].Repeat + 1 };
+                else
+                    order.Add(entry);
+            }
+
+            cost += order.Count;
+            if (score is not null)
+            {
+                score.Voices[v].Order.AddRange(order);
+                score.Voices[v].LoopTo = -1;
+            }
+        }
+        return cost;
+    }
+
+    /// <summary>A row as it plays, its note from <paramref name="based"/>.</summary>
+    private static string Shape(Row row, int based) =>
+        $"{row.Note.Kind}{(row.Note.Kind == RowNoteKind.Note ? row.Note.Note - based : 0)}/{row.Instrument}/{row.Calls}/{string.Join(",", row.Effects)}";
 
     // ------------------------------------------------------------------ notes
 
@@ -295,14 +364,13 @@ public static class Music
         public int Program => Start + (KeepsFirstCall ? 1 : 0);
     }
 
-    /// <summary>One voice's notes as rows - one long pattern, each row as long as its note - each
-    /// on the first instrument that plays it as the tune does, or a new one that does.</summary>
-    private static void Voice(MagPlay.Score.Score score, int v, Frame[] frames, List<int> rises, List<Sound> sounds, Grid grid)
+    /// <summary>One voice's notes as rows on the grid, each on the first instrument that plays it
+    /// as the tune does, or a new one that does; null for a voice without notes.</summary>
+    private static List<(int GridRow, Row Row)>? Voice(MagPlay.Score.Score score, Frame[] frames, List<int> rises, List<Sound> sounds, Grid grid)
     {
         if (rises.Count == 0)
-            return;
+            return null;
 
-        var pattern = new Pattern { Number = v + 1 };
 
         var spans = new NoteSpan[rises.Count];
         for (int i = 0; i < rises.Count; i++)
@@ -370,10 +438,7 @@ public static class Music
             rows[i] = Row.Of(heard.Note, number + 1, [.. effects]);
         }
 
-        pattern.Rows.AddRange(grid.Lay([.. spans.Select((span, i) => (span.Start, rows[i]))], frames.Length));
-        score.Patterns.Add(pattern);
-        score.Voices[v].Order.Add(new OrderEntry(pattern.Number));
-        score.Voices[v].LoopTo = -1;
+        return grid.Lay([.. spans.Select((span, i) => (span.Start, rows[i]))], frames.Length);
     }
 
     /// <summary>Calls a sweep has to go on through for a note to be taken to leave it running.</summary>
