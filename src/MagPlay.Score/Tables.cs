@@ -17,6 +17,10 @@ public enum PitchKind
 
     /// <summary>A frequency, all sixteen bits: a pitch no note has.</summary>
     Frequency,
+
+    /// <summary>A frequency added to the row's note's: a step of a vibrato or a slide, in the
+    /// units a player adds them in.</summary>
+    Offset,
 }
 
 public readonly record struct Pitch(PitchKind Kind, int Value)
@@ -26,6 +30,8 @@ public readonly record struct Pitch(PitchKind Kind, int Value)
     public static Pitch Absolute(int note) => new(PitchKind.Absolute, note);
 
     public static Pitch Frequency(int value) => new(PitchKind.Frequency, value);
+
+    public static Pitch Offset(int value) => new(PitchKind.Offset, value);
 }
 
 /// <summary>A wave program step: a control byte, a pitch, or both, held for <paramref name="Calls"/>.

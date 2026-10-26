@@ -185,6 +185,9 @@ public sealed class ScorePlayer
         /// <summary>The note's first call writes the instrument's first control byte.</summary>
         public bool FirstCall;
 
+        /// <summary>The note's frequency, from the call after a first control byte's.</summary>
+        public int? PendingFrequency;
+
         public bool OnFirstCall => FirstCall && CallsSinceNote == 0;
 
         /// <summary>A note started with the gate already on: off and on again in the same call.</summary>
@@ -218,12 +221,20 @@ public sealed class ScorePlayer
         if (call == voice.NoteAtCall)
             StartNote(voice);
 
+        if (!OnFirstCall(voice) && voice.PendingFrequency is { } pending)
+        {
+            voice.Frequency = pending;
+            voice.PendingFrequency = null;
+        }
+
         if (call > 0 || voice.NoteAtCall > 0)
             PitchEffects(voice, call);
 
         if (!OnFirstCall(voice))
+        {
             StepWave(voice);
-        StepPulse(voice);
+            StepPulse(voice);
+        }
 
         if (call == voice.CutAtCall)
             voice.Gate = false;
@@ -359,22 +370,31 @@ public sealed class ScorePlayer
     {
         voice.Retrigger = voice.Gate;
         voice.FirstCall = false;
+        voice.PendingFrequency = null;
         voice.Note = note;
-        voice.Frequency = NoteFrequency(voice, note);
         voice.Gate = true;
         voice.CallsSinceNote = 0;
         voice.VibratoCall = 0;
 
+        int frequency = NoteFrequency(voice, note);
         if (voice.Instrument is not { } instrument)
+        {
+            voice.Frequency = frequency;
             return;
+        }
 
         voice.AttackDecay = instrument.AttackDecay;
         voice.SustainRelease = instrument.SustainRelease;
         voice.Wave = instrument.WaveProgram >= 0 ? new Program(instrument.WaveProgram, 0, 0) : Program.Stopped;
-        voice.Pulses = instrument.PulseProgram >= 0 ? new Program(instrument.PulseProgram, 0, 0) : Program.Stopped;
+        if (instrument.PulseProgram >= 0)
+            voice.Pulses = new Program(instrument.PulseProgram, 0, 0);
         if (instrument.FilterProgram >= 0)
             _filter = new Program(instrument.FilterProgram, 0, 0);
         voice.FirstCall = instrument.FirstControl is not null;
+        if (voice.FirstCall)
+            voice.PendingFrequency = frequency;
+        else
+            voice.Frequency = frequency;
     }
 
     private static bool OnFirstCall(VoiceState voice) => voice.OnFirstCall;
@@ -502,6 +522,7 @@ public sealed class ScorePlayer
                         {
                             PitchKind.Relative => NoteFrequency(voice, voice.Note + pitch.Value),
                             PitchKind.Absolute => NoteFrequency(voice, pitch.Value),
+                            PitchKind.Offset => (NoteFrequency(voice, voice.Note) + pitch.Value) & 0xFFFF,
                             _ => pitch.Value & 0xFFFF,
                         };
                     }

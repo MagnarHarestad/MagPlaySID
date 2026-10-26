@@ -97,12 +97,19 @@ public class ScorePlayerTests
     [Fact]
     public void A_notes_first_call_writes_the_instruments_first_control_byte_then_the_wave_program_runs()
     {
-        var score = Song(6, Row.Of(C4, 1));
+        var score = Song(6, Row.Of(C4, 1), Row.Of(G4));
         score.Instruments[0].FirstControl = 0x09;
-        var states = States(score, 2);
+        score.Instruments[0].PulseProgram = score.PulseTable.Count;
+        score.PulseTable.AddRange([new PulseStep(0x800, 0x10, 100), new JumpStep(-1)]);
+        var states = States(score, 8);
 
-        Assert.Equal(0x09, Control(states[0]));
-        Assert.Equal(0x41, Control(states[1]));
+        Assert.Equal([0x09, 0x41], states.Take(2).Select(s => Control(s)));
+        Assert.Equal([0, Notes[C4]], states.Take(2).Select(s => Frequency(s)));
+        Assert.Equal([0, 0x800, 0x810], states.Take(3).Select(s => s[2] | (s[3] << 8)));
+
+        // The next note's first call: the voice as it was, then the new pitch and pulse program.
+        Assert.Equal((0x09, Notes[C4], 0x840), (Control(states[6]), Frequency(states[6]), states[6][2] | (states[6][3] << 8)));
+        Assert.Equal((Notes[G4], 0x800), (Frequency(states[7]), states[7][2] | (states[7][3] << 8)));
     }
 
     [Fact]

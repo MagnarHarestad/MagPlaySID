@@ -170,7 +170,8 @@ public sealed class Instrument
 
     public int SustainRelease { get; set; }
 
-    /// <summary>Where its wave, pulse and filter programs start in the score's tables; -1 for none.</summary>
+    /// <summary>Where its wave, pulse and filter programs start in the score's tables; -1 for none -
+    /// a pulse or filter program already running then runs on, as GoatTracker's pointer 0 leaves it.</summary>
     public int WaveProgram { get; set; } = -1;
 
     public int PulseProgram { get; set; } = -1;
@@ -178,8 +179,9 @@ public sealed class Instrument
     public int FilterProgram { get; set; } = -1;
 
     /// <summary>The control byte of a note's first call - $09, test bit and gate, is the common
-    /// hard restart - before its wave program takes over on the next; null starts the program
-    /// on the first call.</summary>
+    /// hard restart. That call writes only it and the envelope: the note's pitch and the wave and
+    /// pulse programs start on the next, the voice sounding as it was until then. Null starts
+    /// them all on the first call.</summary>
     public int? FirstControl { get; set; }
 
     /// <summary>Calls before the next row's note that the hard restart happens; 0 for none.</summary>

@@ -145,16 +145,29 @@ First milestone, `src/MagPlay.Transcribe`:
   and the tune's hard restart taken out as gate timer and envelope; a filter program from the
   first call (sweeps of even steps, routing, mode, volume) - `Score.FilterProgram`.
 
-Measured on the 471, 20 seconds each: the music makes 94.7% of the calls' register changes on
-average (median 97.8%, one in ten under 89.5%). The rest is raw - and, counted apart, the extra
+Measured on the 471, 20 seconds each: the music makes 95.4% of the calls' register changes on
+average (median 98.5%, one in ten under 89.8%). The rest is raw - and, counted apart, the extra
 values a player writes to a register on the way within a call, such as MagSID's player writing a
-note's frequency and then its vibrato. Not yet understood: 29,237 instruments for 74,893 notes - a
-vibrato or a pulse sweep carried over from the note before makes a note's program its own. Tunes
-that play from an NMI or their main loop (the LMan RSIDs, Hi Fi Sky) have no calls yet: all raw.
+note's frequency and then its vibrato. Tunes that play from an NMI or their main loop (the LMan
+RSIDs, Hi Fi Sky) have no calls yet: all raw.
 
-Next: instruments shared across notes (vibrato and slides as effects, pulse carried over), rows
-on the tune's grid with its tempo, patterns found where the music repeats, and calls for tunes
-that play outside an IRQ.
+Instruments are shared where notes play alike, and how alike is measured too - score items
+(instruments, rows, table steps, raw writes) per 100 register changes, on the tunes without
+writes between calls:
+
+| | Instruments for 74,893 notes | Items per 100 changes |
+|---|---|---|
+| An instrument per way a note is played | 29,237 | 35.5 |
+| A pitch kept in every form that fits the notes - semitones, a note, an offset from the note (`PitchKind.Offset`), a frequency - and the pulse carried over from the note before (an instrument without a pulse program leaves the running one, as GoatTracker's pointer 0) | 27,002 | 34.0 |
+| A note's first call keeping the voice as it was (`FirstControl` now holds the pitch and pulse to the next call); pulse widths set or moved, whichever fits | 15,687 | 26.4 |
+| The envelope a note starts with set on its row (5xx, 6xx) when not its instrument's; a held width set by the row (`SetPulse`) | 14,329 | 25.7 |
+
+What still makes a note's instrument its own, measured: a pitch that moves another way - a
+vibrato or slide whose depth follows the note, an arpeggio of its own - a third of the cases;
+another envelope within the note or its hard restart, a fifth.
+
+Next: rows on the tune's grid with its tempo, patterns found where the music repeats, pitch
+effects the player runs (vibrato, slides), and calls for tunes that play outside an IRQ.
 
 ### 4. The Retro view of a score
 

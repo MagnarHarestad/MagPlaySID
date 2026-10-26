@@ -194,6 +194,15 @@ public static class Music
 
     // ------------------------------------------------------------------ notes
 
+    /// <summary>A note of a voice: the calls it starts and ends on, the calls of its hard restart,
+    /// whether its first call keeps the voice as it was, the calls its pulse program runs for
+    /// (-1 when it leaves the one before it running), and the width its row sets, if any.</summary>
+    private readonly record struct NoteSpan(int Start, int End, int Tail, bool KeepsFirstCall, int PulseCalls, int? Width = null)
+    {
+        /// <summary>Where its wave and pulse programs start.</summary>
+        public int Program => Start + (KeepsFirstCall ? 1 : 0);
+    }
+
     /// <summary>One voice's notes as rows - one long pattern, each row as long as its note - each
     /// on the first instrument that plays it as the tune does, or a new one that does.</summary>
     private static void Voice(MagPlay.Score.Score score, int v, Frame[] frames, List<int> rises, List<Sound> sounds)
@@ -205,31 +214,93 @@ public static class Music
         if (rises[0] > 0)
             pattern.Rows.Add(Row.Hold with { Calls = rises[0] });
 
-        var notes = new List<(int Start, int Length, int Tail, int Index)>();
+        var spans = new NoteSpan[rises.Count];
         for (int i = 0; i < rises.Count; i++)
         {
             int start = rises[i], end = i + 1 < rises.Count ? rises[i + 1] : frames.Length;
-            notes.Add((start, end - start, i + 1 < rises.Count ? Tail(frames, start, end) : 0, i));
+            int tail = i + 1 < rises.Count ? Tail(frames, start, end) : 0;
+            bool keeps = start > 0 && end - tail - start >= 2
+                         && frames[start].Frequency == frames[start - 1].Frequency && frames[start].Pulse == frames[start - 1].Pulse;
+            spans[i] = new NoteSpan(start, end, tail, keeps, 0);
+        }
+
+        // A note restarts the pulse unless its program's first calls carry on the sweep before
+        // it; one that restarts it runs its program until the next that does.
+        var restarts = Enumerable.Range(0, spans.Length)
+            .Where(i => i == 0 || !CarriesPulseOn(frames, spans[i].Program, spans[i].End)).ToList();
+        // A width held all the while needs no program, once the one before has stopped moving:
+        // the row sets it, if it is another.
+        bool held = true;
+        for (int r = 0; r < restarts.Count; r++)
+        {
+            var span = spans[restarts[r]];
+            int until = r + 1 < restarts.Count ? spans[restarts[r + 1]].Program : frames.Length;
+            int width = frames[span.Program].Pulse, before = span.Program > 0 ? frames[span.Program - 1].Pulse : 0;
+            bool constant = Enumerable.Range(span.Program, until - span.Program).All(c => frames[c].Pulse == width);
+            if (held && constant && (!span.KeepsFirstCall || width == before))
+            {
+                spans[restarts[r]] = span with { PulseCalls = -1, Width = width != before ? width : null };
+                restarts.RemoveAt(r--);
+                continue;
+            }
+
+            spans[restarts[r]] = span with { PulseCalls = until - span.Program };
+            held = until - span.Program >= 2 && frames[until - 1].Pulse == frames[until - 2].Pulse;
+        }
+        for (int i = 0; i < spans.Length; i++)
+        {
+            if (restarts.BinarySearch(i) < 0 && spans[i].PulseCalls >= 0)
+                spans[i] = spans[i] with { PulseCalls = -1 };
         }
 
         // Longest first, so an instrument is made from the most of its program there is.
-        var rows = new Row[notes.Count];
-        foreach (var note in notes.OrderByDescending(n => n.Length - n.Tail))
+        var rows = new Row[spans.Length];
+        foreach (int i in Enumerable.Range(0, spans.Length).OrderByDescending(i => spans[i].End - spans[i].Tail - spans[i].Start + Math.Max(0, spans[i].PulseCalls)))
         {
-            var heard = Sound.Hear(score.NoteTable, frames, note.Start, note.Length, note.Tail);
+            var heard = Sound.Hear(score.NoteTable, frames, spans[i]);
             int number = sounds.FindIndex(s => s.Plays(heard));
             if (number < 0)
             {
                 sounds.Add(heard);
                 number = sounds.Count - 1;
             }
-            rows[note.Index] = Row.Of(heard.Note, number + 1) with { Calls = note.Length };
+            else
+            {
+                sounds[number].Join(heard);
+            }
+            // A note sounding with another envelope than its instrument's sets it on its row.
+            var sound = sounds[number];
+            var effects = new List<Effect>();
+            if (heard.AttackDecay != sound.AttackDecay)
+                effects.Add(new SetAttackDecay(heard.AttackDecay));
+            if (heard.SustainRelease != sound.SustainRelease)
+                effects.Add(new SetSustainRelease(heard.SustainRelease));
+            if (spans[i].Width is { } set)
+                effects.Add(new SetPulse(set));
+            rows[i] = Row.Of(heard.Note, number + 1, [.. effects]) with { Calls = spans[i].End - spans[i].Start };
         }
 
         pattern.Rows.AddRange(rows);
         score.Patterns.Add(pattern);
         score.Voices[v].Order.Add(new OrderEntry(pattern.Number));
         score.Voices[v].LoopTo = -1;
+    }
+
+    /// <summary>Calls a sweep has to go on through for a note to be taken to leave it running.</summary>
+    private const int SweepCalls = 3;
+
+    /// <summary>The pulse width on the calls from <paramref name="call"/> is where the sweep before
+    /// was going: moved by as much as on the call before, or held.</summary>
+    private static bool CarriesPulseOn(Frame[] frames, int call, int end)
+    {
+        if (call < 2)
+            return false;
+        for (int c = call; c < Math.Min(end, call + SweepCalls); c++)
+        {
+            if (frames[c].Pulse != ((2 * frames[c - 1].Pulse - frames[c - 2].Pulse) & 0xFFF))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>The calls at the end of a note, before the next, that the gate is off for - the
@@ -242,51 +313,95 @@ public static class Music
         return tail < LongestHardRestart && end - 1 - tail > start ? tail : 0;
     }
 
+    /// <summary>A call of a wave program: the control byte, the envelope where it changes - null
+    /// where it is as on the call before - and every way of saying the pitch that fits each note
+    /// the program plays.</summary>
+    private sealed record WaveCall(int Control, int? AttackDecay, int? SustainRelease, HashSet<Pitch> Pitches);
+
+    /// <summary>A call of a pulse program: the width set outright, or moved by an amount.</summary>
+    private readonly record struct PulseCall(bool Set, int Value);
+
     /// <summary>
     /// What a voice does while a note sounds, call by call - its control byte and pitch, its
     /// envelope, its pulse width - and how it is quietened before the next note. Made from one
-    /// note; it plays another when it does the same for as long as that one lasts, its wave
-    /// program holding its last step past its end, and its pulse carrying on its last sweep.
+    /// note; it plays another when it does the same for as long as that one lasts, its programs
+    /// holding their last step past their end, a pulse sweep going on.
+    ///
+    /// A pitch can be said several ways: in semitones from the row's note, as a note of its own,
+    /// as a frequency added to the note's, or as a frequency outright; a pulse width set, or moved.
+    /// An instrument keeps, call by call, the ways that fit every note it plays, and is written in
+    /// the first of them - a drum's noise on one note whatever the row's, an arpeggio in semitones
+    /// from it, a sweep moving on from wherever the width is.
     /// </summary>
     private sealed class Sound
     {
         public required int Note { get; init; }
-        public required List<(int Control, Pitch Pitch, int AttackDecay, int SustainRelease)> Wave { get; init; }
-        public required List<int> Pulse { get; init; }
-        public required int Tail { get; init; }
-        public required int TailAttackDecay { get; init; }
-        public required int TailSustainRelease { get; init; }
 
-        public static Sound Hear(int[] table, Frame[] frames, int start, int length, int tail)
+        /// <summary>The control byte of a first call that keeps the voice as it was; null for none.</summary>
+        public required int? First { get; init; }
+
+        public required int AttackDecay { get; init; }
+        public required int SustainRelease { get; init; }
+        public required List<WaveCall> Wave { get; init; }
+
+        /// <summary>The pulse from the program's start until the next note that restarts it; null
+        /// for a note that leaves the pulse program before it running.</summary>
+        public required List<HashSet<PulseCall>>? Pulse { get; init; }
+
+        public required int Tail { get; init; }
+
+        /// <summary>The envelope the hard restart sets, AD high and SR low; -1 for none - only the
+        /// gate goes off.</summary>
+        public required int TailEnvelope { get; init; }
+
+        public static Sound Hear(int[] table, Frame[] frames, NoteSpan span)
         {
-            int sounding = length - tail;
-            int note = BaseNote(table, frames, start, sounding);
-            var wave = new List<(int, Pitch, int, int)>();
-            var pulse = new List<int>();
-            for (int c = start; c < start + sounding; c++)
+            int sounding = span.End - span.Tail;
+            int note = BaseNote(table, frames, span.Program, sounding);
+            var wave = new List<WaveCall>();
+            var was = frames[span.Start];
+            for (int c = span.Program; c < sounding; c++)
             {
                 var f = frames[c];
-                wave.Add((f.Control, PitchOf(table, note, f.Frequency), f.AttackDecay, f.SustainRelease));
-                pulse.Add(f.Pulse);
+                wave.Add(new WaveCall(f.Control, f.AttackDecay != was.AttackDecay ? f.AttackDecay : null,
+                                      f.SustainRelease != was.SustainRelease ? f.SustainRelease : null, Pitches(table, note, f.Frequency)));
+                was = f;
             }
 
-            var quiet = tail > 0 ? frames[start + sounding] : default;
+            List<HashSet<PulseCall>>? pulse = null;
+            if (span.PulseCalls >= 0)
+            {
+                pulse = [];
+                int before = span.Program > 0 ? frames[span.Program - 1].Pulse : 0;
+                for (int c = span.Program; c < span.Program + span.PulseCalls; c++)
+                {
+                    pulse.Add([new PulseCall(true, frames[c].Pulse), new PulseCall(false, Delta(before, frames[c].Pulse))]);
+                    before = frames[c].Pulse;
+                }
+            }
+
+            var (quiet, sounded) = span.Tail > 0 ? (frames[sounding], frames[sounding - 1]) : (default, default);
             return new Sound
             {
-                Note = note, Wave = wave, Pulse = pulse, Tail = tail,
-                TailAttackDecay = quiet.AttackDecay, TailSustainRelease = quiet.SustainRelease,
+                Note = note,
+                First = span.KeepsFirstCall ? frames[span.Start].Control : null,
+                AttackDecay = frames[span.Start].AttackDecay,
+                SustainRelease = frames[span.Start].SustainRelease,
+                Wave = wave, Pulse = pulse, Tail = span.Tail,
+                TailEnvelope = quiet.AttackDecay == sounded.AttackDecay && quiet.SustainRelease == sounded.SustainRelease
+                    ? -1 : (quiet.AttackDecay << 8) | quiet.SustainRelease,
             };
         }
 
         /// <summary>The note a note is: its first pitch that is one of the table's.</summary>
-        private static int BaseNote(int[] table, Frame[] frames, int start, int length)
+        private static int BaseNote(int[] table, Frame[] frames, int start, int end)
         {
-            for (int c = start; c < start + length; c++)
+            for (int c = start; c < end; c++)
             {
                 if (frames[c].Tonal && Array.BinarySearch(table, frames[c].Frequency) is >= 0 and var n)
                     return n;
             }
-            for (int c = start; c < start + length; c++)
+            for (int c = start; c < end; c++)
             {
                 if (Array.BinarySearch(table, frames[c].Frequency) is >= 0 and var n)
                     return n;
@@ -296,88 +411,143 @@ public static class Music
             return Math.Clamp(nearest < 0 ? ~nearest : nearest, 0, table.Length - 1);
         }
 
-        private static Pitch PitchOf(int[] table, int note, int frequency) =>
-            Array.BinarySearch(table, frequency) is >= 0 and var n ? Pitch.Relative(n - note) : Pitch.Frequency(frequency);
+        private static HashSet<Pitch> Pitches(int[] table, int note, int frequency)
+        {
+            var pitches = new HashSet<Pitch>();
+            if (Array.BinarySearch(table, frequency) is >= 0 and var n)
+            {
+                pitches.Add(Pitch.Relative(n - note));
+                pitches.Add(Pitch.Absolute(n));
+            }
+            pitches.Add(Pitch.Offset(frequency - table[note]));
+            pitches.Add(Pitch.Frequency(frequency));
+            return pitches;
+        }
 
-        /// <summary>Plays <paramref name="other"/>'s note as it sounds: the same quietening, and for
-        /// as many calls as it lasts the same as this does.</summary>
+        /// <summary>Plays <paramref name="other"/>'s note as it sounds: the same start and
+        /// quietening, and for as many calls as it lasts the same as this does.</summary>
         public bool Plays(Sound other)
         {
-            if (other.Tail != Tail || other.TailAttackDecay != TailAttackDecay || other.TailSustainRelease != TailSustainRelease)
+            if (other.First != First || other.Tail != Tail || other.TailEnvelope != TailEnvelope)
                 return false;
+            if ((other.Pulse is null) != (Pulse is null))
+                return false;
+            if (Pulse is { } pulse && !Fits(pulse, other.Pulse!))
+                return false;
+
             for (int c = 0; c < other.Wave.Count; c++)
             {
-                if (Wave[Math.Min(c, Wave.Count - 1)] != other.Wave[c] || PulseAt(c) != other.Pulse[c])
+                var mine = Wave[Math.Min(c, Wave.Count - 1)];
+                var theirs = other.Wave[c];
+                if (mine.Control != theirs.Control || mine.AttackDecay != theirs.AttackDecay || mine.SustainRelease != theirs.SustainRelease)
+                    return false;
+            }
+            return Fits([.. Wave.Select(w => w.Pitches)], [.. other.Wave.Select(w => w.Pitches)]);
+        }
+
+        /// <summary>Some way of saying each call fits both: call by call while <paramref name="mine"/>
+        /// lasts, and past its end the one its last call holds on with.</summary>
+        private static bool Fits<T>(List<HashSet<T>> mine, List<HashSet<T>> theirs)
+        {
+            HashSet<T>? held = null;
+            for (int c = 0; c < theirs.Count; c++)
+            {
+                if (c < mine.Count - 1)
+                {
+                    if (!mine[c].Overlaps(theirs[c]))
+                        return false;
+                    continue;
+                }
+
+                held ??= [.. mine[^1]];
+                held.IntersectWith(theirs[c]);
+                if (held.Count == 0)
                     return false;
             }
             return true;
         }
 
-        /// <summary>The pulse width on call <paramref name="c"/>, the last sweep carried on past the end.</summary>
-        private int PulseAt(int c)
+        /// <summary>Takes <paramref name="other"/>'s note on: only the ways of saying each call that
+        /// fit it too are kept.</summary>
+        public void Join(Sound other)
         {
-            if (c < Pulse.Count)
-                return Pulse[c];
-            int step = Pulse.Count > 1 ? Delta(Pulse[^2], Pulse[^1]) : 0;
-            return (Pulse[^1] + step * (c - Pulse.Count + 1)) & 0xFFF;
+            for (int c = 0; c < other.Wave.Count; c++)
+                Wave[Math.Min(c, Wave.Count - 1)].Pitches.IntersectWith(other.Wave[c].Pitches);
+            if (Pulse is { } pulse)
+            {
+                for (int c = 0; c < other.Pulse!.Count; c++)
+                    pulse[Math.Min(c, pulse.Count - 1)].IntersectWith(other.Pulse[c]);
+            }
         }
 
         private static int Delta(int from, int to) => ((to - from + 0x800) & 0xFFF) - 0x800;
+
+        /// <summary>The way of saying a pitch an instrument is written in, of those that fit.</summary>
+        private static Pitch Chosen(HashSet<Pitch> pitches) =>
+            pitches.OrderBy(p => p.Kind switch { PitchKind.Relative => 0, PitchKind.Absolute => 1, PitchKind.Offset => 2, _ => 3 })
+                   .ThenBy(p => Math.Abs(p.Value)).First();
 
         /// <summary>The instrument: its envelope, quietening and programs, its programs added to
         /// the score's tables.</summary>
         public Instrument ToInstrument(MagPlay.Score.Score score)
         {
-            var (_, _, ad, sr) = Wave[0];
             var instrument = new Instrument
             {
                 Number = score.Instruments.Count + 1,
-                AttackDecay = ad,
-                SustainRelease = sr,
+                AttackDecay = AttackDecay,
+                SustainRelease = SustainRelease,
+                FirstControl = First,
                 GateTimer = Tail,
-                HardRestart = Tail == 0 ? HardRestartKind.None
-                    : TailAttackDecay == Wave[^1].AttackDecay && TailSustainRelease == Wave[^1].SustainRelease ? HardRestartKind.GateOff
-                    : HardRestartKind.Envelope,
-                HardRestartEnvelope = (TailAttackDecay << 8) | TailSustainRelease,
+                HardRestart = Tail == 0 ? HardRestartKind.None : TailEnvelope < 0 ? HardRestartKind.GateOff : HardRestartKind.Envelope,
+                HardRestartEnvelope = Math.Max(0, TailEnvelope),
                 WaveProgram = score.WaveTable.Count,
-                PulseProgram = score.PulseTable.Count,
             };
 
-            for (int c = 0; c < Wave.Count;)
+            var steps = Wave.Select(w => (w.Control, Pitch: Chosen(w.Pitches), w.AttackDecay, w.SustainRelease)).ToList();
+            for (int c = 0; c < steps.Count;)
             {
-                var (control, pitch, attackDecay, sustainRelease) = Wave[c];
-                if (c > 0 && attackDecay != Wave[c - 1].AttackDecay)
-                    score.WaveTable.Add(new EffectStep(new SetAttackDecay(attackDecay)));
-                if (c > 0 && sustainRelease != Wave[c - 1].SustainRelease)
-                    score.WaveTable.Add(new EffectStep(new SetSustainRelease(sustainRelease)));
+                var (control, pitch, attackDecay, sustainRelease) = steps[c];
+                if (attackDecay is { } ad)
+                    score.WaveTable.Add(new EffectStep(new SetAttackDecay(ad)));
+                if (sustainRelease is { } sr)
+                    score.WaveTable.Add(new EffectStep(new SetSustainRelease(sr)));
                 int run = 1;
-                while (c + run < Wave.Count && Wave[c + run] == Wave[c])
+                while (c + run < steps.Count && steps[c + run] == (control, pitch, null, null))
                     run++;
                 score.WaveTable.Add(new WaveStep(control, pitch, run));
                 c += run;
             }
             score.WaveTable.Add(new JumpStep(-1));
 
-            // The width, then each run of calls it moves by the same amount, the last run on and on.
-            var runs = new List<(int Add, int Calls)>();
-            for (int c = 1; c < Pulse.Count; c++)
+            if (Pulse is { } pulse)
             {
-                int add = Delta(Pulse[c - 1], Pulse[c]);
-                if (runs.Count > 0 && runs[^1].Add == add)
-                    runs[^1] = (add, runs[^1].Calls + 1);
-                else
-                    runs.Add((add, 1));
+                instrument.PulseProgram = score.PulseTable.Count;
+                Pulses(score, pulse);
             }
-
-            int Calls(int i) => i == runs.Count - 1 && runs[i].Add != 0 ? int.MaxValue / 2 : runs[i].Calls;
-            if (runs.Count == 0)
-                score.PulseTable.Add(new PulseStep(Pulse[0]));
-            else
-                score.PulseTable.Add(new PulseStep(Pulse[0], runs[0].Add, Calls(0) == int.MaxValue / 2 ? Calls(0) : 1 + runs[0].Calls));
-            for (int i = 1; i < runs.Count; i++)
-                score.PulseTable.Add(new PulseStep(null, runs[i].Add, Calls(i)));
-            score.PulseTable.Add(new JumpStep(-1));
             return instrument;
+        }
+
+        /// <summary>A pulse program: a width set and each run of calls it moves by the same amount
+        /// after - the last run on and on - or a run of moves from wherever the width is.</summary>
+        private static void Pulses(MagPlay.Score.Score score, List<HashSet<PulseCall>> pulse)
+        {
+            // A width set where the program starts, if it can be; after that, moves where they can be.
+            var calls = pulse.Select((ways, c) => ways.Where(w => w.Set == (c == 0)).DefaultIfEmpty(ways.First()).First()).ToList();
+
+            const int OnAndOn = int.MaxValue / 2;
+            for (int c = 0; c < calls.Count;)
+            {
+                int? width = calls[c].Set ? calls[c].Value : null;
+                int next = width is null ? c : c + 1;
+                int add = next < calls.Count && !calls[next].Set ? calls[next].Value : 0;
+                int end = next;
+                while (end < calls.Count && !calls[end].Set && calls[end].Value == add)
+                    end++;
+                end = Math.Max(end, c + 1);
+                score.PulseTable.Add(new PulseStep(width, add, end >= calls.Count && add != 0 ? OnAndOn : end - c));
+                c = end;
+            }
+            score.PulseTable.Add(new JumpStep(-1));
         }
     }
 }
