@@ -152,13 +152,14 @@ public sealed class InstrumentListHeader : Panel
     public static string SoundLabel(string key) => GmBank.Label(key);
 
     /// <summary>Where files of the user's own replace the bank's sounds - made on first use, so
-    /// there is somewhere to save them.</summary>
+    /// there is somewhere to save them. From the Store's package it is the package's own copy of
+    /// the folder that Explorer is shown, the one the editor reads.</summary>
     public static void OpenBankFolder()
     {
         Directory.CreateDirectory(EditorSettings.BankDirectory);
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
-            FileName = EditorSettings.BankDirectory,
+            FileName = PackagedApp.Visible(EditorSettings.BankDirectory),
             UseShellExecute = true,
         });
     }

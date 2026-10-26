@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The MSIX package's manifest, for the Microsoft Store. build-msix.ps1 fills in the $...$ values:
+     the identity and publisher come from the app's reservation in Partner Center, the version
+     from the editor's own <Version>. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity Name="$NAME$" Publisher="$PUBLISHER$" Version="$VERSION$" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>MagSID Editor</DisplayName>
+    <PublisherDisplayName>$PUBLISHERDISPLAYNAME$</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>A tracker for Commodore 64 music, with a low-memory SID player.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="MagSID" Executable="MagSID-Editor.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="MagSID Editor"
+        Description="A tracker for Commodore 64 music, with a low-memory SID player."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <!-- A desktop app running as it does from the zip: full trust, its own files and devices. -->
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

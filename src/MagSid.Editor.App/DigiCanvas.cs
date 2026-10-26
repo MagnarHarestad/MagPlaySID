@@ -63,7 +63,7 @@ public sealed class DigiCanvas : Control
         int frames = Math.Max(1, analysis?.FrameCount ?? 1);
         int visibleWidth = Math.Max(1, _viewWidth - GraphMargin * 2);
         _pxPerFrame = Math.Clamp(visibleWidth / (float)frames, MinPxPerFrame, MaxPxPerFrame);
-        Resize();
+        FitWidth();
     }
 
     public float[] RenderedAudio
@@ -91,14 +91,14 @@ public sealed class DigiCanvas : Control
     {
         _viewWidth = Math.Max(1, width);
         Height = Math.Max(1, height);
-        Resize();
+        FitWidth();
     }
 
     /// <summary>Zooms in (factor above 1) or out, within the limits.</summary>
     public void Zoom(float factor)
     {
         _pxPerFrame = Math.Clamp(_pxPerFrame * factor, MinPxPerFrame, MaxPxPerFrame);
-        Resize();
+        FitWidth();
     }
 
     /// <summary>The clip's width at the current zoom, margins included.</summary>
@@ -108,7 +108,7 @@ public sealed class DigiCanvas : Control
 
     public float XOfFrame(float frame) => GraphMargin + frame * _pxPerFrame;
 
-    private void Resize()
+    private void FitWidth()
     {
         Width = Math.Max(ContentWidth, _viewWidth);
         Invalidate();

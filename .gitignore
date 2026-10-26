@@ -26,3 +26,6 @@ publish-latest/
 # Import SID benchmark: the song lists name local files, and the results are per machine.
 tools/ImportBench/lists/
 tools/ImportBench/results/
+
+# The MSIX build: its publish, layout and package, and the Store identity from Partner Center.
+packaging/msix/out/
