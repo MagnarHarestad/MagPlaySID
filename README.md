@@ -1,3 +1,22 @@
+# MagPlaySID
+
+Plays Commodore 64 `.sid` tunes with the MagSID player's visualisation - a spectrum and a scope per
+voice - and shows each tune as a tracker would: its notes, instruments and effects in rows that
+scroll with the music. Drop a `.sid` on the window, or open one, and it plays. Read-only: a way to
+see how a tune is built. Windows, macOS and Linux.
+
+By Magnar Harestad of Censor Design. Built on the engine of the
+[MagSID editor](https://github.com/MagnarHarestad/MagSID), whose projects are still in this tree.
+
+```bash
+dotnet run --project src/MagPlaySID -c Release -- tune.sid
+```
+
+Where it is going - a song format with every effect C64 players use, played in C# and checked
+against the original frame by frame - is in [docs/PLAN.md](docs/PLAN.md).
+
+---
+
 # MagSID
 
 A Windows tracker for writing Commodore 64 music, and the SID player that plays it on real hardware.

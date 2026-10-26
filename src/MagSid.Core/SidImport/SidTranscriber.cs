@@ -563,6 +563,16 @@ public static partial class SidTranscriber
         }
     }
 
+    /// <summary>The frame of the tune the imported song's row 0 starts on - where a view that
+    /// follows the tune lines the two up.</summary>
+    public static int OriginFrame(Analysis analysis, SidImportOptions options)
+    {
+        int first = Math.Clamp(options.FirstFrame, 0, Math.Max(0, analysis.FrameCount - 1));
+        int count = Math.Clamp(options.FrameCount, 1, analysis.FrameCount - first);
+        return GridOf(analysis, first, count, Math.Clamp(options.FramesPerRow, 1, 64),
+                      Math.Clamp(options.FunkFramesPerRow ?? options.FramesPerRow, 1, 64)).Origin;
+    }
+
     /// <summary>The song's grid: on the best phase, its first row the one the first note starts
     /// on. Counted from the stretch's own start, the phase put Viva Las Vegas's first kick, seven
     /// frames in, on the second row. With funk speed a first note on a B row swaps the pair, so the

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- MagPlaySID: plays .sid tunes with the MagSID player's visualisation, and shows each tune
+       transcribed into tracker rows that scroll with the music. Read-only. See docs/PLAN.md. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MagPlaySID</AssemblyName>
+    <RootNamespace>MagPlaySid</RootNamespace>
+    <Version>0.1</Version>
+    <ApplicationManifest>..\MagSid.Editor.Avalonia\app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+    <ProjectReference Include="..\MagSid.Audio.PortAudio\MagSid.Audio.PortAudio.csproj" />
+    <ProjectReference Include="..\MagSid.Editor.Common\MagSid.Editor.Common.csproj" />
+    <ProjectReference Include="..\MagSid.Editor.Views\MagSid.Editor.Views.csproj" />
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.20" />
+  </ItemGroup>
+
+  <!-- The player's views - spectrum, scopes, transport - and its message box, shared with the
+       editor's SID player rather than copied. -->
+  <ItemGroup>
+    <Compile Include="..\MagSid.Editor.Avalonia\Player\SidPlayerPalette.cs" Link="Linked\SidPlayerPalette.cs" />
+    <Compile Include="..\MagSid.Editor.Avalonia\Player\SpectrumView.cs" Link="Linked\SpectrumView.cs" />
+    <Compile Include="..\MagSid.Editor.Avalonia\Player\VoiceScopeView.cs" Link="Linked\VoiceScopeView.cs" />
+    <Compile Include="..\MagSid.Editor.Avalonia\Player\TransportButton.cs" Link="Linked\TransportButton.cs" />
+    <Compile Include="..\MagSid.Editor.Avalonia\MessageWindow.cs" Link="Linked\MessageWindow.cs" />
+  </ItemGroup>
+
+</Project>
