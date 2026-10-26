@@ -285,28 +285,68 @@ public sealed class ScorePlayer
         return _tempo;
     }
 
+    /// <summary>A place in a voice's order list: the entry, the repeats of its pattern left, the
+    /// pattern, its next row and the entry's transposition.</summary>
+    private readonly record struct Place(int Entry, int RepeatLeft, Pattern? Pattern, int Next, int Transpose);
+
+    private static Place PlaceOf(VoiceState voice) => new(voice.Entry, voice.RepeatLeft, voice.Pattern, voice.NextRow, voice.Transpose);
+
+    /// <summary>Calls a row still to come will last, as <see cref="RowLength"/> will make it.</summary>
+    private int LengthAhead(VoiceState voice, Row row, ref bool funkSecond)
+    {
+        if (row.Calls is { } calls)
+            return Math.Max(1, calls);
+        if (voice.Tempo is { } own)
+            return own;
+        if (_funk is { } funk)
+        {
+            funkSecond = !funkSecond;
+            return Math.Max(1, funkSecond ? funk.First : funk.Second);
+        }
+        return _tempo;
+    }
+
     /// <summary>The row after the voice's current one, through the order list - taking it when
     /// <paramref name="advance"/>, only looking otherwise.</summary>
     private Row? NextRow(VoiceState voice, bool advance)
     {
+        if (RowAt(voice, PlaceOf(voice)) is not { } found)
+            return null;
+
+        if (advance)
+        {
+            var after = found.After;
+            voice.Entry = after.Entry;
+            voice.RepeatLeft = after.RepeatLeft;
+            voice.Pattern = after.Pattern;
+            voice.NextRow = after.Next;
+            voice.Transpose = after.Transpose;
+        }
+        return found.Row;
+    }
+
+    /// <summary>The rows after the voice's current one, in turn, without taking any.</summary>
+    private IEnumerable<Row> UpcomingRows(VoiceState voice)
+    {
+        var place = PlaceOf(voice);
+        while (RowAt(voice, place) is { } found)
+        {
+            yield return found.Row;
+            place = found.After;
+        }
+    }
+
+    /// <summary>The row at <paramref name="at"/> - on into the next entries of the order list when
+    /// its pattern is done - and the place after it.</summary>
+    private (Row Row, Place After)? RowAt(VoiceState voice, Place at)
+    {
         var order = _score.Voices[voice.Index].Order;
-        int entry = voice.Entry, repeatLeft = voice.RepeatLeft, next = voice.NextRow, transpose = voice.Transpose;
-        var pattern = voice.Pattern;
+        var (entry, repeatLeft, pattern, next, transpose) = at;
 
         for (int guard = 0; guard < order.Count * 2 + 4; guard++)
         {
             if (pattern is not null && next < pattern.Rows.Count)
-            {
-                if (advance)
-                {
-                    voice.Entry = entry;
-                    voice.RepeatLeft = repeatLeft;
-                    voice.Pattern = pattern;
-                    voice.NextRow = next + 1;
-                    voice.Transpose = transpose;
-                }
-                return pattern.Rows[next];
-            }
+                return (pattern.Rows[next], new Place(entry, repeatLeft, pattern, next + 1, transpose));
 
             if (pattern is not null && repeatLeft > 1)
             {
@@ -481,20 +521,49 @@ public sealed class ScorePlayer
         voice.VibratoCall++;
     }
 
-    /// <summary>When the row's remaining calls reach the instrument's gate timer and the next row
-    /// starts a note, the gate goes off - and the envelope falls, for an envelope hard restart -
-    /// so the next note's attack starts clean.</summary>
+    /// <summary>When the calls to the next note's start reach the instrument's gate timer, the
+    /// gate goes off - and the envelope falls, for an envelope hard restart - so the next note's
+    /// attack starts clean. The next note may start later in this row, or in a row after held
+    /// ones, delayed or not; a note glided to is not restarted, and a note's own first call is
+    /// never its hard restart.</summary>
     private void HardRestartBeforeNextNote(VoiceState voice, int call)
     {
         if (voice.Instrument is not { GateTimer: > 0 } instrument || instrument.HardRestart == HardRestartKind.None)
             return;
 
-        int at = voice.RowCalls - instrument.GateTimer;
-        if (at < 1 || call != at)
-            return;
+        int until;
+        if (voice.Row.Note.Kind == RowNoteKind.Note && call < voice.NoteAtCall)
+        {
+            if (voice.Row.Effects.Any(e => e is TonePortamento))
+                return;
+            until = voice.NoteAtCall - call;
+        }
+        else
+        {
+            if (call == voice.NoteAtCall && voice.Row.Note.Kind == RowNoteKind.Note)
+                return;
 
-        if (NextRow(voice, advance: false) is not { Note.Kind: RowNoteKind.Note } next
-            || next.Effects.Any(e => e is TonePortamento or NoteDelay))
+            until = voice.RowCalls - call;
+            bool funkSecond = voice.FunkSecond, found = false;
+            foreach (var row in UpcomingRows(voice))
+            {
+                if (row.Note.Kind == RowNoteKind.Note)
+                {
+                    if (row.Effects.Any(e => e is TonePortamento))
+                        return;
+                    until += row.Effects.OfType<NoteDelay>().Select(d => d.Calls).DefaultIfEmpty(0).First();
+                    found = true;
+                    break;
+                }
+                if (row.Note.Kind != RowNoteKind.Hold || until > instrument.GateTimer)
+                    return;
+                until += LengthAhead(voice, row, ref funkSecond);
+            }
+            if (!found)
+                return;
+        }
+
+        if (until != instrument.GateTimer)
             return;
 
         voice.Gate = false;

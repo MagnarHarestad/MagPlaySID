@@ -166,8 +166,20 @@ What still makes a note's instrument its own, measured: a pitch that moves anoth
 vibrato or slide whose depth follows the note, an arpeggio of its own - a third of the cases;
 another envelope within the note or its hard restart, a fifth.
 
-Next: rows on the tune's grid with its tempo, patterns found where the music repeats, pitch
-effects the player runs (vibrato, slides), and calls for tunes that play outside an IRQ.
+**Rows on the tune's grid.** Import SID's grid fitting - the longest row length, or funk pair,
+that puts nine notes in ten on a row - run on the transcriber's own note starts
+(`SidTranscriber.SuggestGrid(starts)`, a small addition to the shared engine): on Import's own
+note analysis, which also counts pitch changes under a held gate, 56 tunes found no grid; on the
+gate-ons, 6. The phase is the one that delays the notes least - on Import's, a player that starts
+some notes a call early had them delayed by a row less one, 31% of all notes delayed; now 6.7%.
+A note off its row is delayed into it (ND), a row two notes start in is split into rows of their
+own lengths (708 such rows on the 471), and with funk tempo every row says its length. The hard
+restart now comes its gate timer before the next note wherever that starts - later in the row,
+past held rows, delayed. Grids found: rows of 6 for 149 tunes, 12 for 51, 7 for 46, 8 for 40;
+funk pairs for 73.
+
+Next: patterns found where the music repeats, pitch effects the player runs (vibrato, slides),
+and calls for tunes that play outside an IRQ.
 
 ### 4. The Retro view of a score
 

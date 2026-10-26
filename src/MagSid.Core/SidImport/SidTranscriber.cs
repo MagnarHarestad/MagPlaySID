@@ -436,6 +436,11 @@ public static partial class SidTranscriber
         return GridFitting(starts) ?? (1, null);
     }
 
+    /// <summary><see cref="SuggestGrid(Analysis, int, int?, bool)"/> for notes found some other way:
+    /// <paramref name="starts"/> are the frames they start on.</summary>
+    public static (int FramesPerRow, int? FunkFramesPerRow) SuggestGrid(IReadOnlyList<int> starts) =>
+        starts.Count == 0 ? (6, null) : GridFitting([.. starts]) ?? (1, null);
+
     private static (int FramesPerRow, int? FunkFramesPerRow)? GridFitting(List<int> starts)
     {
         if (starts.Count == 0)

@@ -1,4 +1,5 @@
 using MagPlay.Score;
+using MagSid.Core.SidImport;
 
 namespace MagPlay.Transcribe;
 
@@ -10,6 +11,10 @@ namespace MagPlay.Transcribe;
 /// and its pulse program, with the tune's hard restart before the next note taken out as the
 /// instrument's. Notes the tune plays alike share an instrument. The filter and the volume are
 /// a program of their own, running from the first call: its cutoff in sweeps of an even step.
+///
+/// The rows are on the tune's grid - Import SID's, of the tune's speed or a funk pair - a note
+/// starting a few calls into its row delayed by as many, and a row two notes start in split into
+/// rows of their own lengths.
 ///
 /// Whatever this gets wrong the transcriber writes raw, so nothing here has to be right - only
 /// right more often, which the raw layer's share measures.
@@ -30,8 +35,11 @@ public static class Music
         var table = NoteTable(frames);
         var score = new MagPlay.Score.Score { Machine = recording.Machine, NoteTable = table };
         var sounds = new List<Sound>();
+        var grid = Grid.Of(rises);
+        score.Tempo = grid.A;
+        score.FunkTempo = grid.Funk ? grid.B : null;
         for (int v = 0; v < 3; v++)
-            Voice(score, v, frames[v], rises[v], sounds);
+            Voice(score, v, frames[v], rises[v], sounds, grid);
 
         foreach (var sound in sounds)
             score.Instruments.Add(sound.ToInstrument(score));
@@ -192,6 +200,90 @@ public static class Music
         return n >= 0 && n < standard.Length ? n : -1;
     }
 
+    // ------------------------------------------------------------------ the grid
+
+    /// <summary>
+    /// Where the rows fall: from <see cref="Origin"/>, rows of <see cref="A"/> calls - and with funk
+    /// tempo of A and <see cref="B"/> in turn - and before it, a row of its own. Rows of the tempo
+    /// are left to it; with funk tempo every row says its length, since a row split for two notes
+    /// would put the turn of A and B out of step.
+    /// </summary>
+    internal sealed record Grid(int A, int B, int Origin)
+    {
+        public bool Funk => A != B;
+
+        private int Period => Funk ? A + B : A;
+
+        public int CallOf(int row) => Origin + row / (Funk ? 2 : 1) * Period + (Funk && (row & 1) == 1 ? A : 0);
+
+        /// <summary>The grid Import SID fits to the notes' starts, on the phase that delays them
+        /// least - a player that starts some notes a call late, or early, has them delayed by one,
+        /// not by a row less one - and its first row on or before the first note.</summary>
+        public static Grid Of(List<int>[] rises)
+        {
+            var starts = rises.SelectMany(r => r).Order().ToList();
+            var (a, funk) = SidTranscriber.SuggestGrid(starts);
+            int b = funk ?? a;
+            if (starts.Count == 0)
+                return new Grid(a, b, 0);
+
+            var grid = Enumerable.Range(0, a + (funk is null ? 0 : b))
+                .SelectMany(phase => funk is null ? [new Grid(a, b, phase)] : new[] { new Grid(a, b, phase), new Grid(b, a, phase) })
+                .MinBy(g => g.Delays(starts))!;
+            while (grid.Origin + grid.Period <= starts[0])
+                grid = grid with { Origin = grid.Origin + grid.Period };
+            return grid;
+        }
+
+        /// <summary>The calls <paramref name="starts"/> are into their rows, all told.</summary>
+        private long Delays(List<int> starts)
+        {
+            long total = 0;
+            foreach (int start in starts)
+            {
+                int from = Origin + (int)Math.Floor((start - Origin) / (double)Period) * Period;
+                int into = start - from;
+                total += Funk && into >= A ? into - A : into;
+            }
+            return total;
+        }
+
+        /// <summary>A voice's notes - each its call and its row - laid on the grid up to
+        /// <paramref name="end"/>: held rows between them, a note's delay into its row as an effect.</summary>
+        public List<Row> Lay(List<(int Start, Row Row)> notes, int end)
+        {
+            var rows = new List<Row>();
+            int next = 0;
+            void Region(int from, int to, bool own)
+            {
+                var inside = new List<(int Start, Row Row)>();
+                while (next < notes.Count && notes[next].Start < to)
+                    inside.Add(notes[next++]);
+                if (inside.Count == 0)
+                {
+                    rows.Add(own ? Row.Hold with { Calls = to - from } : Row.Hold);
+                    return;
+                }
+
+                // Two notes or more: a row from each to the next, the first from the region's start.
+                for (int i = 0; i < inside.Count; i++)
+                {
+                    int rowFrom = i == 0 ? from : inside[i].Start;
+                    int rowTo = i + 1 < inside.Count ? inside[i + 1].Start : to;
+                    int delay = inside[i].Start - rowFrom;
+                    var row = delay > 0 ? inside[i].Row with { Effects = [.. inside[i].Row.Effects, new NoteDelay(delay)] } : inside[i].Row;
+                    rows.Add(own || inside.Count > 1 ? row with { Calls = rowTo - rowFrom } : row);
+                }
+            }
+
+            if (Origin > 0)
+                Region(0, Origin, own: true);
+            for (int row = 0; CallOf(row) < end; row++)
+                Region(CallOf(row), CallOf(row + 1), own: Funk);
+            return rows;
+        }
+    }
+
     // ------------------------------------------------------------------ notes
 
     /// <summary>A note of a voice: the calls it starts and ends on, the calls of its hard restart,
@@ -205,14 +297,12 @@ public static class Music
 
     /// <summary>One voice's notes as rows - one long pattern, each row as long as its note - each
     /// on the first instrument that plays it as the tune does, or a new one that does.</summary>
-    private static void Voice(MagPlay.Score.Score score, int v, Frame[] frames, List<int> rises, List<Sound> sounds)
+    private static void Voice(MagPlay.Score.Score score, int v, Frame[] frames, List<int> rises, List<Sound> sounds, Grid grid)
     {
         if (rises.Count == 0)
             return;
 
         var pattern = new Pattern { Number = v + 1 };
-        if (rises[0] > 0)
-            pattern.Rows.Add(Row.Hold with { Calls = rises[0] });
 
         var spans = new NoteSpan[rises.Count];
         for (int i = 0; i < rises.Count; i++)
@@ -277,10 +367,10 @@ public static class Music
                 effects.Add(new SetSustainRelease(heard.SustainRelease));
             if (spans[i].Width is { } set)
                 effects.Add(new SetPulse(set));
-            rows[i] = Row.Of(heard.Note, number + 1, [.. effects]) with { Calls = spans[i].End - spans[i].Start };
+            rows[i] = Row.Of(heard.Note, number + 1, [.. effects]);
         }
 
-        pattern.Rows.AddRange(rows);
+        pattern.Rows.AddRange(grid.Lay([.. spans.Select((span, i) => (span.Start, rows[i]))], frames.Length));
         score.Patterns.Add(pattern);
         score.Voices[v].Order.Add(new OrderEntry(pattern.Number));
         score.Voices[v].LoopTo = -1;

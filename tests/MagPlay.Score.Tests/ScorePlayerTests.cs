@@ -95,6 +95,20 @@ public class ScorePlayerTests
     }
 
     [Fact]
+    public void The_hard_restart_comes_its_gate_timer_before_the_next_note_through_held_rows_and_delays()
+    {
+        // Rows of 2 calls: the note at 0, held rows, the next note delayed a call into the row at
+        // 6 - so it starts on call 7, and the hard restart is on 5, in the held row before.
+        var score = Song(2, Row.Of(C4, 1), Row.Hold, Row.Hold, Row.Of(G4) with { Effects = [new NoteDelay(1)] });
+        score.Instruments[0].GateTimer = 2;
+        var states = States(score, 8);
+
+        Assert.Equal([0x41, 0x41, 0x41, 0x41, 0x41, 0x40, 0x40, 0x41], states.Select(s => Control(s)));
+        Assert.Equal((0x0F, 0x00), (states[5][5], states[5][6]));
+        Assert.Equal(Notes[G4], Frequency(states[7]));
+    }
+
+    [Fact]
     public void A_notes_first_call_writes_the_instruments_first_control_byte_then_the_wave_program_runs()
     {
         var score = Song(6, Row.Of(C4, 1), Row.Of(G4));

@@ -78,7 +78,7 @@ public class TranscriberTests
     }
 
     [Fact]
-    public void A_players_notes_become_rows_on_one_instrument_and_play_back_exactly()
+    public void A_players_notes_become_rows_of_its_tempo_on_one_instrument_and_play_back_exactly()
     {
         var recording = Recording.Record(Arpeggiator(), 1, 2.0);
         var (score, report) = Transcriber.Transcribe(recording, Music.Of(recording));
@@ -88,7 +88,30 @@ public class TranscriberTests
         Assert.Single(score.Instruments);
         var played = score.Patterns[0].Rows.Where(r => r.Note.Kind == RowNoteKind.Note).ToList();
         Assert.Equal([C4, E4, G4, C5, C4, E4], played.Take(6).Select(r => r.Note.Note));
-        Assert.All(played.SkipLast(1), row => Assert.Equal(8, row.Calls));
+        Assert.Equal(8, score.Tempo);
+        Assert.Null(score.FunkTempo);
+        Assert.All(played, row => Assert.Null(row.Calls));
+        Assert.All(played, row => Assert.Empty(row.Effects));
+    }
+
+    [Fact]
+    public void The_grid_is_on_the_phase_that_delays_notes_least_its_first_row_on_the_first_note()
+    {
+        // Rows of 6 from call 3, two notes a call late - delayed by one - and one a call early,
+        // on the row before, by five. Before the first row, a row of its own.
+        List<int>[] rises = [[3, 9, 15, 22, 27, 33, 40, 45, 51, 57], [8, 21, 39], []];
+        var grid = Music.Grid.Of(rises);
+
+        Assert.Equal((6, 6, 3), (grid.A, grid.B, grid.Origin));
+        var rows = grid.Lay([.. rises[0].Select(s => (s, Row.Of(C4)))], 60);
+        Assert.Equal(3, rows[0].Calls);
+        Assert.All(rows.Skip(1), r => Assert.Null(r.Calls));
+        Assert.Equal([0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0], rows.Select(Delay));
+        var early = grid.Lay([.. rises[1].Select(s => (s, Row.Of(C4)))], 60);
+        Assert.Equal((RowNoteKind.Note, 5), (early[1].Note.Kind, Delay(early[1])));
+        Assert.Equal(3, early.Count(r => r.Note.Kind == RowNoteKind.Note));
+
+        static int Delay(Row row) => row.Effects.OfType<NoteDelay>().Select(d => d.Calls).DefaultIfEmpty(0).First();
     }
 
     [Fact]
