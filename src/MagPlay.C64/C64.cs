@@ -4,6 +4,19 @@ using MagSid.Sid;
 
 namespace MagPlay.C64;
 
+/// <summary>What the 6510 was running when it wrote to the SID.</summary>
+public enum WriteContext : byte
+{
+    /// <summary>No interrupt: a tune's init, or a tune that plays from its main loop.</summary>
+    Main,
+
+    /// <summary>An IRQ - the raster's or CIA 1's: the call of a player, as SID players make it.</summary>
+    Call,
+
+    /// <summary>An NMI - CIA 2's: where digis are streamed from.</summary>
+    Nmi,
+}
+
 /// <summary>
 /// A Commodore 64 for playing SID tunes on: the 6510, 64 KiB of RAM with BASIC, the KERNAL - a
 /// stand-in, see <see cref="Kernal"/> - and the I/O area banked in and out through the processor
@@ -25,6 +38,11 @@ public sealed class C64 : IMemoryBus
     private readonly List<TimedWrite> _sidWrites = [];
     private readonly int[] _extraSids;
     private readonly List<TimedWrite>[] _extraSidWrites;
+    private readonly List<WriteContext> _sidWriteContexts = [];
+    private readonly List<long> _calls = [];
+
+    /// <summary>The interrupts being run, innermost last, each with the stack pointer it was taken at.</summary>
+    private readonly List<(bool Nmi, int Sp)> _interrupts = [];
     private long _synced;
     private long _nmiEdge = -1;
     private bool _maskedBefore = true;
@@ -67,6 +85,12 @@ public sealed class C64 : IMemoryBus
     /// mirrors up to $D7FF as the same, which they are on a C64 with one SID.</summary>
     public IReadOnlyList<TimedWrite> SidWrites => _sidWrites;
 
+    /// <summary>What each of <see cref="SidWrites"/> was written from.</summary>
+    public IReadOnlyList<WriteContext> SidWriteContexts => _sidWriteContexts;
+
+    /// <summary>The cycle each call started on: an IRQ taken while no other IRQ was being run.</summary>
+    public IReadOnlyList<long> Calls => _calls;
+
     /// <summary>The writes to each extra SID a tune's header names, at its own address.</summary>
     public IReadOnlyList<IReadOnlyList<TimedWrite>> ExtraSidWrites => _extraSidWrites;
 
@@ -88,6 +112,7 @@ public sealed class C64 : IMemoryBus
             if (Cia2.InterruptSince > _nmiEdge && Cia2.InterruptSince <= seen)
             {
                 _nmiEdge = Cia2.InterruptSince;
+                Enter(nmi: true);
                 Cpu.Interrupt(nmi: true);
                 continue;
             }
@@ -95,6 +120,7 @@ public sealed class C64 : IMemoryBus
             bool masked = Cpu.Opcode is 0x58 or 0x78 or 0x28 ? _maskedBefore : Cpu.InterruptDisable;
             if (!masked && ((Cia1.Interrupt && Cia1.InterruptSince <= seen) || (Vic.Interrupt && Vic.InterruptSince <= seen)))
             {
+                Enter(nmi: false);
                 Cpu.Interrupt(nmi: false);
                 _maskedBefore = true;
                 continue;
@@ -102,8 +128,33 @@ public sealed class C64 : IMemoryBus
 
             _maskedBefore = Cpu.InterruptDisable;
             Cpu.Step();
+            if (Cpu.Opcode == 0x40)
+                Unwind();
         }
         Sync(Cpu.Cycles);
+    }
+
+    /// <summary>An interrupt about to be taken: a call when it is an IRQ and none is being run.</summary>
+    private void Enter(bool nmi)
+    {
+        Unwind();
+        if (!nmi && !_interrupts.Any(i => !i.Nmi))
+            _calls.Add(Cpu.Cycles);
+        _interrupts.Add((nmi, Cpu.SP & 0xFF));
+    }
+
+    /// <summary>The interrupts left - by an RTI, or by a tune that resets the stack - are those whose
+    /// stack pointer the stack is back at or above.</summary>
+    private void Unwind()
+    {
+        while (_interrupts.Count > 0 && _interrupts[^1].Sp <= (Cpu.SP & 0xFF))
+            _interrupts.RemoveAt(_interrupts.Count - 1);
+    }
+
+    private WriteContext Context()
+    {
+        Unwind();
+        return _interrupts.Count == 0 ? WriteContext.Main : _interrupts[^1].Nmi ? WriteContext.Nmi : WriteContext.Call;
     }
 
     private void Sync(long now)
@@ -207,6 +258,7 @@ public sealed class C64 : IMemoryBus
 
         _sidRegisters[register] = (byte)value;
         _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));
+        _sidWriteContexts.Add(Context());
         if (_sid is not null)
         {
             ClockSidTo(Cpu.AccessCycle);

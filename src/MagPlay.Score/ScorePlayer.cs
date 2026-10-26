@@ -26,11 +26,16 @@ public sealed class ScorePlayer
     private readonly List<TimedWrite> _writes = [];
     private readonly List<TimedWrite> _streamWrites = [];
 
-    /// <summary>What the player last wrote to each register; -1 for not yet.</summary>
+    /// <summary>What is on each register: what the player last wrote, 0 before it has - the SID
+    /// starts with every register 0, so writing 0 to one changes nothing.</summary>
     private readonly int[] _written = new int[0x19];
     private readonly StreamState?[] _streams = new StreamState?[4];
 
     private long _cycle;
+    private int _call;
+    private int _between;
+    private readonly List<TimedWrite> _rawBetween;
+    private readonly int[] _before = new int[0x19];
     private int _cyclesPerCall;
     private int _tempo;
     private (int First, int Second)? _funk;
@@ -46,15 +51,22 @@ public sealed class ScorePlayer
         _cyclesPerCall = Math.Max(1, score.CyclesPerCall);
         _tempo = Math.Max(1, score.Tempo);
         _funk = score.FunkTempo is { } funk ? (_tempo, funk) : null;
-        _modeVolume = score.ModeVolume & 0xFF;
-        Array.Fill(_written, -1);
+        _modeVolume = (score.ModeVolume ?? 0) & 0xFF;
+        if (score.FilterProgram >= 0)
+            _filter = new Program(score.FilterProgram, 0, 0);
+        _rawBetween = [.. score.Raw.Between.OrderBy(w => w.Cycle)];
+        _cycle = score.CallCycles is { Count: > 0 } cycles ? cycles[0] : score.FirstCall;
 
         foreach (var voice in _voices)
             voice.Ended = score.Voices[voice.Index].Order.Count == 0;
 
-        Write(0x18, _modeVolume);
-        Init = [.. _writes];
+        if (score.ModeVolume is not null)
+            Write(0x18, _modeVolume);
+        var init = new List<TimedWrite>(_writes);
         _writes.Clear();
+        for (; _between < _rawBetween.Count && _rawBetween[_between].Cycle < _cycle; _between++)
+            init.Add(_rawBetween[_between]);
+        Init = init;
     }
 
     /// <summary>What is written before the first call.</summary>
@@ -65,10 +77,29 @@ public sealed class ScorePlayer
 
     public int CyclesPerCall => _cyclesPerCall;
 
+    /// <summary>The number of the next call, from 0.</summary>
+    public int CallNumber => _call;
+
+    /// <summary>The last call's own writes - the music's and the raw layer's for that call.</summary>
+    public IReadOnlyList<TimedWrite> CallWrites => _writes;
+
+    /// <summary>The writes after the last call's own up to the next call: digis, and the raw
+    /// layer's writes between calls.</summary>
+    public IReadOnlyList<TimedWrite> BetweenWrites => _streamWrites;
+
     /// <summary>Plays one call: the writes it makes, and the digi writes up to the next call.</summary>
-    public IReadOnlyList<TimedWrite> Call()
+    public IReadOnlyList<TimedWrite> Call() => Call(null);
+
+    /// <summary>
+    /// Plays one call, its raw writes decided by <paramref name="raw"/> - given the music's own
+    /// writes for the call, it says which registers to write as given instead - rather than taken
+    /// from the score. How a transcriber finds the raw layer: playing the score as it goes, and
+    /// writing outright what the music gets wrong.
+    /// </summary>
+    public IReadOnlyList<TimedWrite> Call(Func<int, IReadOnlyList<TimedWrite>, RawCall?>? raw)
     {
         _writes.Clear();
+        Array.Copy(_written, _before, _written.Length);
         foreach (var voice in _voices)
             PlayVoice(voice);
 
@@ -78,14 +109,45 @@ public sealed class ScorePlayer
         Write(0x17, _filterControl);
         Write(0x18, _modeVolume);
 
-        int cycles = _cyclesPerCall;
-        PlayStreams(_cycle, _cycle + cycles);
-        _cycle += cycles;
+        var given = raw is not null ? raw(_call, _writes) : _score.Raw.Calls.GetValueOrDefault(_call);
+        if (given is not null)
+            WriteRawCall(given);
+
+        long next = _score.CallCycles is { } cycles && _call + 1 < cycles.Count ? cycles[_call + 1] : _cycle + _cyclesPerCall;
+        PlayStreams(_cycle, next);
+        for (; _between < _rawBetween.Count && _rawBetween[_between].Cycle < next; _between++)
+            _streamWrites.Add(_rawBetween[_between]);
+        _streamWrites.Sort((a, b) => a.Cycle.CompareTo(b.Cycle));
+        _cycle = next;
+        _call++;
 
         var all = new List<TimedWrite>(_writes.Count + _streamWrites.Count);
         all.AddRange(_writes);
-        all.AddRange(_streamWrites.OrderBy(w => w.Cycle));
+        all.AddRange(_streamWrites);
         return all;
+    }
+
+    /// <summary>A call's raw writes in place of the music's to the registers they replace - and the
+    /// voices and the chip carried on from what is then on them.</summary>
+    private void WriteRawCall(RawCall raw)
+    {
+        _writes.RemoveAll(w => raw.Replaces(w.Register));
+        for (int r = 0; r <= 0x18; r++)
+        {
+            if (!raw.Replaces(r))
+                continue;
+            _written[r] = _before[r];
+            Carry(r, _before[r]);
+        }
+
+        foreach (var write in raw.Writes)
+        {
+            if (write.Register is < 0 or > 0x18)
+                continue;
+            _written[write.Register] = write.Value & 0xFF;
+            _writes.Add(new TimedWrite(_cycle + write.Offset, write.Register, write.Value & 0xFF));
+            Carry(write.Register, write.Value & 0xFF);
+        }
     }
 
     // ------------------------------------------------------------------ voices
@@ -575,7 +637,7 @@ public sealed class ScorePlayer
 
         // A note started with the gate still on: off and on again in this call, so the envelope
         // starts its attack - the way a player restarts a note without leaving a frame of silence.
-        if (voice.Retrigger && (control & 1) != 0 && _written[b + 4] is var last and >= 0 && (last & 1) != 0)
+        if (voice.Retrigger && (control & 1) != 0 && _written[b + 4] is var last && (last & 1) != 0)
             Write(b + 4, last & 0xFE, force: true);
         voice.Retrigger = false;
         Write(b + 4, control);
@@ -591,6 +653,14 @@ public sealed class ScorePlayer
                 continue;
 
             Write(target, value & 0xFF, force: true);
+            Carry(target, value);
+        }
+    }
+
+    /// <summary>The voice or chip state a write to <paramref name="target"/> sets.</summary>
+    private void Carry(int target, int value)
+    {
+        {
             int offset = target % 7;
             var owner = target < 0x15 ? _voices[target / 7] : null;
             switch (target)
@@ -622,10 +692,13 @@ public sealed class ScorePlayer
         _ => 0xFF,
     })];
 
+    /// <summary>The bits of <paramref name="register"/> the SID keeps.</summary>
+    public static int UsedBits(int register) => Used[register];
+
     private void Write(int register, int value, bool force = false)
     {
         int used = Used[register];
-        if (!force && _written[register] >= 0 && (_written[register] & used) == (value & used))
+        if (!force && (_written[register] & used) == (value & used))
             return;
 
         _written[register] = value;

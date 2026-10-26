@@ -116,7 +116,7 @@ GoatTracker `.sng` files convert to the score directly - the `.sng` reader is al
 register writes frame by frame. That checks the player before any transcription depends on it,
 on Magnar's own 115 songs.
 
-### 3. Transcribe any `.sid` into the score
+### 3. Transcribe any `.sid` into the score - under way
 
 Lossless by construction: a tune's writes go into raw steps first, which reproduce it exactly;
 then a musical form - a note, a wave program, a vibrato, a slide, a tempo - replaces raw steps
@@ -125,6 +125,36 @@ describes, and the share of it is the measure of how much of a tune is understoo
 SID's analysis - notes, sounds, the grid, glides, re-strikes - is where the musical forms come
 from. Scored by register agreement and by the heard pitch, on the 202 tunes and the 71
 GoatTracker songs, and on tunes from each player in the table above.
+
+First milestone, `src/MagPlay.Transcribe`:
+
+- **Calls are the tune's IRQs.** The C64 tags each SID write with what it was written from: a
+  call (an IRQ, not nested in another), an NMI, or the main program. A `Recording` is the calls'
+  cycles, each call's own writes, and the writes between calls - init, NMI digis.
+- **The raw layer** (`Score.Raw`): writes between calls kept on their cycles, and per call the
+  registers the music gets wrong, written as the tune wrote them, on their cycles. The score's
+  calls fall on the tune's: evenly spaced within 64 cycles of jitter, or listed (8 tunes).
+- **The transcriber plays the score as it builds it**, and in each call writes raw whatever the
+  music gets wrong - so whatever the music says, the score plays the tune back.
+- **Agreement** is measured by replaying, not by trusting the construction: per call and
+  register, the values it takes (a write that changes nothing left out, as on the SID); between
+  calls, every write on its cycle. All 471 local `.sid` files agree exactly, all raw and with music.
+- **The music, v1** (`Music`): a note per gate-on, as long as it lasts; the tune's own note table,
+  from the frequencies it holds; an instrument per way a note is played - envelope, wave program
+  (control byte, pitch in semitones from the note), pulse program (width, sweeps of even steps),
+  and the tune's hard restart taken out as gate timer and envelope; a filter program from the
+  first call (sweeps of even steps, routing, mode, volume) - `Score.FilterProgram`.
+
+Measured on the 471, 20 seconds each: the music makes 94.7% of the calls' register changes on
+average (median 97.8%, one in ten under 89.5%). The rest is raw - and, counted apart, the extra
+values a player writes to a register on the way within a call, such as MagSID's player writing a
+note's frequency and then its vibrato. Not yet understood: 29,237 instruments for 74,893 notes - a
+vibrato or a pulse sweep carried over from the note before makes a note's program its own. Tunes
+that play from an NMI or their main loop (the LMan RSIDs, Hi Fi Sky) have no calls yet: all raw.
+
+Next: instruments shared across notes (vibrato and slides as effects, pulse carried over), rows
+on the tune's grid with its tempo, patterns found where the music repeats, and calls for tunes
+that play outside an IRQ.
 
 ### 4. The Retro view of a score
 

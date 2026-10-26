@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Any .sid into a score: its writes recorded on the C64, the score built so that playing it
+       gives the same writes - docs/PLAN.md, step 3. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MagPlay.Transcribe</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagPlay.C64\MagPlay.C64.csproj" />
+    <ProjectReference Include="..\MagPlay.Score\MagPlay.Score.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MagPlay.Transcribe.Tests" />
+  </ItemGroup>
+
+</Project>

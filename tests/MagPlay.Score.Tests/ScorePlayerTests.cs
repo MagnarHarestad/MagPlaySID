@@ -354,6 +354,35 @@ public class ScorePlayerTests
     }
 
     [Fact]
+    public void A_raw_call_writes_its_registers_as_given_and_the_music_carries_on_from_them()
+    {
+        var score = Song(6, Row.Of(C4, 1) with { Calls = 100 });
+        score.Raw.Calls[1] = new RawCall(0b11, [new RawWrite(300, 0, 0x34), new RawWrite(310, 1, 0x12)]);
+        score.Raw.Calls[2] = new RawCall(1 << 4, []);
+        var player = new ScorePlayer(score);
+        player.Call();
+        var second = player.Call();
+        var third = player.Call();
+
+        Assert.Equal([(score.CyclesPerCall + 300L, 0, 0x34), (score.CyclesPerCall + 310L, 1, 0x12)],
+                     second.Select(w => (w.Cycle, w.Register, w.Value)));
+        Assert.Empty(third);
+        Assert.Equal(0x1234, Frequency(States(score, 4)[3]));
+    }
+
+    [Fact]
+    public void A_filter_program_of_the_scores_own_runs_from_the_first_call()
+    {
+        var score = new Score { ModeVolume = null, FilterProgram = 0 };
+        score.FilterTable.AddRange([new FilterStep(0x100, 0xF1, 0x10, Add: 8, Calls: 3), new JumpStep(-1)]);
+        var states = States(score, 4);
+
+        Assert.Empty(new ScorePlayer(score).Init);
+        Assert.Equal([0x100, 0x108, 0x110, 0x110], states.Select(s => (s[0x15] & 7) | (s[0x16] << 3)));
+        Assert.All(states, s => Assert.Equal((0xF1, 0x10), (s[0x17], s[0x18])));
+    }
+
+    [Fact]
     public void Effects_read_as_tracker_commands()
     {
         Assert.Equal("120", new Portamento(0x20).Label);

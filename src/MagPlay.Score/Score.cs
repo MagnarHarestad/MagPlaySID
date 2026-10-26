@@ -27,6 +27,17 @@ public sealed class Score
 
     public double CallsPerSecond => Machines.ClockHz(Machine) / CyclesPerCall;
 
+    /// <summary>The cycle the first call happens on: after a tune's init, when it is transcribed.</summary>
+    public long FirstCall { get; set; }
+
+    /// <summary>The cycle of each call, for a tune whose calls are not evenly spaced - an interrupt
+    /// moved about, a timer reprogrammed every few calls. Past its end, calls go on
+    /// <see cref="CyclesPerCall"/> apart; null starts them on <see cref="FirstCall"/>.</summary>
+    public List<long>? CallCycles { get; set; }
+
+    /// <summary>What the music does not say, given outright.</summary>
+    public RawLayer Raw { get; } = new();
+
     /// <summary>The 16-bit SID frequency of each note number. A tune's own table, when it has one,
     /// so its notes come out exactly - players differ in tuning by a fraction of a semitone.</summary>
     public int[] NoteTable { get; set; } = NoteTables.MagSidPal();
@@ -37,8 +48,9 @@ public sealed class Score
     /// <summary>With funk tempo, rows alternate <see cref="Tempo"/> and this.</summary>
     public int? FunkTempo { get; set; }
 
-    /// <summary>$D418 at the start: filter mode in the high nibble, master volume in the low.</summary>
-    public int ModeVolume { get; set; } = 0x0F;
+    /// <summary>$D418 at the start: filter mode in the high nibble, master volume in the low.
+    /// Null writes nothing before the first call - a transcription's init is the tune's own.</summary>
+    public int? ModeVolume { get; set; } = 0x0F;
 
     public List<Instrument> Instruments { get; } = [];
 
@@ -55,6 +67,10 @@ public sealed class Score
     /// <summary>Filter programs. The SID has one filter, so one runs at a time: the one the voice
     /// that last started a filter program asked for.</summary>
     public List<TableStep> FilterTable { get; } = [];
+
+    /// <summary>Where a filter program running from the first call starts, for a tune whose filter
+    /// follows no instrument; -1 for none.</summary>
+    public int FilterProgram { get; set; } = -1;
 
     /// <summary>Digis: what a <see cref="PlaySample"/> effect streams to the chip between calls.</summary>
     public List<Sample> Samples { get; } = [];
