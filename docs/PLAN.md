@@ -77,13 +77,37 @@ The editors whose effects this has to cover, as references:
 | **Rob Hubbard's driver** | Notes with durations rather than rows, per-instrument pulse modulation, vibrato, drums (noise plus a falling pitch), "skydive", octave arpeggios, portamento in the tracks. |
 | **JCH / Laxity NewPlayer, DMC, Future Composer** | The other common players; Laxity's drums and arpeggios, DMC's sound tables. |
 
-### 2. A C64 for every tune
+### 2. A C64 for every tune - done
 
 The emulator MagSID has calls a PSID's play routine once a frame and records each frame's writes.
 It refuses RSID tunes and tunes without a play address, and runs no timers or interrupts - which
 is how most digis and many CIA-timed tunes play. For any tune: CIA 1 and 2 timers, IRQ and NMI,
 the VIC's raster interrupt, enough of the KERNAL for RSID tunes, and every write recorded with
 its cycle. Without it those tunes can be played as a score but not checked against the original.
+
+`src/MagPlay.C64`: `C64`, `Cia`, `Vic`, `Kernal` (a stand-in ROM at the real entry points),
+`SidTune` (loads a `.sid`, starts it as a SID player would, runs it). The 6510 is MagSID's own
+`Mos6502` given a memory bus: with one, it counts cycles, takes IRQ and NMI, and makes each
+access on the cycle the real chip does - fetches from the first cycle, the data on the last, a
+read-modify-write's two writes, the dummy reads. Interrupts are polled on an instruction's
+second-last cycle, the NMI edge is latched, and CLI/SEI/PLP act one instruction late.
+
+Checked against every `.sid` on this machine (471):
+
+- 460 PSIDs give MagSID's recorder's writes exactly, write for write over 20 seconds. Friday
+  does too, once its init has cleared four SID mirrors ($D400-$D481), which the old recorder
+  never saw. Three LMan tunes are 2SID tunes; the header's second SID is now its own chip
+  (`ExtraSidWrites`), and their first SID agrees.
+- All 9 RSIDs run, which the old recorder refused: ThcMOD and LMan digis at ~30,000 writes a
+  second. ThcMOD cancels NMI jitter by jumping through CIA 1's timer registers into one of nine
+  pages, and ends its NMI with an RTI in CIA 2's serial register, whose dummy read acknowledges
+  it. That only works with every access on its cycle; it does now, never leaving the nine pages.
+- The driver sits in the first free page from $0400, as in libsidplayfp: two tunes clear the
+  cassette buffer at $0334 in init.
+
+Left out: the cycles the VIC steals on bad lines and for sprites, and a CIA timer's start delay
+(both timers of a pair share it, so the jitter tricks above don't see it). No tune here has shown
+the difference yet. 2SID and 3SID tunes are recorded per chip but not yet played as such.
 
 ### 2b. Prove the player against GoatTracker
 

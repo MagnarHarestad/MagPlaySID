@@ -52,6 +52,25 @@ public sealed class SidFile
     /// <summary>True when the header says 8580 rather than 6581.</summary>
     public bool Is8580 { get; private init; }
 
+    /// <summary>The header's video standard, bits 2-3 of its flags: 1 PAL, 2 NTSC, 3 either, 0 unknown.</summary>
+    public int VideoStandard { get; private init; }
+
+    /// <summary>The tune wants NTSC timing: its header says NTSC and not PAL too.</summary>
+    public bool IsNtsc => VideoStandard == 2;
+
+    /// <summary>An RSID whose init is a BASIC program to RUN, not machine code to call.</summary>
+    public bool IsBasic { get; private init; }
+
+    /// <summary>The page the header says a driver may use, and how many pages from it; 0 and 0
+    /// when it says nothing, $FF when no page is free.</summary>
+    public int FreePage { get; private init; }
+
+    public int FreePages { get; private init; }
+
+    /// <summary>Where the header puts a second and a third SID (v3 and v4 headers), as addresses
+    /// such as $D420 or $DE00; empty for a tune written for one chip.</summary>
+    public IReadOnlyList<int> ExtraSids { get; private init; } = [];
+
     public static SidFile Parse(byte[] bytes)
     {
         if (bytes.Length < 0x76 + 2)
@@ -101,8 +120,19 @@ public sealed class SidFile
             Data = data,
             // Bits 4-5: 01 = MOS6581, 10 = MOS8580.
             Is8580 = ((flags >> 4) & 0b11) == 0b10,
+            VideoStandard = (flags >> 2) & 0b11,
+            IsBasic = magic == "RSID" && (flags & 0b10) != 0,
+            FreePage = version >= 2 && bytes.Length >= 0x7A ? bytes[0x78] : 0,
+            FreePages = version >= 2 && bytes.Length >= 0x7A ? bytes[0x79] : 0,
+            ExtraSids = [.. new[] { (3, 0x7A), (4, 0x7B) }
+                .Where(field => version >= field.Item1 && bytes.Length > field.Item2 && IsSidPage(bytes[field.Item2]))
+                .Select(field => 0xD000 | (bytes[field.Item2] << 4))],
         };
     }
+
+    /// <summary>A header's SID address byte: $Dxx0 with xx even, from $D420 to $D7E0 or in the
+    /// I/O areas at $DE00-$DFE0.</summary>
+    private static bool IsSidPage(byte value) => (value & 1) == 0 && value is >= 0x42 and <= 0x7F or >= 0xE0 and <= 0xFE;
 
     /// <summary>What this player can and cannot handle, in the user's terms. Null when it can.</summary>
     public string? UnsupportedReason()

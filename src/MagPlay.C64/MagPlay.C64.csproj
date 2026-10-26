@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A Commodore 64 for SID tunes - CIA timers, interrupts, the raster, banked memory - so any
+       .sid can be played and its SID writes recorded by the cycle: docs/PLAN.md, step 2. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MagPlay.C64</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+    <ProjectReference Include="..\MagPlay.Score\MagPlay.Score.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MagPlay.C64.Tests" />
+  </ItemGroup>
+
+</Project>

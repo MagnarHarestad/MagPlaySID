@@ -25,6 +25,11 @@ public sealed class Mos6502
     private readonly byte[] _memory;
     private readonly Action<int, int>? _onWrite;
 
+    /// <summary>A whole machine behind the CPU - banked ROM, I/O chips - instead of flat RAM: see
+    /// MagPlay.C64. With one, read-modify-write instructions also write the old value back before
+    /// the new, as the 6510 does, which is what acknowledges an interrupt with <c>inc $d019</c>.</summary>
+    private readonly IMemoryBus? _bus;
+
     public Mos6502(byte[] memory, Action<int, int>? onWrite = null)
     {
         if (memory.Length != 0x10000)
@@ -34,6 +39,42 @@ public sealed class Mos6502
         _onWrite = onWrite;
         SP = 0xFD;
     }
+
+    public Mos6502(IMemoryBus bus)
+        : this(new byte[0x10000])
+    {
+        _bus = bus;
+    }
+
+    /// <summary>Cycles the CPU has spent, by the NMOS 6510's own counts - an indexed read crossing
+    /// a page and a branch taken, or taken across a page, costing their extra cycle - and seven
+    /// for each interrupt it takes.</summary>
+    public long Cycles { get; private set; }
+
+    /// <summary>Indexing crossed a page in the instruction being run.</summary>
+    private bool _crossed;
+
+    /// <summary>The branch being run was taken, and maybe across a page: its extra cycles.</summary>
+    private int _branchCycles;
+
+    /// <summary>The cycle the instruction or interrupt being run started on, its opcode, and the
+    /// bytes fetched from its stream so far.</summary>
+    private long _start;
+    private int _opcode;
+    private int _fetched;
+
+    /// <summary>The cycle within the instruction the next access is made on, when it is not the
+    /// instruction's last - -1 when it is.</summary>
+    private int _at = -1;
+
+    /// <summary>The cycle the access the bus is being asked for happens on, with a bus: each
+    /// fetch on its own cycle from the instruction's first, the data an instruction reads or writes
+    /// on its last, a read-modify-write's read and first write on the two before. That is where
+    /// the 6510 makes them, which is what a tune timing itself by a chip's register reads.</summary>
+    public long AccessCycle { get; private set; }
+
+    /// <summary>The opcode of the instruction run last.</summary>
+    public int Opcode => _opcode;
 
     public byte[] Memory => _memory;
 
@@ -91,20 +132,81 @@ public sealed class Mos6502
             "Either it loops forever by design, or the tune is not a PSID-style init/play player.");
     }
 
-    public byte Read(int address) => _memory[address & 0xFFFF];
+    public byte Read(int address)
+    {
+        if (_bus is null)
+            return _memory[address & 0xFFFF];
+        Place();
+        return _bus.Read(address & 0xFFFF);
+    }
+
+    /// <summary>Places the access about to be made on its cycle.</summary>
+    private void Place()
+    {
+        int at = _at >= 0 ? _at : BaseCycles[_opcode] + (_crossed && PagePenalty[_opcode] ? 1 : 0) - 1;
+        AccessCycle = _start + at;
+        _at = -1;
+    }
 
     public void Write(int address, int value)
     {
         address &= 0xFFFF;
         value &= 0xFF;
+        if (_bus is not null)
+        {
+            Place();
+            _bus.Write(address, value);
+            return;
+        }
+
         _memory[address] = (byte)value;
         _onWrite?.Invoke(address, value);
+    }
+
+    /// <summary>An interrupt taken: the return address and status pushed - the break flag clear -
+    /// interrupts masked, and the program counter loaded from $FFFA for an NMI, $FFFE for an IRQ.</summary>
+    public void Interrupt(bool nmi)
+    {
+        _start = Cycles;
+        _at = 2;
+        Push(PC >> 8);
+        _at = 3;
+        Push(PC & 0xFF);
+        _at = 4;
+        Push(StatusByte() & ~0x10);
+        InterruptDisable = true;
+        int vector = nmi ? 0xFFFA : 0xFFFE;
+        _at = 5;
+        int low = Read(vector);
+        _at = 6;
+        PC = low | (Read(vector + 1) << 8);
+        Cycles += 7;
     }
 
     public void Step()
     {
         Steps++;
+        _crossed = false;
+        _branchCycles = 0;
+        _start = Cycles;
+        _fetched = 0;
         byte opcode = Fetch();
+        _opcode = opcode;
+
+        // A one-byte instruction reads the byte after it anyway, and throws it away - a read that
+        // acknowledges an interrupt when it lands on $DC0D or $DD0D, which tunes running an RTI
+        // out of CIA 2's serial register do on purpose.
+        if (_bus is not null && OneByte[opcode])
+        {
+            _at = 1;
+            Read(PC);
+        }
+        Execute(opcode);
+        Cycles += BaseCycles[opcode] + (_crossed && PagePenalty[opcode] ? 1 : 0) + _branchCycles;
+    }
+
+    private void Execute(byte opcode)
+    {
 
         switch (opcode)
         {
@@ -270,6 +372,18 @@ public sealed class Mos6502
             case 0x7E: Modify(AbsoluteX(), Ror); break;
 
             // --- jumps ---
+            // BRK: on a machine, an interrupt through $FFFE with the break flag pushed set; over
+            // flat RAM, where nothing set that vector, a tune that gets here has run off its code.
+            case 0x00 when _bus is null:
+                throw new SidPlaybackException($"Opcode $00 at ${PC - 1:X4} is BRK - the tune has run into something that is not code.");
+            case 0x00:
+                Fetch();
+                Push(PC >> 8);
+                Push(PC & 0xFF);
+                Push(StatusByte() | 0x10);
+                InterruptDisable = true;
+                PC = Read(0xFFFE) | (Read(0xFFFF) << 8);
+                break;
             case 0x4C: PC = Absolute(); break;
             case 0x6C: PC = IndirectJump(); break;
             case 0x20: Jsr(); break;
@@ -392,7 +506,7 @@ public sealed class Mos6502
             case 0x04: case 0x44: case 0x64: Fetch(); break;
             case 0x14: case 0x34: case 0x54: case 0x74: case 0xD4: case 0xF4: Fetch(); break;
             case 0x0C: FetchWord(); break;
-            case 0x1C: case 0x3C: case 0x5C: case 0x7C: case 0xDC: case 0xFC: FetchWord(); break;
+            case 0x1C: case 0x3C: case 0x5C: case 0x7C: case 0xDC: case 0xFC: AbsoluteX(); break;
 
             // JAM: the CPU halts and only a reset brings it back.
             case 0x02: case 0x12: case 0x22: case 0x32: case 0x42: case 0x52:
@@ -408,7 +522,13 @@ public sealed class Mos6502
 
     // --- addressing modes ---
 
-    private byte Fetch() => _memory[PC++ & 0xFFFF];
+    private byte Fetch()
+    {
+        _at = _fetched++;
+        byte value = Read(PC);
+        PC = (PC + 1) & 0xFFFF;
+        return value;
+    }
 
     private int FetchWord()
     {
@@ -426,9 +546,23 @@ public sealed class Mos6502
 
     private int Absolute() => FetchWord();
 
-    private int AbsoluteX() => (FetchWord() + X) & 0xFFFF;
+    private int AbsoluteX() => Indexed(FetchWord(), X);
 
-    private int AbsoluteY() => (FetchWord() + Y) & 0xFFFF;
+    private int AbsoluteY() => Indexed(FetchWord(), Y);
+
+    private int Indexed(int baseAddress, int index)
+    {
+        int address = (baseAddress + index) & 0xFFFF;
+        _crossed = (address & 0xFF00) != (baseAddress & 0xFF00);
+
+        // Crossing a page, the 6510 first reads the address with the high byte not yet carried.
+        if (_crossed && _bus is not null)
+        {
+            _at = BaseCycles[_opcode] + (PagePenalty[_opcode] ? 1 : 0) - 2;
+            Read((baseAddress & 0xFF00) | (address & 0xFF));
+        }
+        return address;
+    }
 
     /// <summary>(zp,x) - the pointer is read from zero page and the index is applied before the
     /// read, wrapping inside the page.</summary>
@@ -443,7 +577,7 @@ public sealed class Mos6502
     {
         int pointer = Fetch();
         int address = Read(pointer) | (Read((pointer + 1) & 0xFF) << 8);
-        return (address + Y) & 0xFFFF;
+        return Indexed(address, Y);
     }
 
     /// <summary>JMP (abs), including the page-boundary bug: the high byte is fetched from the same
@@ -453,7 +587,9 @@ public sealed class Mos6502
     {
         int pointer = FetchWord();
         int high = (pointer & 0xFF00) | ((pointer + 1) & 0x00FF);
-        return Read(pointer) | (Read(high) << 8);
+        _at = 3;
+        int low = Read(pointer);
+        return low | (Read(high) << 8);
     }
 
     // --- operations ---
@@ -476,9 +612,25 @@ public sealed class Mos6502
         SetZn(Y);
     }
 
+    /// <summary>The read of a read-modify-write instruction - and, on a machine, the write of the
+    /// unchanged value the 6510 makes before the changed one.</summary>
+    private int ReadModify(int address)
+    {
+        int last = BaseCycles[_opcode] - 1;
+        _at = last - 2;
+        int value = Read(address);
+        if (_bus is not null)
+        {
+            _at = last - 1;
+            Place();
+            _bus.Write(address & 0xFFFF, value);
+        }
+        return value;
+    }
+
     private void Modify(int address, Func<int, int> operation)
     {
-        int result = operation(Read(address)) & 0xFF;
+        int result = operation(ReadModify(address)) & 0xFF;
         Write(address, result);
         SetZn(result);
     }
@@ -603,14 +755,14 @@ public sealed class Mos6502
     /// reach it only through a path that leaves carry set.</summary>
     private void Isc(int address)
     {
-        int value = (Read(address) + 1) & 0xFF;
+        int value = (ReadModify(address) + 1) & 0xFF;
         Write(address, value);
         Sbc(value);
     }
 
     private void Slo(int address)
     {
-        int value = Asl(Read(address));
+        int value = Asl(ReadModify(address));
         Write(address, value);
         A |= value;
         SetZn(A);
@@ -618,7 +770,7 @@ public sealed class Mos6502
 
     private void Rla(int address)
     {
-        int value = Rol(Read(address));
+        int value = Rol(ReadModify(address));
         Write(address, value);
         A &= value;
         SetZn(A);
@@ -626,7 +778,7 @@ public sealed class Mos6502
 
     private void Sre(int address)
     {
-        int value = Lsr(Read(address));
+        int value = Lsr(ReadModify(address));
         Write(address, value);
         A ^= value;
         SetZn(A);
@@ -634,14 +786,14 @@ public sealed class Mos6502
 
     private void Rra(int address)
     {
-        int value = Ror(Read(address));
+        int value = Ror(ReadModify(address));
         Write(address, value);
         Adc(value);
     }
 
     private void Dcp(int address)
     {
-        int value = (Read(address) - 1) & 0xFF;
+        int value = (ReadModify(address) - 1) & 0xFF;
         Write(address, value);
         Compare(A, value);
     }
@@ -719,7 +871,7 @@ public sealed class Mos6502
     private int IndirectBase()
     {
         int pointer = Fetch();
-        return _memory[pointer] | (_memory[(pointer + 1) & 0xFF] << 8);
+        return Read(pointer) | (Read((pointer + 1) & 0xFF) << 8);
     }
 
     private void Jsr()
@@ -734,8 +886,69 @@ public sealed class Mos6502
     private void Branch(bool taken)
     {
         sbyte offset = (sbyte)Fetch();
-        if (taken)
-            PC = (PC + offset) & 0xFFFF;
+        if (!taken)
+            return;
+
+        int target = (PC + offset) & 0xFFFF;
+        _branchCycles = (target & 0xFF00) == (PC & 0xFF00) ? 1 : 2;
+        PC = target;
+    }
+
+    /// <summary>Cycles of each opcode on the NMOS 6510, undocumented ones included, before the
+    /// extra cycle of a page crossed and of a branch taken.</summary>
+    private static readonly byte[] BaseCycles =
+    [
+        7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6,
+        2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+        6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6,
+        2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+        6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6,
+        2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+        6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6,
+        2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+        2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,
+        2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5,
+        2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4,
+        2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4,
+        2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
+        2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+        2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
+        2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
+    ];
+
+    /// <summary>The instructions that are their opcode alone: implied, accumulator, stack, RTS, RTI.</summary>
+    private static readonly bool[] OneByte = BuildOneByte();
+
+    private static bool[] BuildOneByte()
+    {
+        var one = new bool[256];
+        for (int high = 0; high < 16; high++)
+        {
+            one[(high << 4) | 0x08] = true;
+            one[(high << 4) | 0x0A] = true;
+        }
+        one[0x40] = one[0x60] = true;
+        return one;
+    }
+
+    /// <summary>The reads that take a cycle more when indexing crosses a page: abs,X, abs,Y and
+    /// (zp),Y loads and arithmetic, LAX and LAS, and the NOPs that read abs,X. Stores and
+    /// read-modify-writes always take the longer count.</summary>
+    private static readonly bool[] PagePenalty = BuildPagePenalty();
+
+    private static bool[] BuildPagePenalty()
+    {
+        var penalty = new bool[256];
+        foreach (int opcode in new[]
+                 {
+                     0x11, 0x31, 0x51, 0x71, 0xB1, 0xD1, 0xF1,
+                     0x19, 0x39, 0x59, 0x79, 0xB9, 0xD9, 0xF9,
+                     0x1D, 0x3D, 0x5D, 0x7D, 0xBD, 0xDD, 0xFD,
+                     0xBC, 0xBE, 0xB3, 0xBF, 0xBB,
+                     0x1C, 0x3C, 0x5C, 0x7C, 0xDC, 0xFC,
+                 })
+            penalty[opcode] = true;
+        return penalty;
     }
 
     // --- state helpers ---
@@ -748,14 +961,20 @@ public sealed class Mos6502
 
     private void Push(int value)
     {
-        _memory[0x0100 + (SP & 0xFF)] = (byte)value;
+        if (_bus is null)
+            _memory[0x0100 + (SP & 0xFF)] = (byte)value;
+        else
+        {
+            Place();
+            _bus.Write(0x0100 + (SP & 0xFF), value & 0xFF);
+        }
         SP = (SP - 1) & 0xFF;
     }
 
     private byte Pop()
     {
         SP = (SP + 1) & 0xFF;
-        return _memory[0x0100 + (SP & 0xFF)];
+        return Read(0x0100 + (SP & 0xFF));
     }
 
     private int StatusByte() =>
@@ -776,3 +995,12 @@ public sealed class Mos6502
 /// <summary>Thrown when a tune cannot be loaded or run - a malformed header, an opcode this
 /// interpreter does not cover, a play routine that never returns.</summary>
 public sealed class SidPlaybackException(string message) : Exception(message);
+
+/// <summary>What the CPU reads and writes through when it runs in a whole machine rather than over
+/// flat RAM: the machine decides what each address is - RAM, ROM, a chip's register.</summary>
+public interface IMemoryBus
+{
+    byte Read(int address);
+
+    void Write(int address, int value);
+}

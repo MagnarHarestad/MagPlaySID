@@ -1,0 +1,255 @@
+using MagPlay.Score;
+using MagSid.Playback;
+using MagSid.Sid;
+
+namespace MagPlay.C64;
+
+/// <summary>
+/// A Commodore 64 for playing SID tunes on: the 6510, 64 KiB of RAM with BASIC, the KERNAL - a
+/// stand-in, see <see cref="Kernal"/> - and the I/O area banked in and out through the processor
+/// port at $01, CIA 1 on the IRQ and CIA 2 on the NMI, the VIC's raster interrupt, and the SID.
+/// It runs by cycles, not by calls: whatever a tune does with interrupts happens when it would,
+/// and every write to the SID is recorded with the cycle it happens on.
+///
+/// Each access is made on the cycle the 6510 makes it - see <see cref="Mos6502.AccessCycle"/> - so
+/// a tune that times itself by reading a timer reads what it would. What it leaves out: the cycles
+/// the VIC steals on bad lines and for sprites, and the screen.
+/// </summary>
+public sealed class C64 : IMemoryBus
+{
+    private readonly byte[] _ram = new byte[0x10000];
+    private readonly byte[] _kernal = Kernal.Build();
+    private readonly byte[] _basic = new byte[0x2000];
+    private readonly byte[] _colour = new byte[0x400];
+    private readonly byte[] _sidRegisters = new byte[0x20];
+    private readonly List<TimedWrite> _sidWrites = [];
+    private readonly int[] _extraSids;
+    private readonly List<TimedWrite>[] _extraSidWrites;
+    private long _synced;
+    private long _nmiEdge = -1;
+    private bool _maskedBefore = true;
+    private int _port = 0x37;
+    private int _direction = 0x2F;
+
+    /// <summary>A SID model, run only once a tune reads what the chip itself makes - voice 3's
+    /// oscillator or envelope - and then kept in step with every write.</summary>
+    private SidChip? _sid;
+    private long _sidCycle;
+
+    public C64(Machine machine, IReadOnlyList<int>? extraSids = null)
+    {
+        _extraSids = [.. extraSids ?? []];
+        _extraSidWrites = [.. _extraSids.Select(_ => new List<TimedWrite>())];
+        Machine = machine;
+        Vic = machine == Machine.Ntsc ? new Vic(65, 263) : new Vic(63, 312);
+        Cpu = new Mos6502(this);
+        Kernal.SetVectors(_ram);
+        _ram[0] = (byte)_direction;
+        _ram[1] = (byte)_port;
+    }
+
+    public Machine Machine { get; }
+
+    public Mos6502 Cpu { get; }
+
+    public Cia Cia1 { get; } = new();
+
+    public Cia Cia2 { get; } = new();
+
+    public Vic Vic { get; }
+
+    /// <summary>All RAM, whatever is banked over it.</summary>
+    public byte[] Ram => _ram;
+
+    public long Cycle => Cpu.Cycles;
+
+    /// <summary>Every SID write so far, with its cycle, $D400-$D418 as 0-$18 - and the SID's
+    /// mirrors up to $D7FF as the same, which they are on a C64 with one SID.</summary>
+    public IReadOnlyList<TimedWrite> SidWrites => _sidWrites;
+
+    /// <summary>The writes to each extra SID a tune's header names, at its own address.</summary>
+    public IReadOnlyList<IReadOnlyList<TimedWrite>> ExtraSidWrites => _extraSidWrites;
+
+    /// <summary>Runs until <paramref name="cycle"/>: the chips kept in step, an NMI taken when CIA 2
+    /// raises its line, an IRQ while the CPU allows one.
+    ///
+    /// The 6510 looks at its interrupt lines on an instruction's second-last cycle, so a line that
+    /// rises on the last waits for the instruction after; and CLI, SEI and PLP change the I flag only
+    /// after that look, so the instruction after them runs under the old flag.</summary>
+    public void RunUntil(long cycle)
+    {
+        while (Cpu.Cycles < cycle)
+        {
+            long now = Cpu.Cycles;
+            Sync(now);
+            long seen = now - 2;
+
+            // An NMI is taken on the line's falling edge, which the 6510 latches.
+            if (Cia2.InterruptSince > _nmiEdge && Cia2.InterruptSince <= seen)
+            {
+                _nmiEdge = Cia2.InterruptSince;
+                Cpu.Interrupt(nmi: true);
+                continue;
+            }
+
+            bool masked = Cpu.Opcode is 0x58 or 0x78 or 0x28 ? _maskedBefore : Cpu.InterruptDisable;
+            if (!masked && ((Cia1.Interrupt && Cia1.InterruptSince <= seen) || (Vic.Interrupt && Vic.InterruptSince <= seen)))
+            {
+                Cpu.Interrupt(nmi: false);
+                _maskedBefore = true;
+                continue;
+            }
+
+            _maskedBefore = Cpu.InterruptDisable;
+            Cpu.Step();
+        }
+        Sync(Cpu.Cycles);
+    }
+
+    private void Sync(long now)
+    {
+        if (now <= _synced)
+            return;
+        Cia1.AdvanceTo(now);
+        Cia2.AdvanceTo(now);
+        Vic.AdvanceTo(now);
+        _synced = now;
+    }
+
+    // ------------------------------------------------------------------ the memory map
+
+    /// <summary>LORAM, HIRAM and CHAREN as the port drives them - an input pin floats high.</summary>
+    private int Banking => (_port | ~_direction) & 0x07;
+
+    private bool IoVisible => Banking is 5 or 6 or 7;
+
+    public byte Read(int address)
+    {
+        switch (address)
+        {
+            case 0x0000: return (byte)_direction;
+            case 0x0001: return (byte)((_port & _direction) | (~_direction & 0x17));
+            case >= 0xA000 and < 0xC000 when Banking is 3 or 7:
+                return _basic[address - 0xA000];
+            case >= 0xD000 and < 0xE000 when IoVisible:
+                return ReadIo(address);
+            case >= 0xE000 when (Banking & 0x02) != 0:
+                return _kernal[address - 0xE000];
+            default:
+                return _ram[address];
+        }
+    }
+
+    public void Write(int address, int value)
+    {
+        value &= 0xFF;
+        if (address == 0x0000)
+            _direction = value;
+        else if (address == 0x0001)
+            _port = value;
+
+        if (address is >= 0xD000 and < 0xE000 && IoVisible)
+        {
+            WriteIo(address, value);
+            return;
+        }
+
+        _ram[address] = (byte)value;
+    }
+
+    private byte ReadIo(int address)
+    {
+        Sync(Cpu.AccessCycle);
+        return address switch
+        {
+            < 0xD400 => Vic.Read(address),
+            < 0xD800 => ReadSid(address & 0x1F),
+            < 0xDC00 => (byte)(_colour[address - 0xD800] | 0xF0),
+            < 0xDD00 => Cia1.Read(address),
+            < 0xDE00 => Cia2.Read(address),
+            _ => 0xFF,
+        };
+    }
+
+    private void WriteIo(int address, int value)
+    {
+        Sync(Cpu.AccessCycle);
+        switch (address)
+        {
+            case < 0xD400: Vic.Write(address, value); break;
+            case var _ when ExtraSid(address) is >= 0 and var chip:
+                if ((address & 0x1F) <= 0x18)
+                    _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
+                break;
+            case < 0xD800: WriteSid(address & 0x1F, value); break;
+            case < 0xDC00: _colour[address - 0xD800] = (byte)(value & 0x0F); break;
+            case < 0xDD00: Cia1.Write(address, value); break;
+            case < 0xDE00: Cia2.Write(address, value); break;
+        }
+    }
+
+    // ------------------------------------------------------------------ the SID
+
+    private int ExtraSid(int address)
+    {
+        for (int i = 0; i < _extraSids.Length; i++)
+        {
+            if ((address & ~0x1F) == _extraSids[i])
+                return i;
+        }
+        return -1;
+    }
+
+    private void WriteSid(int register, int value)
+    {
+        if (register > 0x18)
+            return;
+
+        _sidRegisters[register] = (byte)value;
+        _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));
+        if (_sid is not null)
+        {
+            ClockSidTo(Cpu.AccessCycle);
+            _sid.Write(register, value);
+        }
+    }
+
+    private byte ReadSid(int register)
+    {
+        switch (register)
+        {
+            case 0x19:
+            case 0x1A:
+                return 0xFF;
+            case 0x1B:
+            case 0x1C:
+                EnsureSid();
+                ClockSidTo(Cpu.AccessCycle);
+                return (byte)_sid!.Read(register);
+            default:
+                return 0;
+        }
+    }
+
+    /// <summary>The model, started the first time it is needed and brought up to now by playing it
+    /// every write made so far.</summary>
+    private void EnsureSid()
+    {
+        if (_sid is not null)
+            return;
+
+        _sid = new SidChip();
+        _sidCycle = 0;
+        foreach (var write in _sidWrites)
+        {
+            ClockSidTo(write.Cycle);
+            _sid.Write(write.Register, write.Value);
+        }
+    }
+
+    private void ClockSidTo(long cycle)
+    {
+        for (; _sidCycle < cycle; _sidCycle++)
+            _sid!.Clock();
+    }
+}
