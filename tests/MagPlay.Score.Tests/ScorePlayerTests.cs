@@ -404,6 +404,25 @@ public class ScorePlayerTests
     }
 
     [Fact]
+    public void A_timeline_says_where_each_voice_is_on_every_call_and_when_each_row_starts()
+    {
+        var score = Song(3, Row.Of(C4, 1), Row.Hold, Row.Of(E4) with { Calls = 2 }, Row.Of(G4));
+        score.WaveTable.Clear();
+        score.WaveTable.AddRange([new WaveStep(0x09), new WaveStep(0x41, Calls: 2), new WaveStep(0x40), new JumpStep(-1)]);
+        score.Voices[0].Order[0] = new OrderEntry(1, Transpose: 12, Repeat: 2);
+        var timeline = ScoreTimeline.Of(score, 20);
+
+        Assert.Equal([0, 3, 6, 8, 11, 14, 17], timeline.Rows[0].Select(r => r.Call).Take(7));
+        Assert.Equal([0, 1, 2, 3, 0, 1, 2], timeline.Rows[0].Select(r => r.Row).Take(7));
+        Assert.All(timeline.Rows[0], r => Assert.Equal((0, 12), (r.Entry, r.Transpose)));
+        Assert.Equal([0, 1, 1, 2, 2], Enumerable.Range(0, 5).Select(c => timeline.PositionOf(0, c).WaveStep));
+        Assert.Equal(2, timeline.RowAt(0, 7));
+        Assert.Equal(score.CyclesPerCall * 5L, timeline.CycleOf(5));
+        Assert.Equal(5, timeline.CallAt(score.CyclesPerCall * 5L + 100));
+        Assert.Empty(timeline.Rows[1]);
+    }
+
+    [Fact]
     public void Effects_read_as_tracker_commands()
     {
         Assert.Equal("120", new Portamento(0x20).Label);

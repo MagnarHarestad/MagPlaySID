@@ -3,6 +3,12 @@ namespace MagPlay.Score;
 /// <summary>A register write and the CPU cycle it happens on, counted from the tune's start.</summary>
 public readonly record struct TimedWrite(long Cycle, int Register, int Value);
 
+/// <summary>Where a voice is in the score after a call: its order entry and the transposition it
+/// gives, the pattern and row being played and the calls into it, the instrument, and the steps
+/// of its wave and pulse programs that are sounding - -1 where there is none.</summary>
+public readonly record struct VoicePosition(int Entry, int Transpose, int Pattern, int Row, int RowCall,
+                                            int Instrument, int WaveStep, int PulseStep, bool Ended);
+
 /// <summary>
 /// Plays a <see cref="Score"/> as a C64 player would: call by call, each voice reading its rows,
 /// running its instrument's programs and its effects, and writing the SID's registers. What
@@ -79,6 +85,17 @@ public sealed class ScorePlayer
 
     /// <summary>The number of the next call, from 0.</summary>
     public int CallNumber => _call;
+
+    /// <summary>Where <paramref name="voice"/> is after the last call.</summary>
+    public VoicePosition PositionOf(int voice)
+    {
+        var v = _voices[voice];
+        return new VoicePosition(v.Entry, v.Transpose, v.Pattern?.Number ?? -1, v.NextRow - 1, v.RowCall,
+                                 v.Instrument?.Number ?? 0, v.Wave.Playing, v.Pulses.Playing, v.Ended);
+    }
+
+    /// <summary>The step of the filter program sounding after the last call; -1 for none.</summary>
+    public int FilterStep => _filter.Playing;
 
     /// <summary>The last call's own writes - the music's and the raw layer's for that call.</summary>
     public IReadOnlyList<TimedWrite> CallWrites => _writes;
@@ -201,8 +218,9 @@ public sealed class ScorePlayer
         public int CutAtCall = -1;
     }
 
-    /// <summary>A program's place in its table: the step, the calls it has left, and what it adds a call.</summary>
-    private sealed record Program(int Step, int CallsLeft, int Add)
+    /// <summary>A program's place in its table: the step to run next, the calls the one sounding
+    /// has left, what it adds a call, and the step sounding - kept when the program stops on it.</summary>
+    private sealed record Program(int Step, int CallsLeft, int Add, int Playing = -1)
     {
         public static Program Stopped { get; } = new(-1, 0, 0);
 
@@ -683,15 +701,16 @@ public sealed class ScorePlayer
         }
 
         int at = program.Step;
+        var stopped = Program.Stopped with { Playing = program.Playing };
         for (int jumps = 0; jumps < MaxJumps; jumps++)
         {
             if (at < 0 || at >= table.Count)
-                return Program.Stopped;
+                return stopped;
 
             if (table[at] is JumpStep jump)
             {
                 if (jump.To < 0)
-                    return Program.Stopped;
+                    return stopped;
                 at = jump.To;
                 continue;
             }
@@ -703,10 +722,10 @@ public sealed class ScorePlayer
                 continue;
             }
 
-            return new Program(at + 1, calls - 1, add);
+            return new Program(at + 1, calls - 1, add, at);
         }
 
-        return Program.Stopped;
+        return stopped;
     }
 
     // ------------------------------------------------------------------ writing

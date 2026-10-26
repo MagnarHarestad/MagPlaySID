@@ -5,7 +5,6 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using MagSid.Editor.App.Controls;
 using MagSid.Editor.Avalonia;
 using MagSid.Editor.Avalonia.Player;
 using MagSid.Playback;
@@ -15,15 +14,12 @@ namespace MagPlaySid;
 /// <summary>
 /// MagPlaySID's window: a .sid plays - opened, dropped on the window from Explorer, Finder or the
 /// desktop, or named on the command line - with the MagSID player's spectrum and a scope per
-/// voice, and below them the tune transcribed into tracker rows that scroll with the music.
-/// The sound is always the tune's own 6502 code; the rows are only a view of it.
+/// voice, and below them the tune transcribed into a score whose rows scroll with the music.
+/// The sound is always the tune's own 6502 code; the score is only a view of it.
 /// </summary>
 internal sealed class PlayerWindow : Window
 {
     private static readonly FontFamily Mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
-
-    /// <summary>Rows handed to the view this many frames before they sound, so it never waits.</summary>
-    private const int LeadFrames = 25;
 
     private readonly SpectrumView _spectrum = new();
     private readonly VoiceScopeView[] _scopes = [new(0), new(1), new(2)];
@@ -36,7 +32,7 @@ internal sealed class PlayerWindow : Window
     private readonly TextBlock _empty = new();
     private readonly TextBlock _retroStatus = new();
     private readonly Button _open = new();
-    private readonly TrackerGridControl _grid = new();
+    private readonly ScoreView _view = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly bool[] _muted = new bool[3];
 
@@ -48,9 +44,6 @@ internal sealed class PlayerWindow : Window
 
     private Transcription? _transcription;
     private CancellationTokenSource? _transcribing;
-    private int _nextRow;
-    private double _lastFrame;
-    private long _viewClock;
 
     public PlayerWindow(string? path = null)
     {
@@ -161,18 +154,17 @@ internal sealed class PlayerWindow : Window
         spectrumHost.Children.Add(_spectrum);
         spectrumHost.Children.Add(_empty);
 
-        // The Retro view: read-only - it follows the music and takes no keys or clicks.
-        _grid.Width = TrackerGridControl.ContentWidth;
-        _grid.IsHitTestVisible = false;
-        _grid.Focusable = false;
-        _grid.AudioClockSamples = () => _viewClock;
+        // The Retro view: read-only - it follows the music; a click picks the voice whose
+        // instrument it shows.
+        _view.Width = _view.ContentWidth;
+        _view.Focusable = false;
         _retroStatus.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _retroStatus.FontSize = 12;
         _retroStatus.Margin = new Thickness(0, 0, 0, 4);
         var retro = new DockPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(18, 4, 18, 12) };
         DockPanel.SetDock(_retroStatus, Dock.Top);
         retro.Children.Add(_retroStatus);
-        retro.Children.Add(_grid);
+        retro.Children.Add(_view);
 
         var root = new DockPanel();
         foreach (var top in new Control[] { header, spectrumHost, scopes, transport })
@@ -301,7 +293,7 @@ internal sealed class PlayerWindow : Window
         _transcribing = cancel;
         _transcription = null;
         _length = null;
-        _grid.SetPlaybackActive(false);
+        _view.SetScore(null, null);
         _retroStatus.Text = "Transcribing...";
         var file = _file!;
 
@@ -309,8 +301,7 @@ internal sealed class PlayerWindow : Window
         {
             var length = SidSongLength.Measure(file, song: song);
             double seconds = length is null ? 180 : length.TotalFrames / length.CallsPerSecond;
-            int frames = Math.Clamp((int)Math.Ceiling(seconds * 50), 50, 50 * 600);
-            return (length, Transcription.Make(file, song, frames, cancel.Token));
+            return (length, Transcription.Make(file, song, Math.Clamp(seconds + 1, 1, 600), cancel.Token));
         }, cancel.Token).ContinueWith(task => Dispatcher.UIThread.Post(() =>
         {
             if (cancel.IsCancellationRequested || _file != file || _song != song)
@@ -325,11 +316,8 @@ internal sealed class PlayerWindow : Window
             }
 
             (_length, _transcription) = task.Result;
-            var transcription = _transcription;
-            _grid.SetSong(transcription.Song);
-            _retroStatus.Text = $"Transcribed by MagSID's Import SID - {transcription.Song.Instruments.Count} instruments, " +
-                                $"speed {transcription.Song.Speed + 1}{(transcription.Song.HasFunk ? $"/{transcription.Song.FunkSpeed + 1}" : "")}";
-            FollowFrom(0);
+            _view.SetScore(_transcription.Score, _transcription.Timeline);
+            _retroStatus.Text = _transcription.Describe();
         }), TaskScheduler.Default);
     }
 
@@ -363,58 +351,9 @@ internal sealed class PlayerWindow : Window
 
         var position = PositionWithinSong(at);
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
-        Follow(position.TotalSeconds * 50);
+        if (_transcription is { } transcription)
+            _view.SetCycle((long)(position.TotalSeconds * transcription.ClockHz));
     }
-
-    /// <summary>Hands the view the rows starting up to just past the frame being heard, and sets
-    /// its clock there. A step back - the tune looping - starts the view again from there.</summary>
-    private void Follow(double frame)
-    {
-        if (_transcription is not { } transcription)
-            return;
-
-        if (frame < _lastFrame - 2)
-            FollowFrom(frame);
-        _lastFrame = frame;
-
-        var rows = transcription.Rows;
-        while (_nextRow < rows.Count && rows[_nextRow].Frame <= frame + LeadFrames)
-        {
-            var row = rows[_nextRow++];
-            _grid.SetChannelPlaybackAnchor(row.Channel, row.Pattern, row.Row, row.OrderEntrySequence, SampleOf(row.Frame));
-        }
-
-        _viewClock = SampleOf(frame);
-    }
-
-    /// <summary>The view started again at a frame: each voice from the row it is on there.</summary>
-    private void FollowFrom(double frame)
-    {
-        var rows = _transcription!.Rows;
-        _grid.SetPlaybackActive(true);
-        _lastFrame = frame;
-
-        int first = 0;
-        while (first < rows.Count && rows[first].Frame <= frame)
-            first++;
-
-        // The row each voice is sounding at that frame, then everything after it.
-        for (int channel = 0; channel < 3; channel++)
-        {
-            for (int i = first - 1; i >= 0; i--)
-            {
-                if (rows[i].Channel != channel)
-                    continue;
-                var row = rows[i];
-                _grid.SetChannelPlaybackAnchor(row.Channel, row.Pattern, row.Row, row.OrderEntrySequence, SampleOf(row.Frame));
-                break;
-            }
-        }
-
-        _nextRow = first;
-    }
-
-    private static long SampleOf(double frame) => (long)(frame * SongPlaybackEngine.SamplesPerFrame);
 
     /// <summary>Where the listener is inside the song: past the end it folds back into the loop.</summary>
     private TimeSpan PositionWithinSong(long samples)

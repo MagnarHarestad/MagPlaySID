@@ -116,7 +116,7 @@ GoatTracker `.sng` files convert to the score directly - the `.sng` reader is al
 register writes frame by frame. That checks the player before any transcription depends on it,
 on Magnar's own 115 songs.
 
-### 3. Transcribe any `.sid` into the score - under way
+### 3. Transcribe any `.sid` into the score - first version in
 
 Lossless by construction: a tune's writes go into raw steps first, which reproduce it exactly;
 then a musical form - a note, a wave program, a vibrato, a slide, a tempo - replaces raw steps
@@ -187,10 +187,27 @@ entry when it comes again straight after. On the 471: 15,713 patterns hold 71,97
 Next: pitch effects the player runs (vibrato, slides), loops in programs, and calls for tunes
 that play outside an IRQ.
 
-### 4. The Retro view of a score
+### 4. The Retro view of a score - first version in
 
 Note, instrument and effect columns per voice, scrolling with the music; the instrument and table
 of the selected voice beside them, their current step lit.
+
+`src/MagPlaySID/ScoreView.cs`, fed by `Transcription`: the tune recorded on the C64 for its measured
+length, transcribed (step 3), and the score played once silently into a `ScoreTimeline` - the
+cycle of every call, each voice's order entry, pattern, row, instrument and wave and pulse step
+after it, the filter program's step, and the rows in the order they play
+(`ScorePlayer.PositionOf`, `FilterStep`). The view goes by the tune's cycle - the seconds heard
+times the machine's clock - so it scrolls smoothly between calls, rows placed by when they play:
+a row split off its grid row is as short as it is, marked where it is too short to write. Each
+voice shows pattern row, note (transposed as its order entry says), instrument and effects, a
+line and the pattern's number at each pattern's start; a click on a voice shows its instrument -
+envelope, first control, hard restart - and its wave and pulse programs beside the rows, and the
+filter program below, the step sounding lit. A three-minute tune is ready about three seconds
+after it starts, most of it recording.
+
+The app no longer uses Import SID or the editor's tracker grid, and so no longer references the
+editor projects. The sound is still MagSID's PSID engine, so RSIDs are refused before the view
+gets them; playing the recording itself - any tune, digis included - is the step after.
 
 ## Rules carried over from MagSID
 

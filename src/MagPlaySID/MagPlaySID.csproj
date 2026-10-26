@@ -17,9 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+    <ProjectReference Include="..\MagPlay.Transcribe\MagPlay.Transcribe.csproj" />
     <ProjectReference Include="..\MagSid.Audio.PortAudio\MagSid.Audio.PortAudio.csproj" />
-    <ProjectReference Include="..\MagSid.Editor.Common\MagSid.Editor.Common.csproj" />
-    <ProjectReference Include="..\MagSid.Editor.Views\MagSid.Editor.Views.csproj" />
     <PackageReference Include="Avalonia" Version="11.3.20" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
