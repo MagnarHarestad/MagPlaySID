@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The score format MagPlaySID transcribes tunes into, and the C# player that plays it -
+       docs/PLAN.md, step 1. Free of the MagSID player's memory budget: every effect C64 players
+       use, and raw register steps for whatever none of them describes. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MagPlay.Score</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MagPlay.Score.Tests" />
+  </ItemGroup>
+
+</Project>
