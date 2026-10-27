@@ -41,7 +41,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     private short[] _pending = new short[8192];
     private int _pendingCount;
 
-    private readonly float[][] _voiceScopes = [new float[RingSamples], new float[RingSamples], new float[RingSamples]];
+    private readonly float[][] _voiceScopes;
     private readonly float[] _mixScope = new float[RingSamples];
     private readonly int[][] _voiceStates;
     private readonly int[][] _registers;
@@ -56,8 +56,12 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         _chips = new SidChip[chips];
         _registers = new int[chips][];
         _voiceStates = new int[3 * chips][];
+        _voiceScopes = new float[3 * chips][];
         for (int voice = 0; voice < _voiceStates.Length; voice++)
+        {
             _voiceStates[voice] = new int[RingSamples];
+            _voiceScopes[voice] = new float[RingSamples];
+        }
 
         _tune = SidTune.Load(file, Math.Clamp(song, 1, Math.Max(1, file.Songs)), this, record: false);
         File = file;
@@ -108,11 +112,11 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// <summary>The SID chips the tune plays on: 1, or 2 or 3 for a 2SID or 3SID tune.</summary>
     public int Chips => _chips.Length;
 
-    /// <summary>A voice muted - on every chip, the voice of each in its place.</summary>
+    /// <summary>A voice muted: 0-2 the first chip's, 3-5 the second's, 6-8 the third's.</summary>
     public void SetVoiceMuted(int voice, bool muted)
     {
-        foreach (var chip in _chips)
-            chip.SetVoiceMuted(voice, muted);
+        if (voice >= 0 && voice < 3 * _chips.Length)
+            _chips[voice / 3].SetVoiceMuted(voice % 3, muted);
     }
 
     public int Read(byte[] buffer, int offset, int count)
@@ -215,8 +219,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
                 var chip = _chips[voice / 3];
                 var registers = _registers[voice / 3];
                 int b = voice % 3 * 7;
-                if (voice < 3)
-                    _voiceScopes[voice][at] = chip.Voice(voice).Output() / VoiceOutputScale;
+                _voiceScopes[voice][at] = chip.Voice(voice % 3).Output() / VoiceOutputScale;
                 _voiceStates[voice][at] = registers[b] | (registers[b + 1] << 8) | (registers[b + 4] << 16)
                                           | (chip.Voice(voice % 3).Envelope.Output() << 24);
             }

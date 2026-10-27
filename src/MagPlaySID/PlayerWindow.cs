@@ -25,7 +25,8 @@ internal sealed class PlayerWindow : Window
     private static readonly FontFamily Mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
     private readonly SpectrumView _spectrum = new();
-    private readonly VoiceScopeView[] _scopes = [new(0), new(1), new(2)];
+    private VoiceScopeView[] _scopes = [];
+    private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
     private readonly TransportButton _previous = new(TransportGlyph.Previous);
     private readonly TransportButton _playPause = new(TransportGlyph.Pause);
     private readonly TransportButton _next = new(TransportGlyph.Next);
@@ -38,7 +39,7 @@ internal sealed class PlayerWindow : Window
     private readonly ScoreView _view = new();
     private readonly PianoView _piano = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
-    private readonly bool[] _muted = new bool[3];
+    private readonly bool[] _muted = new bool[9];
 
     private SidFile? _file;
     private C64PlaybackEngine? _engine;
@@ -116,18 +117,7 @@ internal sealed class PlayerWindow : Window
         header.Children.Add(_open);
         header.Children.Add(new StackPanel { Children = { _title, _details } });
 
-        var scopes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*,*"), Height = 110, Margin = new Thickness(18, 6, 18, 4) };
-        for (int i = 0; i < 3; i++)
-        {
-            _scopes[i].Margin = new Thickness(i == 0 ? 0 : 5, 0, i == 2 ? 0 : 5, 0);
-            _scopes[i].MuteToggled += (voice, muted) =>
-            {
-                _muted[voice] = muted;
-                _engine?.SetVoiceMuted(voice, muted);
-            };
-            Grid.SetColumn(_scopes[i], i);
-            scopes.Children.Add(_scopes[i]);
-        }
+        BuildScopes(3);
 
         _elapsed.FontFamily = Mono;
         _elapsed.FontSize = 16;
@@ -171,7 +161,7 @@ internal sealed class PlayerWindow : Window
         retro.Children.Add(_view);
 
         var root = new DockPanel();
-        foreach (var top in new Control[] { header, spectrumHost, scopes, transport })
+        foreach (var top in new Control[] { header, spectrumHost, _scopeRow, transport })
         {
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
@@ -181,6 +171,34 @@ internal sealed class PlayerWindow : Window
         root.Children.Add(_piano);
         root.Children.Add(retro);
         return root;
+    }
+
+    /// <summary>A scope for each voice - three a chip, headed as the score's columns are - made
+    /// again only when the number changes; a change of chips unmutes every voice.</summary>
+    private void BuildScopes(int voices)
+    {
+        if (_scopes.Length == voices)
+            return;
+
+        Array.Clear(_muted);
+        _scopeRow.Children.Clear();
+        _scopeRow.ColumnDefinitions = new ColumnDefinitions(string.Join(",", Enumerable.Repeat("*", voices)));
+        _scopes = new VoiceScopeView[voices];
+        for (int i = 0; i < voices; i++)
+        {
+            var scope = new VoiceScopeView(i, voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null)
+            {
+                Margin = new Thickness(i == 0 ? 0 : 5, 0, i == voices - 1 ? 0 : 5, 0),
+            };
+            scope.MuteToggled += (voice, muted) =>
+            {
+                _muted[voice] = muted;
+                _engine?.SetVoiceMuted(voice, muted);
+            };
+            Grid.SetColumn(scope, i);
+            _scopeRow.Children.Add(scope);
+            _scopes[i] = scope;
+        }
     }
 
     private void ShowEmpty()
@@ -274,7 +292,8 @@ internal sealed class PlayerWindow : Window
         try
         {
             _engine = new C64PlaybackEngine(file, song);
-            for (int voice = 0; voice < 3; voice++)
+            BuildScopes(3 * _engine.Chips);
+            for (int voice = 0; voice < _scopes.Length; voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
             _output = AudioOutput.Start(_engine, latencyMs: 100);
         }

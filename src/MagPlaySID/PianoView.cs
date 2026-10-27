@@ -44,7 +44,7 @@ internal sealed class PianoView : Control
         Array.Clear(_lit);
         for (int voice = 0; voice < 3 * engine.Chips; voice++)
         {
-            if (muted[voice % 3])
+            if (muted[voice])
                 continue;
 
             var (frequency, control, envelope) = engine.VoiceAt(voice, at);

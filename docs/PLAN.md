@@ -244,7 +244,8 @@ reads. The engine runs a SID model per chip, each of the model the header names 
 (`SidFile.ExtraSids8580`; an unknown one is the first chip's), clocked together - the others take
 the cycles the first took for its sample, so all sample on the same instant - and mixes them,
 scaled by 0.7 for two and 0.55 for three so they do not clip where one would not. The spectrum
-hears the mix and the piano lights every chip's voices; the three scopes are the first chip's.
+hears the mix, the piano lights every chip's voices, and there is a scope for every voice - six
+or nine side by side, headed SID1 V1 to SID3 V3 - each muting its own chip's voice.
 Tried on the three 2SID tunes here (LMan's Blade Runner pair, Dervish D); there is no 3SID tune
 here, so the third chip is tested only through the same path.
 

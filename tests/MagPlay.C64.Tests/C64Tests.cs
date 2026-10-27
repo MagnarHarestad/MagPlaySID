@@ -394,6 +394,20 @@ public class C64Tests
         Assert.True(Loudness(buffer) > 1000);
         var (frequency, control, _) = engine.VoiceAt(3, buffer.Length / 2 - 1);
         Assert.Equal((0x1000, 0x11), (frequency, control));
+
+        // Its own scope traces it; muting the first chip's voice 1 leaves it sounding, its own silences it.
+        var scope = new float[SidFilePlaybackEngine.ScopeSamples];
+        engine.CaptureVoiceScope(3, scope, buffer.Length / 2);
+        Assert.True(scope.Max() - scope.Min() > 0.5f);
+        engine.SetVoiceMuted(0, true);
+        engine.Read(buffer, 0, buffer.Length);
+        Assert.True(Loudness(buffer) > 1000);
+        engine.SetVoiceMuted(3, true);
+
+        // The step the muted voice's DC level leaves takes the output filter a moment to settle.
+        engine.Read(buffer, 0, buffer.Length);
+        engine.Read(buffer, 0, buffer.Length);
+        Assert.True(Loudness(buffer) < 200, $"loudness {Loudness(buffer)}");
     }
 
     [Fact]

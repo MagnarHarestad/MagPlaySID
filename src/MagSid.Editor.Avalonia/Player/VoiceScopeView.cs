@@ -9,6 +9,7 @@ namespace MagSid.Editor.Avalonia.Player;
 /// <summary>
 /// One SID voice's own waveform, before the filter and the mix, triggered on a rising zero crossing
 /// so a steady note stands still. A click mutes the voice. A port of the Windows editor's view.
+/// A voice past the third - on a second or third SID - takes the colour of its place on its chip.
 /// </summary>
 internal sealed class VoiceScopeView : Control
 {
@@ -19,6 +20,7 @@ internal sealed class VoiceScopeView : Control
 
     private readonly float[] _samples = new float[SidFilePlaybackEngine.ScopeSamples];
     private readonly int _voice;
+    private readonly string _name;
     private readonly Color _colour;
     private readonly IBrush _fill = SidPlayerPalette.PanelFill();
     private readonly Pen _border = new(SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder));
@@ -29,10 +31,12 @@ internal sealed class VoiceScopeView : Control
     private bool _muted;
     private float _level;
 
-    public VoiceScopeView(int voice)
+    /// <param name="name">What the scope is labelled; VOICE and the voice's number when left out.</param>
+    public VoiceScopeView(int voice, string? name = null)
     {
         _voice = voice;
-        _colour = SidPlayerPalette.VoiceColour(voice);
+        _name = name ?? $"VOICE {voice + 1}";
+        _colour = SidPlayerPalette.VoiceColour(voice % 3);
         _glow = new Pen(new SolidColorBrush(SidPlayerPalette.WithAlpha(_colour, 40)), 3.5);
         _trace = new Pen(new SolidColorBrush(_colour), 1.4);
         Cursor = new Cursor(StandardCursorType.Hand);
@@ -110,7 +114,7 @@ internal sealed class VoiceScopeView : Control
 
         context.DrawRectangle(_border, bounds.Deflate(0.5));
 
-        string text = _muted ? $"VOICE {_voice + 1}  MUTED" : $"VOICE {_voice + 1}";
+        string text = _muted ? $"{_name}  MUTED" : _name;
         var label = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
             LabelFace, 10, new SolidColorBrush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170)));
         context.DrawText(label, new Point(8, bounds.Height - 17));
