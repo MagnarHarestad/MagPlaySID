@@ -206,8 +206,22 @@ filter program below, the step sounding lit. A three-minute tune is ready about 
 after it starts, most of it recording.
 
 The app no longer uses Import SID or the editor's tracker grid, and so no longer references the
-editor projects. The sound is still MagSID's PSID engine, so RSIDs are refused before the view
-gets them; playing the recording itself - any tune, digis included - is the step after.
+editor projects.
+
+**The sound is the C64 now.** `C64PlaybackEngine` (in `src/MagPlay.C64`) runs the tune on the
+same C64 the transcription is recorded on, live, a couple of milliseconds ahead of the sound card,
+and plays into the SID through `ISidPort`: the chip is clocked up to each write's cycle - and each
+read of voice 3's oscillator or envelope - before it, so every write sounds where the 6510 made
+it, digis from an NMI included. Played so, the C64 keeps no record of its writes. Its init runs
+unheard up to the first call and the chip settles, as MagSID's engines do; the view goes by the
+engine's own cycle (`CycleAt`), the same count the recording keeps. So RSIDs play and show too:
+the ThcMOD and LMan digis, Hi Fi Sky. Ten seconds of a tune renders in under a second.
+The spectrum and scopes take `IScopeSource`, which MagSID's PSID engine also implements - a
+small change to the shared player views - and `SidChipSettling` is public.
+
+Not yet: a tune's length for an RSID - the length is still measured on MagSID's PSID engine,
+which refuses them, so an RSID shows no length and is transcribed for its first three minutes;
+the second and third SID of a 2SID or 3SID tune are not played.
 
 ## Rules carried over from MagSID
 

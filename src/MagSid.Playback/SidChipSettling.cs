@@ -2,7 +2,7 @@ using MagSid.Sid;
 
 namespace MagSid.Playback;
 
-internal static class SidChipSettling
+public static class SidChipSettling
 {
     /// <summary>
     /// Clocks a freshly configured chip past its power-on settling, discarding the samples.

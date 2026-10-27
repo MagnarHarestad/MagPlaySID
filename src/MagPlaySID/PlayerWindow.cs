@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using MagSid.Editor.Avalonia;
+using MagPlay.C64;
 using MagSid.Editor.Avalonia.Player;
 using MagSid.Playback;
 
@@ -15,7 +16,8 @@ namespace MagPlaySid;
 /// MagPlaySID's window: a .sid plays - opened, dropped on the window from Explorer, Finder or the
 /// desktop, or named on the command line - with the MagSID player's spectrum and a scope per
 /// voice, and below them the tune transcribed into a score whose rows scroll with the music.
-/// The sound is always the tune's own 6502 code; the score is only a view of it.
+/// The sound is always the tune's own 6502 code, run on the C64 - any tune, RSIDs and digis too;
+/// the score is only a view of it.
 /// </summary>
 internal sealed class PlayerWindow : Window
 {
@@ -37,7 +39,7 @@ internal sealed class PlayerWindow : Window
     private readonly bool[] _muted = new bool[3];
 
     private SidFile? _file;
-    private SidFilePlaybackEngine? _engine;
+    private C64PlaybackEngine? _engine;
     private IAudioOutput? _output;
     private SidSongLength.Result? _length;
     private int _song;
@@ -209,7 +211,7 @@ internal sealed class PlayerWindow : Window
         try
         {
             file = SidFile.Parse(File.ReadAllBytes(path));
-            if (file.UnsupportedReason() is { } reason)
+            if (SidTune.Unsupported(file) is { } reason)
                 throw new SidPlaybackException(reason);
         }
         catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException)
@@ -235,6 +237,10 @@ internal sealed class PlayerWindow : Window
         if (!string.IsNullOrWhiteSpace(file.Released))
             parts.Add(file.Released);
         parts.Add(file.Is8580 ? "8580" : "6581");
+        if (file.IsNtsc)
+            parts.Add("NTSC");
+        if (file.IsRsid)
+            parts.Add("RSID");
         if (file.UsesCiaTimer(_song))
             parts.Add("CIA timer");
         if (file.Songs > 1)
@@ -259,7 +265,7 @@ internal sealed class PlayerWindow : Window
 
         try
         {
-            _engine = new SidFilePlaybackEngine(file, chipModel: null, song: song);
+            _engine = new C64PlaybackEngine(file, song);
             for (int voice = 0; voice < 3; voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
             _output = AudioOutput.Start(_engine, latencyMs: 100);
@@ -351,14 +357,16 @@ internal sealed class PlayerWindow : Window
 
         var position = PositionWithinSong(at);
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
-        if (_transcription is { } transcription)
-            _view.SetCycle((long)(position.TotalSeconds * transcription.ClockHz));
+        if (_transcription is not null)
+            _view.SetCycle(engine.CycleAt(position.TotalSeconds * C64PlaybackEngine.SampleRate));
+        if (engine.Failure is { } failure && !_details.Text!.StartsWith("The tune stopped", StringComparison.Ordinal))
+            _details.Text = $"The tune stopped: {failure}";
     }
 
     /// <summary>Where the listener is inside the song: past the end it folds back into the loop.</summary>
     private TimeSpan PositionWithinSong(long samples)
     {
-        var elapsed = TimeSpan.FromSeconds(samples / (double)SidFilePlaybackEngine.SampleRate);
+        var elapsed = TimeSpan.FromSeconds(samples / (double)C64PlaybackEngine.SampleRate);
         if (_length is not { } length || length.LoopFrames <= 0 || elapsed <= length.Total)
             return elapsed;
 

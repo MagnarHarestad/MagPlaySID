@@ -284,4 +284,66 @@ public class C64Tests
 
         Assert.Contains("BASIC", SidTune.Unsupported(SidFile.Parse(bytes)));
     }
+
+    private sealed class Chip : ISidPort
+    {
+        public List<TimedWrite> Writes { get; } = [];
+
+        public void Write(long cycle, int register, int value) => Writes.Add(new TimedWrite(cycle, register, value));
+
+        public byte Read(long cycle, int register) => 0;
+    }
+
+    [Fact]
+    public void A_chip_played_into_gets_every_write_on_its_cycle_as_a_recording_has_it()
+    {
+        byte[] code = [0x60, 0xEE, 0x00, 0xC0, 0xAD, 0x00, 0xC0, 0x8D, 0x18, 0xD4, 0x60];
+        var file = Tune(code, play: 0x1001);
+        var chip = new Chip();
+        var played = SidTune.Load(file, 1, chip, record: false);
+        played.Run(Pal / 2);
+
+        Assert.Equal(SidTune.Record(file, 1, 0.5), chip.Writes);
+        Assert.Empty(played.Computer.SidWrites);
+    }
+
+    /// <summary>The RMS of 16-bit mono samples.</summary>
+    private static double Loudness(byte[] buffer) =>
+        Math.Sqrt(Enumerable.Range(0, buffer.Length / 2).Average(i => Math.Pow(BitConverter.ToInt16(buffer, i * 2), 2)));
+
+    [Fact]
+    public void The_engine_plays_a_note_and_an_nmi_digi_out_loud_and_silence_while_paused()
+    {
+        // init: freq $1000, AD $00, SR $F0, triangle with the gate, volume 15 / rts
+        byte[] note =
+        [
+            0xA9, 0x10, 0x8D, 0x01, 0xD4, 0xA9, 0xF0, 0x8D, 0x06, 0xD4,
+            0xA9, 0x11, 0x8D, 0x04, 0xD4, 0xA9, 0x0F, 0x8D, 0x18, 0xD4, 0x60, 0x60,
+        ];
+        var tone = new C64PlaybackEngine(Tune(note, play: 0x1015), 1);
+        var buffer = new byte[C64PlaybackEngine.SampleRate];
+        tone.Read(buffer, 0, buffer.Length);
+        Assert.True(Loudness(buffer) > 1000);
+
+        tone.Paused = true;
+        tone.Read(buffer, 0, buffer.Length);
+        Assert.Equal(0, Loudness(buffer));
+
+        // The digi of the NMI test above: $D418 stepped 0-15 from CIA 2's NMI.
+        var code = new byte[0x40];
+        byte[] init =
+        [
+            0xA9, 0x20, 0x8D, 0x18, 0x03, 0xA9, 0x10, 0x8D, 0x19, 0x03,
+            0xA9, 123, 0x8D, 0x04, 0xDD, 0xA9, 0x00, 0x8D, 0x05, 0xDD,
+            0xA9, 0x81, 0x8D, 0x0D, 0xDD, 0xA9, 0x11, 0x8D, 0x0E, 0xDD, 0x60,
+        ];
+        byte[] nmi = [0x48, 0xAD, 0x0D, 0xDD, 0xEE, 0x01, 0xC0, 0xAD, 0x01, 0xC0, 0x29, 0x0F, 0x8D, 0x18, 0xD4, 0x68, 0x40];
+        init.CopyTo(code, 0);
+        nmi.CopyTo(code, 0x20);
+        var digi = new C64PlaybackEngine(Tune(code, rsid: true), 1);
+        digi.Read(buffer, 0, buffer.Length);
+
+        Assert.Null(digi.Failure);
+        Assert.True(Loudness(buffer) > 1000);
+    }
 }

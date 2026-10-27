@@ -57,7 +57,7 @@ internal sealed class SpectrumView : Control
     }
 
     /// <summary>Advances the display by one frame from the mix the listener is hearing.</summary>
-    public void Update(SidFilePlaybackEngine engine, long atSample)
+    public void Update(IScopeSource engine, long atSample)
     {
         engine.CaptureMix(_samples, atSample);
 

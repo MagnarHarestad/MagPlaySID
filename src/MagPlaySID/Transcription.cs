@@ -18,9 +18,6 @@ internal sealed class Transcription
 
     public required Transcriber.Report Report { get; init; }
 
-    /// <summary>The C64's clock the cycles count: PAL's or NTSC's.</summary>
-    public required double ClockHz { get; init; }
-
     /// <param name="seconds">How much of the tune: its measured length.</param>
     public static Transcription Make(SidFile file, int song, double seconds, CancellationToken cancel)
     {
@@ -33,7 +30,6 @@ internal sealed class Transcription
             Score = score,
             Timeline = ScoreTimeline.Of(score, Math.Max(1, recording.Calls.Count)),
             Report = report,
-            ClockHz = Machines.ClockHz(recording.Machine),
         };
     }
 

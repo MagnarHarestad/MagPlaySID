@@ -48,12 +48,14 @@ public sealed class SidTune
         return null;
     }
 
-    public static SidTune Load(SidFile file, int song)
+    /// <param name="sid">The chip it plays into, for a tune that is listened to.</param>
+    /// <param name="record">Keep every SID write, for a tune that is transcribed.</param>
+    public static SidTune Load(SidFile file, int song, ISidPort? sid = null, bool record = true)
     {
         if (Unsupported(file) is { } reason)
             throw new SidPlaybackException(reason);
 
-        var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids);
+        var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids, sid, record);
         file.Data.CopyTo(machine.Ram, file.LoadAddress);
 
         int driver = DriverAddress(file);

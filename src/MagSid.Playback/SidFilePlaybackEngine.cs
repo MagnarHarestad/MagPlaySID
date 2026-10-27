@@ -16,7 +16,7 @@ namespace MagSid.Playback;
 /// sequencer: register writes are interleaved at frame boundaries rather than issued up front, so a
 /// note lands on the right SID cycle relative to the audio around it.
 /// </summary>
-public sealed class SidFilePlaybackEngine : IWaveProvider
+public sealed class SidFilePlaybackEngine : IWaveProvider, IScopeSource
 {
     private const double ClockFrequency = PlayRate.PalClock;
 

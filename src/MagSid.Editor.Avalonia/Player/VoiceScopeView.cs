@@ -40,7 +40,7 @@ internal sealed class VoiceScopeView : Control
 
     public event Action<int, bool>? MuteToggled;
 
-    public void Update(SidFilePlaybackEngine engine, long atSample)
+    public void Update(IScopeSource engine, long atSample)
     {
         engine.CaptureVoiceScope(_voice, _samples, atSample);
 

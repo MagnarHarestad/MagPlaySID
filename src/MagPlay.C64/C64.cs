@@ -4,6 +4,15 @@ using MagSid.Sid;
 
 namespace MagPlay.C64;
 
+/// <summary>A SID chip the C64 plays into: each write, and each read of what the chip makes itself -
+/// voice 3's oscillator and envelope - on the cycle the 6510 makes it.</summary>
+public interface ISidPort
+{
+    void Write(long cycle, int register, int value);
+
+    byte Read(long cycle, int register);
+}
+
 /// <summary>What the 6510 was running when it wrote to the SID.</summary>
 public enum WriteContext : byte
 {
@@ -43,6 +52,8 @@ public sealed class C64 : IMemoryBus
 
     /// <summary>The interrupts being run, innermost last, each with the stack pointer it was taken at.</summary>
     private readonly List<(bool Nmi, int Sp)> _interrupts = [];
+    private readonly ISidPort? _chip;
+    private readonly bool _record;
     private long _synced;
     private long _nmiEdge = -1;
     private bool _maskedBefore = true;
@@ -54,8 +65,14 @@ public sealed class C64 : IMemoryBus
     private SidChip? _sid;
     private long _sidCycle;
 
-    public C64(Machine machine, IReadOnlyList<int>? extraSids = null)
+    /// <param name="sid">A chip to play into, for a C64 that is listened to; without one the
+    /// writes are only recorded.</param>
+    /// <param name="record">Keep every write in <see cref="SidWrites"/> - off for a C64 played for
+    /// as long as anyone listens, which a digi would fill memory with.</param>
+    public C64(Machine machine, IReadOnlyList<int>? extraSids = null, ISidPort? sid = null, bool record = true)
     {
+        _chip = sid;
+        _record = record;
         _extraSids = [.. extraSids ?? []];
         _extraSidWrites = [.. _extraSids.Select(_ => new List<TimedWrite>())];
         Machine = machine;
@@ -229,7 +246,7 @@ public sealed class C64 : IMemoryBus
         {
             case < 0xD400: Vic.Write(address, value); break;
             case var _ when ExtraSid(address) is >= 0 and var chip:
-                if ((address & 0x1F) <= 0x18)
+                if ((address & 0x1F) <= 0x18 && _record)
                     _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
                 break;
             case < 0xD800: WriteSid(address & 0x1F, value); break;
@@ -257,6 +274,10 @@ public sealed class C64 : IMemoryBus
             return;
 
         _sidRegisters[register] = (byte)value;
+        _chip?.Write(Cpu.AccessCycle, register, value);
+        if (!_record)
+            return;
+
         _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));
         _sidWriteContexts.Add(Context());
         if (_sid is not null)
@@ -275,6 +296,8 @@ public sealed class C64 : IMemoryBus
                 return 0xFF;
             case 0x1B:
             case 0x1C:
+                if (_chip is not null)
+                    return _chip.Read(Cpu.AccessCycle, register);
                 EnsureSid();
                 ClockSidTo(Cpu.AccessCycle);
                 return (byte)_sid!.Read(register);
