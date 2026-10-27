@@ -338,6 +338,14 @@ public class C64Tests
         tone.Read(buffer, 0, buffer.Length);
         Assert.Equal(0, Loudness(buffer));
 
+        // The tune's own sample stands still through the pause and goes on after it.
+        tone.Paused = false;
+        tone.Read(buffer, 0, buffer.Length);
+        int half = buffer.Length / 2;
+        Assert.Equal(half / 2, tone.TuneSampleAt(half / 2));
+        Assert.Equal(half, tone.TuneSampleAt(half + half / 2));
+        Assert.Equal(half + half / 2, tone.TuneSampleAt(2 * half + half / 2));
+
         // The digi of the NMI test above: $D418 stepped 0-15 from CIA 2's NMI.
         var code = new byte[0x40];
         byte[] init =

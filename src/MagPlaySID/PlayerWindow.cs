@@ -397,7 +397,7 @@ internal sealed class PlayerWindow : Window
         if (_engine is not { } engine || _output is not { } output)
             return;
 
-        long at = output.SamplesPlayed;
+        long at = engine.TuneSampleAt(output.SamplesPlayed);
         _spectrum.Update(engine, at);
         foreach (var scope in _scopes)
             scope.Update(engine, at);

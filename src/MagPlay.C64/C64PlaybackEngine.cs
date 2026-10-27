@@ -49,6 +49,12 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     private long _scopeWritten;
     private readonly object _scopeLock = new();
 
+    /// <summary>Where the output went silent for a pause, or on again: the device's sample and the
+    /// tune's there. Between them the tune moves as the device does, or not at all.</summary>
+    private readonly List<(long Device, long Tune, bool Silent)> _turns = [(0, 0, false)];
+    private long _device;
+    private long _tuneSample;
+
     /// <param name="song">The subtune, counting from 1.</param>
     public C64PlaybackEngine(SidFile file, int song)
     {
@@ -106,6 +112,19 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
     public WaveFormat WaveFormat { get; } = new(SampleRate, 16, 1);
 
+    /// <summary>The tune's own sample the device is playing at its sample <paramref name="device"/>:
+    /// the samples of silence a pause gave the device are not the tune's, so a view following this
+    /// stands still while paused.</summary>
+    public long TuneSampleAt(long device)
+    {
+        lock (_turns)
+        {
+            int at = _turns.FindLastIndex(t => t.Device <= device);
+            var (from, tune, silent) = _turns[Math.Max(0, at)];
+            return silent ? tune : tune + Math.Max(0, device - from);
+        }
+    }
+
     /// <summary>The C64's cycle at sample <paramref name="sample"/>.</summary>
     public long CycleAt(double sample) => StartCycle + (long)(sample * ClockHz / SampleRate);
 
@@ -122,7 +141,19 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     public int Read(byte[] buffer, int offset, int count)
     {
         int wanted = count / 2;
-        if (Paused || Failure is not null)
+        bool silent = Paused || Failure is not null;
+        lock (_turns)
+        {
+            if (_turns[^1].Silent != silent)
+                _turns.Add((_device, _tuneSample, silent));
+            if (_turns.Count > 256)
+                _turns.RemoveRange(0, _turns.Count - 256);
+            _device += wanted;
+            if (!silent)
+                _tuneSample += wanted;
+        }
+
+        if (silent)
         {
             Array.Clear(buffer, offset, wanted * 2);
             return wanted * 2;
