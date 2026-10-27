@@ -15,7 +15,8 @@ namespace MagPlaySid;
 /// <summary>
 /// MagPlaySID's window: a .sid plays - opened, dropped on the window from Explorer, Finder or the
 /// desktop, or named on the command line - with the MagSID player's spectrum and a scope per
-/// voice, and below them the tune transcribed into a score whose rows scroll with the music.
+/// voice, below them the tune transcribed into a score whose rows scroll with the music, and at
+/// the bottom a keyboard lit by the notes the voices play.
 /// The sound is always the tune's own 6502 code, run on the C64 - any tune, RSIDs and digis too;
 /// the score is only a view of it.
 /// </summary>
@@ -35,6 +36,7 @@ internal sealed class PlayerWindow : Window
     private readonly TextBlock _retroStatus = new();
     private readonly Button _open = new();
     private readonly ScoreView _view = new();
+    private readonly PianoView _piano = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly bool[] _muted = new bool[3];
 
@@ -163,7 +165,7 @@ internal sealed class PlayerWindow : Window
         _retroStatus.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _retroStatus.FontSize = 12;
         _retroStatus.Margin = new Thickness(0, 0, 0, 4);
-        var retro = new DockPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(18, 4, 18, 12) };
+        var retro = new DockPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(18, 4, 18, 8) };
         DockPanel.SetDock(_retroStatus, Dock.Top);
         retro.Children.Add(_retroStatus);
         retro.Children.Add(_view);
@@ -174,6 +176,9 @@ internal sealed class PlayerWindow : Window
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
         }
+        _piano.Margin = new Thickness(18, 0, 18, 12);
+        DockPanel.SetDock(_piano, Dock.Bottom);
+        root.Children.Add(_piano);
         root.Children.Add(retro);
         return root;
     }
@@ -253,6 +258,7 @@ internal sealed class PlayerWindow : Window
         _spectrum.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
+        _piano.Clear();
         Start(_song);
         Transcribe(_song);
     }
@@ -355,6 +361,7 @@ internal sealed class PlayerWindow : Window
         _spectrum.Update(engine, at);
         foreach (var scope in _scopes)
             scope.Update(engine, at);
+        _piano.Update(engine, at, _muted);
 
         var position = PositionWithinSong(at);
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";

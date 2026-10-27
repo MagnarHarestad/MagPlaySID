@@ -325,6 +325,12 @@ public class C64Tests
         tone.Read(buffer, 0, buffer.Length);
         Assert.True(Loudness(buffer) > 1000);
 
+        // Frequency $1000 on PAL is 240.5 Hz, nearest B-3 - key 47 from C-0.
+        var (frequency, control, envelope) = tone.VoiceAt(0, buffer.Length / 2 - 1);
+        Assert.Equal((0x1000, 0x11), (frequency, control));
+        Assert.True(envelope > 200);
+        Assert.Equal(47, (int)Math.Round(tone.NoteOf(frequency)));
+
         tone.Paused = true;
         tone.Read(buffer, 0, buffer.Length);
         Assert.Equal(0, Loudness(buffer));

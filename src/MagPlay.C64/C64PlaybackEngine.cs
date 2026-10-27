@@ -38,6 +38,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
     private readonly float[][] _voiceScopes = [new float[RingSamples], new float[RingSamples], new float[RingSamples]];
     private readonly float[] _mixScope = new float[RingSamples];
+    private readonly int[][] _voiceStates = [new int[RingSamples], new int[RingSamples], new int[RingSamples]];
+    private readonly int[] _registers = new int[0x19];
     private long _scopeWritten;
     private readonly object _scopeLock = new();
 
@@ -120,6 +122,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     {
         ClockTo(cycle);
         _chip.Write(register, value);
+        _registers[register] = value & 0xFF;
     }
 
     byte ISidPort.Read(long cycle, int register)
@@ -156,11 +159,34 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         {
             int at = (int)(_scopeWritten % RingSamples);
             for (int voice = 0; voice < 3; voice++)
+            {
                 _voiceScopes[voice][at] = _chip.Voice(voice).Output() / VoiceOutputScale;
+                int b = voice * 7;
+                _voiceStates[voice][at] = _registers[b] | (_registers[b + 1] << 8) | (_registers[b + 4] << 16)
+                                          | (_chip.Voice(voice).Envelope.Output() << 24);
+            }
             _mixScope[at] = mix / 32768f;
             _scopeWritten++;
         }
     }
+
+    /// <summary>What a voice is doing at sample <paramref name="at"/> - the one the listener hears:
+    /// its frequency register, control byte and envelope level, 0-255.</summary>
+    public (int Frequency, int Control, int Envelope) VoiceAt(int voice, long at)
+    {
+        lock (_scopeLock)
+        {
+            if (_scopeWritten == 0)
+                return default;
+            long sample = Math.Clamp(at, Math.Max(0, _scopeWritten - RingSamples), _scopeWritten - 1);
+            int state = _voiceStates[voice][(int)(sample % RingSamples)];
+            return (state & 0xFFFF, (state >> 16) & 0xFF, (state >> 24) & 0xFF);
+        }
+    }
+
+    /// <summary>The note a frequency register plays on this machine, C-0 as 0 - fractional, between keys.</summary>
+    public double NoteOf(int frequency) =>
+        frequency <= 0 ? double.NaN : 12 * Math.Log2(frequency * ClockHz / 16777216.0 / 16.3516);
 
     public void CaptureVoiceScope(int voice, float[] destination, long endingAt) =>
         CaptureRing(_voiceScopes[voice], destination, endingAt);

@@ -231,6 +231,13 @@ real 50.12. A tune that never repeats within twenty minutes takes some twenty se
 A PSID's init or play routine in the I/O area ($D000-$DFFF) is called with all RAM banked in, as
 libsidplayfp does; two of Magnar's test tunes start at $DFF6 and did nothing before.
 
+**A piano along the bottom** (`PianoView`): the SID's eight octaves, C-0 to B-7, each voice's key
+lit in the voice's scope colour as bright as its envelope, so a release fades on the key. Read
+from the chip at the sample being heard - the engine keeps each voice's frequency, control byte
+and envelope beside its scope samples (`VoiceAt`, `NoteOf`) - so it shows what sounds,
+arpeggios, slides and drums too, in any tune. A muted voice lights nothing. The keys are drawn in
+the player's own colours: ivory-grey and ebony on the panel background, seams in its border.
+
 Not yet: the second and third SID of a 2SID or 3SID tune are not played.
 
 ## Rules carried over from MagSID
