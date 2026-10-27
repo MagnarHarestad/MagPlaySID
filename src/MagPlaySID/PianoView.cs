@@ -10,7 +10,8 @@ namespace MagPlaySid;
 /// A keyboard of the SID's eight octaves, C-0 to B-7, playing what the chip plays: each voice's
 /// key lights in the voice's colour - the scopes' - as bright as its envelope, so a note's release
 /// fades on the key. Read from the chip itself at the sample being heard, so it shows what sounds -
-/// an arpeggio, a slide, a drum - in any tune, whatever the transcription makes of it.
+/// an arpeggio, a slide, a drum - in any tune, whatever the transcription makes of it. A 2SID or
+/// 3SID tune's other chips light keys too, each voice in the colour of its place on its chip.
 /// </summary>
 internal sealed class PianoView : Control
 {
@@ -41,9 +42,9 @@ internal sealed class PianoView : Control
     public void Update(C64PlaybackEngine engine, long at, IReadOnlyList<bool> muted)
     {
         Array.Clear(_lit);
-        for (int voice = 0; voice < 3; voice++)
+        for (int voice = 0; voice < 3 * engine.Chips; voice++)
         {
-            if (muted[voice])
+            if (muted[voice % 3])
                 continue;
 
             var (frequency, control, envelope) = engine.VoiceAt(voice, at);
@@ -54,7 +55,7 @@ internal sealed class PianoView : Control
 
             int key = (int)Math.Round(note);
             if (key is >= 0 and < Keys)
-                _lit[key, voice] = Math.Sqrt(envelope / 255.0);
+                _lit[key, voice % 3] = Math.Max(_lit[key, voice % 3], Math.Sqrt(envelope / 255.0));
         }
         InvalidateVisual();
     }

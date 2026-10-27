@@ -4,13 +4,14 @@ using MagSid.Sid;
 
 namespace MagPlay.C64;
 
-/// <summary>A SID chip the C64 plays into: each write, and each read of what the chip makes itself -
-/// voice 3's oscillator and envelope - on the cycle the 6510 makes it.</summary>
+/// <summary>The SID chips the C64 plays into: each write, and each read of what a chip makes
+/// itself - voice 3's oscillator and envelope - on the cycle the 6510 makes it. Chip 0 is the one
+/// at $D400; 1 and 2 are the ones a 2SID or 3SID tune's header names, in its order.</summary>
 public interface ISidPort
 {
-    void Write(long cycle, int register, int value);
+    void Write(long cycle, int chip, int register, int value);
 
-    byte Read(long cycle, int register);
+    byte Read(long cycle, int chip, int register);
 }
 
 /// <summary>What the 6510 was running when it wrote to the SID.</summary>
@@ -242,7 +243,8 @@ public sealed class C64 : IMemoryBus
         return address switch
         {
             < 0xD400 => Vic.Read(address),
-            < 0xD800 => ReadSid(address & 0x1F),
+            _ when ExtraSid(address) is >= 0 and var chip => ReadSid(chip + 1, address & 0x1F),
+            < 0xD800 => ReadSid(0, address & 0x1F),
             < 0xDC00 => (byte)(_colour[address - 0xD800] | 0xF0),
             < 0xDD00 => Cia1.Read(address),
             < 0xDE00 => Cia2.Read(address),
@@ -257,7 +259,10 @@ public sealed class C64 : IMemoryBus
         {
             case < 0xD400: Vic.Write(address, value); break;
             case var _ when ExtraSid(address) is >= 0 and var chip:
-                if ((address & 0x1F) <= 0x18 && _record)
+                if ((address & 0x1F) > 0x18)
+                    break;
+                _chip?.Write(Cpu.AccessCycle, chip + 1, address & 0x1F, value);
+                if (_record)
                     _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
                 break;
             case < 0xD800: WriteSid(address & 0x1F, value); break;
@@ -285,7 +290,7 @@ public sealed class C64 : IMemoryBus
             return;
 
         _sidRegisters[register] = (byte)value;
-        _chip?.Write(Cpu.AccessCycle, register, value);
+        _chip?.Write(Cpu.AccessCycle, 0, register, value);
         if (!_record)
             return;
 
@@ -298,7 +303,7 @@ public sealed class C64 : IMemoryBus
         }
     }
 
-    private byte ReadSid(int register)
+    private byte ReadSid(int chip, int register)
     {
         switch (register)
         {
@@ -308,7 +313,9 @@ public sealed class C64 : IMemoryBus
             case 0x1B:
             case 0x1C:
                 if (_chip is not null)
-                    return _chip.Read(Cpu.AccessCycle, register);
+                    return _chip.Read(Cpu.AccessCycle, chip, register);
+                if (chip > 0)
+                    return 0;
                 EnsureSid();
                 ClockSidTo(Cpu.AccessCycle);
                 return (byte)_sid!.Read(register);

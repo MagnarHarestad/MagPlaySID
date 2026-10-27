@@ -289,9 +289,12 @@ public class C64Tests
     {
         public List<TimedWrite> Writes { get; } = [];
 
-        public void Write(long cycle, int register, int value) => Writes.Add(new TimedWrite(cycle, register, value));
+        public List<TimedWrite> Second { get; } = [];
 
-        public byte Read(long cycle, int register) => 0;
+        public void Write(long cycle, int chip, int register, int value) =>
+            (chip == 0 ? Writes : Second).Add(new TimedWrite(cycle, register, value));
+
+        public byte Read(long cycle, int chip, int register) => 0;
     }
 
     [Fact]
@@ -367,5 +370,49 @@ public class C64Tests
         // A 16-bit counter - inc $c000 / bne / inc $c001 - comes round only after 22 minutes.
         byte[] counter = [0x60, 0xEE, 0x00, 0xC0, 0xD0, 0x03, 0xEE, 0x01, 0xC0, 0x60];
         Assert.Null(C64SongLength.Measure(Tune(counter, play: 0x1001), 1, maxSeconds: 30));
+    }
+
+    [Fact]
+    public void A_2sid_tune_plays_its_second_chip_through_the_port_and_out_loud()
+    {
+        // init: freq hi $10, SR $F0, triangle and gate, volume 15 - all on the SID at $D420 / rts
+        byte[] code =
+        [
+            0xA9, 0x10, 0x8D, 0x21, 0xD4, 0xA9, 0xF0, 0x8D, 0x26, 0xD4,
+            0xA9, 0x11, 0x8D, 0x24, 0xD4, 0xA9, 0x0F, 0x8D, 0x38, 0xD4, 0x60, 0x60,
+        ];
+        var file = Tune(code, play: 0x1015, secondSid: 0xD420);
+        var chip = new Chip();
+        SidTune.Load(file, 1, chip, record: false).Run(10000);
+        Assert.Empty(chip.Writes);
+        Assert.Equal([(0x01, 0x10), (0x06, 0xF0), (0x04, 0x11), (0x18, 0x0F)], chip.Second.Select(w => (w.Register, w.Value)));
+
+        var engine = new C64PlaybackEngine(file, 1);
+        var buffer = new byte[C64PlaybackEngine.SampleRate];
+        engine.Read(buffer, 0, buffer.Length);
+        Assert.Equal(2, engine.Chips);
+        Assert.True(Loudness(buffer) > 1000);
+        var (frequency, control, _) = engine.VoiceAt(3, buffer.Length / 2 - 1);
+        Assert.Equal((0x1000, 0x11), (frequency, control));
+    }
+
+    [Fact]
+    public void The_header_says_each_extra_sids_model_and_an_unknown_one_is_the_first_chips()
+    {
+        var bytes = new byte[0x7E];
+        "PSID"u8.CopyTo(bytes);
+        bytes[5] = 4;
+        bytes[7] = 0x7C;
+        bytes[8] = 0x10;
+        bytes[0x0F] = 1;
+        bytes[0x11] = 1;
+        bytes[0x76] = 0x00;   // third SID: unknown
+        bytes[0x77] = 0x60;   // first 8580, second 6581
+        bytes[0x7A] = 0x42;
+        bytes[0x7B] = 0x44;
+        var file = SidFile.Parse(bytes);
+
+        Assert.Equal([0xD420, 0xD440], file.ExtraSids);
+        Assert.Equal([false, true], file.ExtraSids8580);
     }
 }

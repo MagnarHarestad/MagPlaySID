@@ -10,7 +10,8 @@ namespace MagPlay.C64;
 /// RSID, on the raster or a CIA timer, multispeed, digis from an NMI - and the SID is clocked up to
 /// each write's own cycle before the write, so every write sounds where the 6510 made it. The C64
 /// runs a little ahead of the sound card, a slice at a time, for as long as anyone listens; it
-/// keeps no record of the writes.
+/// keeps no record of the writes. A 2SID or 3SID tune plays on as many chips, clocked together and
+/// mixed into one.
 ///
 /// The cycles count from the C64's start, as a <see cref="SidTune"/> recorded for a transcription
 /// counts them, so a view of the transcription follows this by <see cref="CycleAt"/>.
@@ -29,7 +30,11 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// <summary>Samples of history the scope rings keep: 1.5 seconds, past any device's latency.</summary>
     private const int RingSamples = 65536;
 
-    private readonly SidChip _chip = new();
+    /// <summary>What the mix of several chips is scaled by, so two or three at full volume do not
+    /// clip where one would not: by chip count.</summary>
+    private static readonly double[] MixScale = [0, 1, 0.7, 0.55];
+
+    private readonly SidChip[] _chips;
     private readonly SidTune _tune;
     private long _chipCycle;
     private bool _silent;
@@ -38,20 +43,34 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
     private readonly float[][] _voiceScopes = [new float[RingSamples], new float[RingSamples], new float[RingSamples]];
     private readonly float[] _mixScope = new float[RingSamples];
-    private readonly int[][] _voiceStates = [new int[RingSamples], new int[RingSamples], new int[RingSamples]];
-    private readonly int[] _registers = new int[0x19];
+    private readonly int[][] _voiceStates;
+    private readonly int[][] _registers;
+    private readonly short[] _extraSample = new short[1];
     private long _scopeWritten;
     private readonly object _scopeLock = new();
 
     /// <param name="song">The subtune, counting from 1.</param>
     public C64PlaybackEngine(SidFile file, int song)
     {
+        int chips = 1 + Math.Min(2, file.ExtraSids.Count);
+        _chips = new SidChip[chips];
+        _registers = new int[chips][];
+        _voiceStates = new int[3 * chips][];
+        for (int voice = 0; voice < _voiceStates.Length; voice++)
+            _voiceStates[voice] = new int[RingSamples];
+
         _tune = SidTune.Load(file, Math.Clamp(song, 1, Math.Max(1, file.Songs)), this, record: false);
         File = file;
         Song = _tune.Song;
         ClockHz = Machines.ClockHz(_tune.Computer.Machine);
-        _chip.SetChipModel(file.Is8580 ? ChipModel.Mos8580 : ChipModel.Mos6581);
-        _chip.SetSamplingParameters(ClockHz, SamplingMethod.Interpolate, SampleRate);
+        for (int chip = 0; chip < chips; chip++)
+        {
+            bool is8580 = chip == 0 ? file.Is8580 : file.ExtraSids8580[chip - 1];
+            _chips[chip] = new SidChip();
+            _chips[chip].SetChipModel(is8580 ? ChipModel.Mos8580 : ChipModel.Mos6581);
+            _chips[chip].SetSamplingParameters(ClockHz, SamplingMethod.Interpolate, SampleRate);
+            _registers[chip] = new int[0x19];
+        }
 
         // Init, unheard, up to the first call - or two frames, for a tune that plays without - and
         // the chip let settle from the volume it set, so the music starts without a thump.
@@ -60,7 +79,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         while (_tune.Computer.Calls.Count == 0 && _tune.Computer.Cycle < until)
             _tune.Run(64);
         ClockTo(_tune.Computer.Cycle);
-        _chip.SettleStartupTransient(ClockHz);
+        foreach (var chip in _chips)
+            chip.SettleStartupTransient(ClockHz);
         _silent = false;
         StartCycle = _chipCycle;
     }
@@ -85,7 +105,15 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// <summary>The C64's cycle at sample <paramref name="sample"/>.</summary>
     public long CycleAt(double sample) => StartCycle + (long)(sample * ClockHz / SampleRate);
 
-    public void SetVoiceMuted(int voice, bool muted) => _chip.SetVoiceMuted(voice, muted);
+    /// <summary>The SID chips the tune plays on: 1, or 2 or 3 for a 2SID or 3SID tune.</summary>
+    public int Chips => _chips.Length;
+
+    /// <summary>A voice muted - on every chip, the voice of each in its place.</summary>
+    public void SetVoiceMuted(int voice, bool muted)
+    {
+        foreach (var chip in _chips)
+            chip.SetVoiceMuted(voice, muted);
+    }
 
     public int Read(byte[] buffer, int offset, int count)
     {
@@ -118,21 +146,26 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         return wanted * 2;
     }
 
-    void ISidPort.Write(long cycle, int register, int value)
+    void ISidPort.Write(long cycle, int chip, int register, int value)
     {
+        if (chip >= _chips.Length)
+            return;
         ClockTo(cycle);
-        _chip.Write(register, value);
-        _registers[register] = value & 0xFF;
+        _chips[chip].Write(register, value);
+        _registers[chip][register] = value & 0xFF;
     }
 
-    byte ISidPort.Read(long cycle, int register)
+    byte ISidPort.Read(long cycle, int chip, int register)
     {
+        if (chip >= _chips.Length)
+            return 0;
         ClockTo(cycle);
-        return (byte)_chip.Read(register);
+        return (byte)_chips[chip].Read(register);
     }
 
-    /// <summary>The chip clocked on to <paramref name="cycle"/>, a sample at a time so each voice's
-    /// own output can be read at the instant its sample is taken, as the scopes draw it.</summary>
+    /// <summary>The chips clocked on to <paramref name="cycle"/>, a sample at a time so each voice's
+    /// own output can be read at the instant its sample is taken, as the scopes draw it. The other
+    /// chips take the cycles the first took for its sample, so theirs fall on the same instant.</summary>
     private void ClockTo(long cycle)
     {
         int cycles = (int)Math.Min(int.MaxValue, cycle - _chipCycle);
@@ -144,7 +177,11 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         {
             if (_pendingCount == _pending.Length)
                 Array.Resize(ref _pending, _pending.Length * 2);
-            if (_chip.ClockAndSample(ref cycles, _pending, _pendingCount, 1) == 0)
+            int before = cycles;
+            int sampled = _chips[0].ClockAndSample(ref cycles, _pending, _pendingCount, 1);
+            if (_chips.Length > 1)
+                MixIn(before - cycles, sampled);
+            if (sampled == 0)
                 break;
             if (_silent)
                 continue;
@@ -153,17 +190,35 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         }
     }
 
+    /// <summary>The other chips through the same <paramref name="cycles"/>, their sample added to the
+    /// first's, the sum scaled for the number of chips.</summary>
+    private void MixIn(int cycles, int sampled)
+    {
+        int sum = sampled > 0 ? _pending[_pendingCount] : 0;
+        for (int chip = 1; chip < _chips.Length; chip++)
+        {
+            int left = cycles;
+            if (_chips[chip].ClockAndSample(ref left, _extraSample, 0, 1) > 0)
+                sum += _extraSample[0];
+        }
+        if (sampled > 0)
+            _pending[_pendingCount] = (short)Math.Clamp(sum * MixScale[_chips.Length], short.MinValue, short.MaxValue);
+    }
+
     private void Capture(short mix)
     {
         lock (_scopeLock)
         {
             int at = (int)(_scopeWritten % RingSamples);
-            for (int voice = 0; voice < 3; voice++)
+            for (int voice = 0; voice < _voiceStates.Length; voice++)
             {
-                _voiceScopes[voice][at] = _chip.Voice(voice).Output() / VoiceOutputScale;
-                int b = voice * 7;
-                _voiceStates[voice][at] = _registers[b] | (_registers[b + 1] << 8) | (_registers[b + 4] << 16)
-                                          | (_chip.Voice(voice).Envelope.Output() << 24);
+                var chip = _chips[voice / 3];
+                var registers = _registers[voice / 3];
+                int b = voice % 3 * 7;
+                if (voice < 3)
+                    _voiceScopes[voice][at] = chip.Voice(voice).Output() / VoiceOutputScale;
+                _voiceStates[voice][at] = registers[b] | (registers[b + 1] << 8) | (registers[b + 4] << 16)
+                                          | (chip.Voice(voice % 3).Envelope.Output() << 24);
             }
             _mixScope[at] = mix / 32768f;
             _scopeWritten++;
@@ -171,7 +226,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     }
 
     /// <summary>What a voice is doing at sample <paramref name="at"/> - the one the listener hears:
-    /// its frequency register, control byte and envelope level, 0-255.</summary>
+    /// its frequency register, control byte and envelope level, 0-255. Voices 3-5 are the second
+    /// chip's, 6-8 the third's.</summary>
     public (int Frequency, int Control, int Envelope) VoiceAt(int voice, long at)
     {
         lock (_scopeLock)

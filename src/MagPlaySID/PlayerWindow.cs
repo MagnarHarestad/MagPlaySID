@@ -246,6 +246,8 @@ internal sealed class PlayerWindow : Window
             parts.Add("NTSC");
         if (file.IsRsid)
             parts.Add("RSID");
+        if (file.ExtraSids.Count > 0)
+            parts.Add($"{1 + file.ExtraSids.Count}SID");
         if (file.UsesCiaTimer(_song))
             parts.Add("CIA timer");
         if (file.Songs > 1)
@@ -330,7 +332,7 @@ internal sealed class PlayerWindow : Window
 
             (_length, _transcription) = task.Result;
             _view.SetScore(_transcription.Score, _transcription.Timeline);
-            _retroStatus.Text = _transcription.Describe();
+            _retroStatus.Text = _transcription.Describe() + (file.ExtraSids.Count > 0 ? " - the first SID's" : "");
         }), TaskScheduler.Default);
     }
 

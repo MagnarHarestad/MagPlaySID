@@ -71,6 +71,10 @@ public sealed class SidFile
     /// such as $D420 or $DE00; empty for a tune written for one chip.</summary>
     public IReadOnlyList<int> ExtraSids { get; private init; } = [];
 
+    /// <summary>Whether each of <see cref="ExtraSids"/> is an 8580 - its own bits of the header's
+    /// flags, or the first chip's model where they leave it unknown.</summary>
+    public IReadOnlyList<bool> ExtraSids8580 { get; private init; } = [];
+
     public static SidFile Parse(byte[] bytes)
     {
         if (bytes.Length < 0x76 + 2)
@@ -124,11 +128,21 @@ public sealed class SidFile
             IsBasic = magic == "RSID" && (flags & 0b10) != 0,
             FreePage = version >= 2 && bytes.Length >= 0x7A ? bytes[0x78] : 0,
             FreePages = version >= 2 && bytes.Length >= 0x7A ? bytes[0x79] : 0,
-            ExtraSids = [.. new[] { (3, 0x7A), (4, 0x7B) }
-                .Where(field => version >= field.Item1 && bytes.Length > field.Item2 && IsSidPage(bytes[field.Item2]))
-                .Select(field => 0xD000 | (bytes[field.Item2] << 4))],
+            ExtraSids = [.. ExtraSidFields(version, bytes).Select(field => 0xD000 | (bytes[field.Address] << 4))],
+            ExtraSids8580 = [.. ExtraSidFields(version, bytes).Select(field => ((flags >> field.ModelBits) & 0b11) switch
+            {
+                0b10 => true,
+                0b01 => false,
+                _ => ((flags >> 4) & 0b11) == 0b10,
+            })],
         };
     }
+
+    /// <summary>The header's second and third SID: the version they came in, the byte with the
+    /// address, the flags bits with the model - those that name a SID.</summary>
+    private static IEnumerable<(int Version, int Address, int ModelBits)> ExtraSidFields(int version, byte[] bytes) =>
+        new[] { (Version: 3, Address: 0x7A, ModelBits: 6), (Version: 4, Address: 0x7B, ModelBits: 8) }
+            .Where(field => version >= field.Version && bytes.Length > field.Address && IsSidPage(bytes[field.Address]));
 
     /// <summary>A header's SID address byte: $Dxx0 with xx even, from $D420 to $D7E0 or in the
     /// I/O areas at $DE00-$DFE0.</summary>

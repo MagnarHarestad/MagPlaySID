@@ -238,7 +238,15 @@ and envelope beside its scope samples (`VoiceAt`, `NoteOf`) - so it shows what s
 arpeggios, slides and drums too, in any tune. A muted voice lights nothing. The keys are drawn in
 the player's own colours: ivory-grey and ebony on the panel background, seams in its border.
 
-Not yet: the second and third SID of a 2SID or 3SID tune are not played.
+**2SID and 3SID tunes play on all their chips.** `ISidPort` takes a chip - 0 at $D400, then the
+header's second and third SID in its order - and the C64 sends each chip its writes and its voice 3
+reads. The engine runs a SID model per chip, each of the model the header names for it
+(`SidFile.ExtraSids8580`; an unknown one is the first chip's), clocked together - the others take
+the cycles the first took for its sample, so all sample on the same instant - and mixes them,
+scaled by 0.7 for two and 0.55 for three so they do not clip where one would not. The spectrum
+hears the mix and the piano lights every chip's voices; the three scopes and the transcription
+are the first chip's. Tried on the three 2SID tunes here (LMan's Blade Runner pair, Dervish D);
+there is no 3SID tune here, so the third chip is tested only through the same path.
 
 ## Rules carried over from MagSID
 
