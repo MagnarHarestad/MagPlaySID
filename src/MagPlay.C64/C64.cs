@@ -53,6 +53,7 @@ public sealed class C64 : IMemoryBus
     /// <summary>The interrupts being run, innermost last, each with the stack pointer it was taken at.</summary>
     private readonly List<(bool Nmi, int Sp)> _interrupts = [];
     private readonly ISidPort? _chip;
+    private readonly bool[] _writtenPages = new bool[256];
     private readonly bool _record;
     private long _synced;
     private long _nmiEdge = -1;
@@ -108,6 +109,12 @@ public sealed class C64 : IMemoryBus
     /// <summary>The cycle each call started on: an IRQ taken while no other IRQ was being run.</summary>
     public IReadOnlyList<long> Calls => _calls;
 
+    /// <summary>A call is starting: the IRQ is about to be taken, nothing of it run yet.</summary>
+    public event Action? CallStarting;
+
+    /// <summary>The 6510 has written to RAM in <paramref name="page"/> - under the ROMs and I/O too.</summary>
+    public bool PageWritten(int page) => _writtenPages[page & 0xFF];
+
     /// <summary>The writes to each extra SID a tune's header names, at its own address.</summary>
     public IReadOnlyList<IReadOnlyList<TimedWrite>> ExtraSidWrites => _extraSidWrites;
 
@@ -156,7 +163,10 @@ public sealed class C64 : IMemoryBus
     {
         Unwind();
         if (!nmi && !_interrupts.Any(i => !i.Nmi))
+        {
             _calls.Add(Cpu.Cycles);
+            CallStarting?.Invoke();
+        }
         _interrupts.Add((nmi, Cpu.SP & 0xFF));
     }
 
@@ -223,6 +233,7 @@ public sealed class C64 : IMemoryBus
         }
 
         _ram[address] = (byte)value;
+        _writtenPages[address >> 8] = true;
     }
 
     private byte ReadIo(int address)

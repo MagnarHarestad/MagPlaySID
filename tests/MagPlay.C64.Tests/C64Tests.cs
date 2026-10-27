@@ -346,4 +346,20 @@ public class C64Tests
         Assert.Null(digi.Failure);
         Assert.True(Loudness(buffer) > 1000);
     }
+
+    [Fact]
+    public void A_tunes_length_is_measured_on_the_c64_by_its_memory_coming_round_again()
+    {
+        // play: inc $c000 / lda $c000 / sta $d418 / rts - a page outside the tune, round every 256 calls.
+        byte[] code = [0x60, 0xEE, 0x00, 0xC0, 0xAD, 0x00, 0xC0, 0x8D, 0x18, 0xD4, 0x60];
+        var length = C64SongLength.Measure(Tune(code, play: 0x1001), 1);
+
+        Assert.NotNull(length);
+        Assert.Equal(256, length.LoopFrames);
+        Assert.InRange(length.CallsPerSecond, 50.1, 50.15);
+
+        // A 16-bit counter - inc $c000 / bne / inc $c001 - comes round only after 22 minutes.
+        byte[] counter = [0x60, 0xEE, 0x00, 0xC0, 0xD0, 0x03, 0xEE, 0x01, 0xC0, 0x60];
+        Assert.Null(C64SongLength.Measure(Tune(counter, play: 0x1001), 1, maxSeconds: 30));
+    }
 }

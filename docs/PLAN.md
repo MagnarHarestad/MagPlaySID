@@ -219,9 +219,19 @@ the ThcMOD and LMan digis, Hi Fi Sky. Ten seconds of a tune renders in under a s
 The spectrum and scopes take `IScopeSource`, which MagSID's PSID engine also implements - a
 small change to the shared player views - and `SidChipSettling` is public.
 
-Not yet: a tune's length for an RSID - the length is still measured on MagSID's PSID engine,
-which refuses them, so an RSID shows no length and is transcribed for its first three minutes;
-the second and third SID of a 2SID or 3SID tune are not played.
+**The length is measured on the C64 too** (`C64SongLength`): as MagSID's measure, a tune has
+looped when its memory at the start of a call is as at an earlier one - the zero page, its own
+bytes, and every page it has written to by then (an RSID unpacks and buffers wherever it likes),
+the states seen let go when a page joins. On the 172 local tunes it agrees with MagSID's measure
+call for call on 159; the LMan RSIDs now have lengths (5:31, 8:35, 6:27); Friday, which MagSID's
+engine had looping after 0.2 seconds, plays 1:55. Measured in the C64's own time, the length
+is the time the tune plays in - MagSID's counts PAL frames as 50 a second, 0.25% short of the
+real 50.12. A tune that never repeats within twenty minutes takes some twenty seconds to say so.
+
+A PSID's init or play routine in the I/O area ($D000-$DFFF) is called with all RAM banked in, as
+libsidplayfp does; two of Magnar's test tunes start at $DFF6 and did nothing before.
+
+Not yet: the second and third SID of a 2SID or 3SID tune are not played.
 
 ## Rules carried over from MagSID
 

@@ -120,6 +120,11 @@ public sealed class SidTune
         return 0x37;
     }
 
+    /// <summary>The banking a routine at <paramref name="address"/> is called with: the tune's, or
+    /// all RAM for one in the I/O area's - as libsidplayfp calls it - which banks I/O in itself
+    /// to reach the SID.</summary>
+    private static int Banking(SidFile file, int address) => address is >= 0xD000 and < 0xE000 ? 0x34 : Banking(file);
+
     /// <summary>The driver's code, and where an interrupt coming straight through $FFFE enters it
     /// (-1 for a tune that plays from interrupts of its own).</summary>
     private static (byte[] Code, int RamEntry) DriverCode(SidFile file, int song, int at, Machine machine)
@@ -154,8 +159,15 @@ public sealed class SidTune
         if (psid)
             Emit(0xA9, 0, 0x8D, 0x14, 0x03, 0xA9, 0, 0x8D, 0x15, 0x03);
 
-        // lda #song-1 / jsr init / cli / wait: jmp wait
-        Emit(0xA9, Math.Max(0, song - 1), 0x20, file.InitAddress & 0xFF, file.InitAddress >> 8, 0x58);
+        // lda #song-1 / jsr init / cli / wait: jmp wait - init banked as its address asks, and the
+        // tune's banking back for the driver's own interrupt.
+        int initBank = file.IsRsid ? bank : Banking(file, file.InitAddress);
+        if (initBank != bank)
+            Emit(0xA9, initBank, 0x85, 0x01);
+        Emit(0xA9, Math.Max(0, song - 1), 0x20, file.InitAddress & 0xFF, file.InitAddress >> 8);
+        if (initBank != bank)
+            Emit(0xA9, bank, 0x85, 0x01);
+        Emit(0x58);
         int wait = Here();
         Emit(0x4C, wait & 0xFF, wait >> 8);
 
@@ -168,7 +180,7 @@ public sealed class SidTune
             // From $0314: acknowledge the VIC and CIA 1, call play with the tune's banking, restore.
             int irqAt = Here();
             Emit(0xA9, 0xFF, 0x8D, 0x19, 0xD0, 0xAD, 0x0D, 0xDC);
-            Emit(0xA5, 0x01, 0x48, 0xA9, bank, 0x85, 0x01);
+            Emit(0xA5, 0x01, 0x48, 0xA9, Banking(file, file.PlayAddress), 0x85, 0x01);
             Emit(0x20, file.PlayAddress & 0xFF, file.PlayAddress >> 8);
             Emit(0x68, 0x85, 0x01, 0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40);
 

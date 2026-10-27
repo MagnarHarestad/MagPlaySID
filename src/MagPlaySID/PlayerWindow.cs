@@ -291,7 +291,8 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>Measures the tune and transcribes it, off the UI thread, while it already plays;
-    /// the view starts following when it is done.</summary>
+    /// the view starts following when it is done. Measured on the C64 it plays on, so the length
+    /// is in the time it plays in - and an RSID has one.</summary>
     private void Transcribe(int song)
     {
         _transcribing?.Cancel();
@@ -305,7 +306,7 @@ internal sealed class PlayerWindow : Window
 
         Task.Run(() =>
         {
-            var length = SidSongLength.Measure(file, song: song);
+            var length = C64SongLength.Measure(file, song);
             double seconds = length is null ? 180 : length.TotalFrames / length.CallsPerSecond;
             return (length, Transcription.Make(file, song, Math.Clamp(seconds + 1, 1, 600), cancel.Token));
         }, cancel.Token).ContinueWith(task => Dispatcher.UIThread.Post(() =>
