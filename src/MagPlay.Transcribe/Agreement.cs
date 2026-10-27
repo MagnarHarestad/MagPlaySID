@@ -26,8 +26,8 @@ public static class Agreement
     {
         var player = new ScorePlayer(score);
         var between = new List<TimedWrite>(player.Init);
-        var tuneState = NewState();
-        var scoreState = NewState();
+        var tuneState = NewState(score.Chips);
+        var scoreState = NewState(score.Chips);
         int groups = 0, same = 0;
 
         for (int call = 0; call < recording.Calls.Count || player.Cycle <= recording.End; call++)
@@ -37,7 +37,7 @@ public static class Agreement
             if (call >= recording.Calls.Count)
                 continue;
 
-            for (int register = 0; register <= 0x18; register++)
+            foreach (int register in ScorePlayer.Registers(score.Chips))
             {
                 var tune = Values(recording.CallWrites[call], register, tuneState);
                 var played = Values(player.CallWrites, register, scoreState);
@@ -56,8 +56,8 @@ public static class Agreement
         return new Result(groups, same, recording.Between.Count, betweenSame, exact);
     }
 
-    /// <summary>The registers as the SID starts: all 0.</summary>
-    internal static int[] NewState() => new int[0x19];
+    /// <summary>The registers as the SIDs start: all 0, $20 a chip.</summary>
+    internal static int[] NewState(int chips = 1) => new int[0x20 * chips];
 
     /// <summary>The values <paramref name="register"/> takes in <paramref name="writes"/>, a write
     /// that leaves it as it was left out; <paramref name="state"/> carried on.</summary>

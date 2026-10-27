@@ -56,7 +56,27 @@ public sealed class Score
 
     public List<Pattern> Patterns { get; } = [];
 
-    public Voice[] Voices { get; } = [new(), new(), new()];
+    /// <summary>The SID chips the score plays on, 1 to 3 - a 2SID or 3SID tune's. Chip c's registers
+    /// are numbered from c * $20, so the first chip's are the SID's own, and its voices are
+    /// 3c to 3c + 2 of <see cref="Voices"/>.</summary>
+    public int Chips
+    {
+        get => _chips;
+        set
+        {
+            _chips = Math.Clamp(value, 1, 3);
+            Voices = [.. Enumerable.Range(0, 3 * _chips).Select(v => v < Voices.Length ? Voices[v] : new Voice())];
+            FilterPrograms = [.. Enumerable.Range(0, _chips).Select(c => c < FilterPrograms.Length ? FilterPrograms[c] : -1)];
+        }
+    }
+
+    private int _chips = 1;
+
+    /// <summary>The register a voice's register is: <paramref name="register"/> 0-6 of voice
+    /// <paramref name="voice"/>, counted across the chips.</summary>
+    public static int RegisterOf(int voice, int register) => voice / 3 * 0x20 + voice % 3 * 7 + register;
+
+    public Voice[] Voices { get; private set; } = [new(), new(), new()];
 
     /// <summary>Wave programs: control byte and pitch, a step a call - shared by the instruments
     /// that point into it, as GoatTracker's wavetable is.</summary>
@@ -69,8 +89,15 @@ public sealed class Score
     public List<TableStep> FilterTable { get; } = [];
 
     /// <summary>Where a filter program running from the first call starts, for a tune whose filter
-    /// follows no instrument; -1 for none.</summary>
-    public int FilterProgram { get; set; } = -1;
+    /// follows no instrument; -1 for none. The first chip's - <see cref="FilterPrograms"/> has each's.</summary>
+    public int FilterProgram
+    {
+        get => FilterPrograms[0];
+        set => FilterPrograms[0] = value;
+    }
+
+    /// <summary>Each chip's filter program from the first call.</summary>
+    public int[] FilterPrograms { get; private set; } = [-1];
 
     /// <summary>Digis: what a <see cref="PlaySample"/> effect streams to the chip between calls.</summary>
     public List<Sample> Samples { get; } = [];

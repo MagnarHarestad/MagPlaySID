@@ -13,14 +13,16 @@ namespace MagPlaySid;
 /// scrolling with the music past a line where they sound, and beside them the selected voice's
 /// instrument with its wave and pulse programs, and the filter program, the step sounding lit.
 /// Rows are placed by when they play, so a row a note splits off its grid row is as tall as it is
-/// long. Clicking a voice's rows selects it.
+/// long. Clicking a voice's rows selects it. A 2SID or 3SID tune shows every chip's voices, in
+/// narrower columns.
 /// </summary>
 internal sealed class ScoreView : Control
 {
     private const double RowHeight = 17;
     private const double FontSize = 13;
     private const double HeaderHeight = 26;
-    private const int VoiceChars = 24;
+    /// <summary>Characters a voice's column has: fewer, the more voices there are.</summary>
+    private int VoiceChars => Voices switch { <= 3 => 24, <= 6 => 17, _ => 11 };
     private const double Gap = 14;
 
     private static readonly Typeface Mono = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"));
@@ -38,7 +40,9 @@ internal sealed class ScoreView : Control
 
     private double VoiceWidth => VoiceChars * _charWidth;
 
-    private double TrackerWidth => 3 * VoiceWidth + 2 * Gap;
+    private int Voices => _score?.Voices.Length ?? 3;
+
+    private double TrackerWidth => Voices * VoiceWidth + (Voices - 1) * Gap;
 
     private double PanelWidth => 30 * _charWidth;
 
@@ -47,6 +51,8 @@ internal sealed class ScoreView : Control
         _score = score;
         _timeline = timeline;
         _call = 0;
+        _selected = Math.Min(_selected, Voices - 1);
+        Width = ContentWidth;
         InvalidateVisual();
     }
 
@@ -71,7 +77,7 @@ internal sealed class ScoreView : Control
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         double x = e.GetPosition(this).X;
-        for (int v = 0; v < 3; v++)
+        for (int v = 0; v < Voices; v++)
         {
             double left = v * (VoiceWidth + Gap);
             if (x >= left && x < left + VoiceWidth)
@@ -97,15 +103,15 @@ internal sealed class ScoreView : Control
         {
             context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 18)),
                                   new Rect(0, line, TrackerWidth, RowHeight));
-            for (int v = 0; v < 3; v++)
+            for (int v = 0; v < Voices; v++)
                 DrawVoice(context, score, timeline, v, v * (VoiceWidth + Gap), line, perCall, bounds.Height);
         }
 
-        for (int v = 0; v < 3; v++)
+        for (int v = 0; v < Voices; v++)
         {
             double left = v * (VoiceWidth + Gap);
-            var colour = SidPlayerPalette.VoiceColour(v);
-            Text(context, $"VOICE {v + 1}", left + 4, 5, v == _selected ? colour : SidPlayerPalette.WithAlpha(colour, 140), bold: true);
+            var colour = SidPlayerPalette.VoiceColour(v % 3);
+            Text(context, Name(v), left + 4, 5, v == _selected ? colour : SidPlayerPalette.WithAlpha(colour, 140), bold: true);
             if (v == _selected)
                 context.FillRectangle(new SolidColorBrush(colour), new Rect(left, HeaderHeight - 3, VoiceWidth, 2));
         }
@@ -122,7 +128,7 @@ internal sealed class ScoreView : Control
         if (rows.Count == 0)
             return;
 
-        var colour = SidPlayerPalette.VoiceColour(v);
+        var colour = SidPlayerPalette.VoiceColour(v % 3);
         int now = Math.Max(0, timeline.RowAt(v, (int)Math.Floor(_call)));
         using var clip = context.PushClip(new Rect(left - 6, HeaderHeight, VoiceWidth + 6, height - HeaderHeight));
         double Y(int i) => line + (rows[i].Call - _call) * perCall;
@@ -178,6 +184,9 @@ internal sealed class ScoreView : Control
         return $"{played.Row:X2} {note} {instrument} {effects}";
     }
 
+    /// <summary>A voice by its place: VOICE 1-3 on one chip; with more, which SID it is on too.</summary>
+    private string Name(int voice) => Voices <= 3 ? $"VOICE {voice + 1}" : $"SID{voice / 3 + 1} V{voice % 3 + 1}";
+
     private static string EntryText(PlayedRow played) =>
         played.Transpose == 0 ? $"P{played.Pattern:X2}" : $"P{played.Pattern:X2}{(played.Transpose > 0 ? "+" : "-")}{Math.Abs(played.Transpose)}";
 
@@ -187,7 +196,7 @@ internal sealed class ScoreView : Control
     {
         int call = Math.Max(0, (int)Math.Floor(_call));
         var position = timeline.PositionOf(_selected, call);
-        var colour = SidPlayerPalette.VoiceColour(_selected);
+        var colour = SidPlayerPalette.VoiceColour(_selected % 3);
         var dim = SidPlayerPalette.Subtitle;
         double y = 5;
 
@@ -199,7 +208,7 @@ internal sealed class ScoreView : Control
 
         if (score.InstrumentNumber(position.Instrument) is not { } instrument)
         {
-            Line($"VOICE {_selected + 1}", colour, bold: true);
+            Line(Name(_selected), colour, bold: true);
             Line("No instrument yet", dim);
         }
         else
@@ -227,9 +236,11 @@ internal sealed class ScoreView : Control
         }
 
         y = Math.Max(y + 6, height - 6 * RowHeight);
-        Line("FILTER", SidPlayerPalette.Title, bold: true);
-        int filterStep = timeline.FilterStepAt(call);
-        Program(context, score.FilterTable, score.FilterProgram >= 0 ? score.FilterProgram : Start(score.FilterTable, filterStep),
+        int chip = Math.Min(_selected / 3, score.Chips - 1);
+        Line(score.Chips > 1 ? $"FILTER, SID{chip + 1}" : "FILTER", SidPlayerPalette.Title, bold: true);
+        int filterStep = timeline.FilterStepAt(call, chip);
+        int filterProgram = score.FilterPrograms[chip];
+        Program(context, score.FilterTable, filterProgram >= 0 ? filterProgram : Start(score.FilterTable, filterStep),
                 filterStep, left, ref y, 4);
     }
 
@@ -266,7 +277,7 @@ internal sealed class ScoreView : Control
         {
             bool lit = step == sounding;
             if (lit)
-                context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(_selected), 60)),
+                context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(_selected % 3), 60)),
                                       new Rect(left - 3, y - 1, PanelWidth - 4, RowHeight));
             Text(context, $"{step - start:X2} {Describe(table[step])}", left, y,
                  lit ? SidPlayerPalette.Title : SidPlayerPalette.Control, bold: lit);

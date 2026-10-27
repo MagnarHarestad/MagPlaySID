@@ -48,6 +48,7 @@ public sealed class C64 : IMemoryBus
     private readonly List<TimedWrite> _sidWrites = [];
     private readonly int[] _extraSids;
     private readonly List<TimedWrite>[] _extraSidWrites;
+    private readonly List<WriteContext>[] _extraSidWriteContexts;
     private readonly List<WriteContext> _sidWriteContexts = [];
     private readonly List<long> _calls = [];
 
@@ -77,6 +78,7 @@ public sealed class C64 : IMemoryBus
         _record = record;
         _extraSids = [.. extraSids ?? []];
         _extraSidWrites = [.. _extraSids.Select(_ => new List<TimedWrite>())];
+        _extraSidWriteContexts = [.. _extraSids.Select(_ => new List<WriteContext>())];
         Machine = machine;
         Vic = machine == Machine.Ntsc ? new Vic(65, 263) : new Vic(63, 312);
         Cpu = new Mos6502(this);
@@ -115,6 +117,9 @@ public sealed class C64 : IMemoryBus
 
     /// <summary>The 6510 has written to RAM in <paramref name="page"/> - under the ROMs and I/O too.</summary>
     public bool PageWritten(int page) => _writtenPages[page & 0xFF];
+
+    /// <summary>What each of <see cref="ExtraSidWrites"/> was written from.</summary>
+    public IReadOnlyList<IReadOnlyList<WriteContext>> ExtraSidWriteContexts => _extraSidWriteContexts;
 
     /// <summary>The writes to each extra SID a tune's header names, at its own address.</summary>
     public IReadOnlyList<IReadOnlyList<TimedWrite>> ExtraSidWrites => _extraSidWrites;
@@ -263,7 +268,10 @@ public sealed class C64 : IMemoryBus
                     break;
                 _chip?.Write(Cpu.AccessCycle, chip + 1, address & 0x1F, value);
                 if (_record)
+                {
                     _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
+                    _extraSidWriteContexts[chip].Add(Context());
+                }
                 break;
             case < 0xD800: WriteSid(address & 0x1F, value); break;
             case < 0xDC00: _colour[address - 0xD800] = (byte)(value & 0x0F); break;

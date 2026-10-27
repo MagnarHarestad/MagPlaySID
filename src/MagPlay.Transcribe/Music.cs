@@ -16,7 +16,8 @@ namespace MagPlay.Transcribe;
 /// starting a few calls into its row delayed by as many, and a row two notes start in split into
 /// rows of their own lengths. They are cut into patterns of as many rows as make the fewest rows
 /// and order entries in all: a stretch that plays again is its pattern again, transposed if
-/// its notes are.
+/// its notes are. A 2SID or 3SID tune's other chips are heard the same way: three voices more
+/// each, and a filter program each.
 ///
 /// Whatever this gets wrong the transcriber writes raw, so nothing here has to be right - only
 /// right more often, which the raw layer's share measures.
@@ -35,19 +36,20 @@ public static class Music
 
         var frames = Frames(recording, out var rises);
         var table = NoteTable(frames);
-        var score = new MagPlay.Score.Score { Machine = recording.Machine, NoteTable = table };
+        var score = new MagPlay.Score.Score { Machine = recording.Machine, NoteTable = table, Chips = recording.Chips };
         var sounds = new List<Sound>();
         var grid = Grid.Of(rises);
         score.Tempo = grid.A;
         score.FunkTempo = grid.Funk ? grid.B : null;
-        var voices = new List<(int GridRow, Row Row)>?[3];
-        for (int v = 0; v < 3; v++)
+        var voices = new List<(int GridRow, Row Row)>?[frames.Length];
+        for (int v = 0; v < frames.Length; v++)
             voices[v] = Voice(score, frames[v], rises[v], sounds, grid);
         Arrange(score, voices, PatternLength(voices));
 
         foreach (var sound in sounds)
             score.Instruments.Add(sound.ToInstrument(score));
-        Filter(score, Globals(recording));
+        for (int chip = 0; chip < recording.Chips; chip++)
+            Filter(score, chip, Globals(recording, chip));
         return score;
     }
 
@@ -64,27 +66,31 @@ public static class Music
     /// in which its gate went on - from off, or off and on again within the call.</summary>
     internal static Frame[][] Frames(Recording recording, out List<int>[] rises)
     {
-        var registers = new int[0x19];
+        var registers = new int[0x20 * recording.Chips];
         int calls = recording.Calls.Count;
-        var frames = new Frame[3][];
-        rises = [[], [], []];
-        for (int v = 0; v < 3; v++)
+        int count = 3 * recording.Chips;
+        var frames = new Frame[count][];
+        rises = new List<int>[count];
+        for (int v = 0; v < count; v++)
+        {
             frames[v] = new Frame[calls];
+            rises[v] = [];
+        }
 
         for (int c = 0; c < calls; c++)
         {
-            var rose = new bool[3];
+            var rose = new bool[count];
             foreach (var write in recording.CallWrites[c])
             {
-                int r = write.Register;
-                if (r < 0x15 && r % 7 == 4 && (write.Value & 1) != 0 && (registers[r] & 1) == 0)
-                    rose[r / 7] = true;
+                int r = write.Register, chip = r >> 5, own = r & 0x1F;
+                if (own < 0x15 && own % 7 == 4 && (write.Value & 1) != 0 && (registers[r] & 1) == 0)
+                    rose[chip * 3 + own / 7] = true;
                 registers[r] = write.Value;
             }
 
-            for (int v = 0; v < 3; v++)
+            for (int v = 0; v < count; v++)
             {
-                int b = v * 7;
+                int b = MagPlay.Score.Score.RegisterOf(v, 0);
                 frames[v][c] = new Frame(registers[b] | (registers[b + 1] << 8),
                                          registers[b + 2] | ((registers[b + 3] & 0x0F) << 8),
                                          registers[b + 4], registers[b + 5], registers[b + 6]);
@@ -99,14 +105,18 @@ public static class Music
     /// <summary>The filter and volume after a call: cutoff, resonance and routing, mode and volume.</summary>
     internal readonly record struct Global(int Cutoff, int Control, int ModeVolume);
 
-    internal static Global[] Globals(Recording recording)
+    /// <summary>Each call's filter and volume on <paramref name="chip"/>.</summary>
+    internal static Global[] Globals(Recording recording, int chip = 0)
     {
         var registers = new int[0x19];
         var globals = new Global[recording.Calls.Count];
         for (int c = 0; c < globals.Length; c++)
         {
             foreach (var write in recording.CallWrites[c])
-                registers[write.Register] = write.Value;
+            {
+                if (write.Register >> 5 == chip)
+                    registers[write.Register & 0x1F] = write.Value;
+            }
             globals[c] = new Global((registers[0x15] & 7) | (registers[0x16] << 3), registers[0x17], registers[0x18]);
         }
         return globals;
@@ -117,12 +127,12 @@ public static class Music
     /// by the same amount in, with the routing, mode and volume unchanged - a sweep is one step,
     /// a held cutoff one more.
     /// </summary>
-    private static void Filter(MagPlay.Score.Score score, Global[] globals)
+    private static void Filter(MagPlay.Score.Score score, int chip, Global[] globals)
     {
         if (globals.All(g => g == default))
             return;
 
-        score.FilterProgram = score.FilterTable.Count;
+        score.FilterPrograms[chip] = score.FilterTable.Count;
         int volume = 0;
         for (int c = 0; c < globals.Length;)
         {
@@ -309,7 +319,7 @@ public static class Music
     {
         var made = new Dictionary<string, (int Number, int Base)>();
         int cost = 0;
-        for (int v = 0; v < 3; v++)
+        for (int v = 0; v < voices.Length; v++)
         {
             if (voices[v] is not { } rows)
                 continue;

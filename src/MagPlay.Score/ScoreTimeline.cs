@@ -13,9 +13,9 @@ public sealed class ScoreTimeline
 {
     private readonly long[] _cycles;
     private readonly VoicePosition[][] _voices;
-    private readonly int[] _filterSteps;
+    private readonly int[][] _filterSteps;
 
-    private ScoreTimeline(long[] cycles, VoicePosition[][] voices, int[] filterSteps, IReadOnlyList<PlayedRow>[] rows)
+    private ScoreTimeline(long[] cycles, VoicePosition[][] voices, int[][] filterSteps, IReadOnlyList<PlayedRow>[] rows)
     {
         _cycles = cycles;
         _voices = voices;
@@ -24,6 +24,9 @@ public sealed class ScoreTimeline
     }
 
     public int Calls => _cycles.Length;
+
+    /// <summary>The voices: three a chip.</summary>
+    public int Voices => _voices.Length;
 
     /// <summary>Each voice's rows, in the order they are played.</summary>
     public IReadOnlyList<PlayedRow>[] Rows { get; }
@@ -40,7 +43,8 @@ public sealed class ScoreTimeline
 
     public VoicePosition PositionOf(int voice, int call) => _voices[voice][Math.Clamp(call, 0, _cycles.Length - 1)];
 
-    public int FilterStepAt(int call) => _filterSteps[Math.Clamp(call, 0, _cycles.Length - 1)];
+    /// <summary>The step of <paramref name="chip"/>'s filter program sounding on <paramref name="call"/>.</summary>
+    public int FilterStepAt(int call, int chip = 0) => _filterSteps[chip][Math.Clamp(call, 0, _cycles.Length - 1)];
 
     /// <summary>The row of <paramref name="voice"/>'s that is playing on <paramref name="call"/>,
     /// as an index into <see cref="Rows"/>; -1 before its first.</summary>
@@ -69,21 +73,25 @@ public sealed class ScoreTimeline
         calls = Math.Max(1, calls);
         var player = new ScorePlayer(score);
         var cycles = new long[calls];
-        var voices = new VoicePosition[3][];
-        var rows = new List<PlayedRow>[3];
-        for (int v = 0; v < 3; v++)
+        int count = score.Voices.Length;
+        var voices = new VoicePosition[count][];
+        var rows = new List<PlayedRow>[count];
+        for (int v = 0; v < count; v++)
         {
             voices[v] = new VoicePosition[calls];
             rows[v] = [];
         }
-        var filterSteps = new int[calls];
+        var filterSteps = new int[score.Chips][];
+        for (int chip = 0; chip < score.Chips; chip++)
+            filterSteps[chip] = new int[calls];
 
         for (int call = 0; call < calls; call++)
         {
             cycles[call] = player.Cycle;
             player.Call();
-            filterSteps[call] = player.FilterStep;
-            for (int v = 0; v < 3; v++)
+            for (int chip = 0; chip < score.Chips; chip++)
+                filterSteps[chip][call] = player.FilterStepOf(chip);
+            for (int v = 0; v < count; v++)
             {
                 var position = player.PositionOf(v);
                 voices[v][call] = position;

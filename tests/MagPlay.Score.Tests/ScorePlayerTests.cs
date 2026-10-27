@@ -423,6 +423,29 @@ public class ScorePlayerTests
     }
 
     [Fact]
+    public void A_score_on_two_chips_plays_the_second_chips_voices_and_volume_on_its_registers()
+    {
+        var score = Song(6, Row.Of(C4, 1));
+        score.Chips = 2;
+        var pattern = new Pattern { Number = 2 };
+        pattern.Rows.Add(Row.Of(E4, 1, new MasterVolume(9)));
+        score.Patterns.Add(pattern);
+        score.Voices[3].Order.Add(new OrderEntry(2));
+        score.Raw.Calls[1] = new RawCall(RawCall.Bit(0x22), [new RawWrite(0, 0x22, 0x55)]);
+        var player = new ScorePlayer(score);
+        var first = player.Call();
+        var second = player.Call();
+
+        Assert.Equal(6, score.Voices.Length);
+        Assert.Contains(new TimedWrite(0, 0x20, Notes[E4] & 0xFF), first);
+        Assert.Contains(new TimedWrite(0, 0x24, 0x41), first);
+        Assert.Contains(new TimedWrite(0, 0x38, 0x09), first);
+        Assert.Contains(new TimedWrite(0, 0x00, Notes[C4] & 0xFF), first);
+        Assert.Contains(new TimedWrite(0, 0x18, 0x0F), first.Concat(player.Init));
+        Assert.Equal([(0x22, 0x55)], second.Select(w => (w.Register, w.Value)));
+    }
+
+    [Fact]
     public void Effects_read_as_tracker_commands()
     {
         Assert.Equal("120", new Portamento(0x20).Label);

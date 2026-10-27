@@ -332,7 +332,7 @@ internal sealed class PlayerWindow : Window
 
             (_length, _transcription) = task.Result;
             _view.SetScore(_transcription.Score, _transcription.Timeline);
-            _retroStatus.Text = _transcription.Describe() + (file.ExtraSids.Count > 0 ? " - the first SID's" : "");
+            _retroStatus.Text = _transcription.Describe();
         }), TaskScheduler.Default);
     }
 

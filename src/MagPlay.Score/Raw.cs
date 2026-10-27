@@ -22,11 +22,14 @@ public sealed class RawLayer
     public bool IsEmpty => Between.Count == 0 && Calls.Count == 0;
 }
 
-/// <summary>One call's raw writes. The registers in <paramref name="Registers"/> - a bit each,
-/// $00-$18 - are written only as <paramref name="Writes"/> say; none of them, when it has none.</summary>
-public sealed record RawCall(int Registers, IReadOnlyList<RawWrite> Writes)
+/// <summary>One call's raw writes. The registers in <paramref name="Registers"/> - a bit each, as
+/// the score numbers them: $00-$18 on the first chip, $20-$38 and $40-$58 on a second and third -
+/// are written only as <paramref name="Writes"/> say; none of them, when it has none.</summary>
+public sealed record RawCall(UInt128 Registers, IReadOnlyList<RawWrite> Writes)
 {
-    public bool Replaces(int register) => (Registers >> register & 1) != 0;
+    public bool Replaces(int register) => register is >= 0 and < 128 && ((Registers >> register) & 1) != 0;
+
+    public static UInt128 Bit(int register) => UInt128.One << register;
 }
 
 /// <summary>A write <paramref name="Offset"/> cycles after its call starts - where the tune made it.</summary>

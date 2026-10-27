@@ -244,9 +244,20 @@ reads. The engine runs a SID model per chip, each of the model the header names 
 (`SidFile.ExtraSids8580`; an unknown one is the first chip's), clocked together - the others take
 the cycles the first took for its sample, so all sample on the same instant - and mixes them,
 scaled by 0.7 for two and 0.55 for three so they do not clip where one would not. The spectrum
-hears the mix and the piano lights every chip's voices; the three scopes and the transcription
-are the first chip's. Tried on the three 2SID tunes here (LMan's Blade Runner pair, Dervish D);
-there is no 3SID tune here, so the third chip is tested only through the same path.
+hears the mix and the piano lights every chip's voices; the three scopes are the first chip's.
+Tried on the three 2SID tunes here (LMan's Blade Runner pair, Dervish D); there is no 3SID tune
+here, so the third chip is tested only through the same path.
+
+**And they are transcribed on all their chips.** A score has `Chips`, 1 to 3, and three voices
+each; its registers are numbered from $20 a chip - the first chip's are the SID's own - and a raw
+call's registers are a 128-bit set. The score player keeps each chip's filter, volume and filter
+program apart (`FilterPrograms`), a voice writing its own chip's registers, a raw step in a
+voice's program its chip's. The C64 tags the other chips' writes with what they were written
+from too, the recording numbers them as the score does, and the transcriber, the agreement and
+the music go over every chip's registers and voices. All 471 tunes still play back exactly; the
+2SID tunes' music makes 99.8-100% of both chips' changes, with notes on the second chip's
+voices and a filter program each. The view shows every voice - narrower columns for six or nine,
+headed SID1 V1 to SID2 V3 - and the filter program of the selected voice's chip.
 
 ## Rules carried over from MagSID
 

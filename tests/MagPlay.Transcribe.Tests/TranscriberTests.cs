@@ -13,7 +13,7 @@ public class TranscriberTests
     private const int C4 = 48, E4 = 52, G4 = 55, C5 = 60;
 
     /// <summary>A .sid around <paramref name="code"/>, which loads at $1000.</summary>
-    private static SidFile Tune(byte[] code, int play = 0, bool rsid = false)
+    private static SidFile Tune(byte[] code, int play = 0, bool rsid = false, int secondSid = 0)
     {
         var bytes = new byte[0x7C + code.Length];
         (rsid ? "RSID"u8 : "PSID"u8).CopyTo(bytes);
@@ -23,7 +23,7 @@ public class TranscriberTests
             bytes[at + 1] = (byte)value;
         }
 
-        Word(0x04, 2);
+        Word(0x04, secondSid != 0 ? 3 : 2);
         Word(0x06, 0x7C);
         Word(0x08, 0x1000);
         Word(0x0A, 0x1000);
@@ -31,6 +31,7 @@ public class TranscriberTests
         Word(0x0E, 1);
         Word(0x10, 1);
         Word(0x76, 0x14);
+        bytes[0x7A] = (byte)(secondSid >> 4);
         code.CopyTo(bytes, 0x7C);
         return SidFile.Parse(bytes);
     }
@@ -114,6 +115,34 @@ public class TranscriberTests
         Assert.Equal(3, early.Count(r => r.Note.Kind == RowNoteKind.Note));
 
         static int Delay(Row row) => row.Effects.OfType<NoteDelay>().Select(d => d.Calls).DefaultIfEmpty(0).First();
+    }
+
+    [Fact]
+    public void A_2sid_tune_is_transcribed_on_both_chips_and_plays_back_exactly()
+    {
+        // The arpeggiator, and after it a note on the SID at $D420 whenever it starts one: the
+        // next note of its table, the gate off and on again.
+        var arpeggiator = Arpeggiator();
+        var code = new byte[0x100];
+        Array.Copy(arpeggiator.Data, code, arpeggiator.Data.Length);
+        byte[] second =
+        [
+            0x20, 0x10, 0x10,                                     // jsr play
+            0xAC, 0x01, 0xC0, 0xB9, 0x60, 0x10, 0x8D, 0x20, 0xD4,  // ldy $c001 / lda lo,y / sta $d420
+            0xB9, 0x64, 0x10, 0x8D, 0x21, 0xD4,                    // lda hi,y / sta $d421
+            0xAD, 0x00, 0xC0, 0xD0, 0x0A,                          // lda $c000 / bne done
+            0xA9, 0x40, 0x8D, 0x24, 0xD4, 0xA9, 0x21, 0x8D, 0x24, 0xD4, // gate off, saw and gate on
+            0x60,                                                  // done: rts
+        ];
+        second.CopyTo(code, 0x80);
+        var recording = Recording.Record(Tune(code, play: 0x1080, secondSid: 0xD420), 1, 2.0);
+        var (score, report) = Transcriber.Transcribe(recording, Music.Of(recording));
+
+        Assert.Equal(2, score.Chips);
+        Assert.True(Agreement.Measure(recording, score).Exact);
+        Assert.Contains(recording.CallWrites.SelectMany(c => c), w => w.Register == 0x24);
+        Assert.NotEmpty(score.Voices[3].Order);
+        Assert.True(report.Music > 0.9);
     }
 
     [Fact]

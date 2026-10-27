@@ -23,7 +23,7 @@ public static class Transcriber
     /// <param name="Detail">Registers in a call the music ends right but the tune also writes other
     /// values to on the way - a player's two writes of a frequency in one call - written raw.</param>
     /// <param name="Between">Writes between calls, all raw.</param>
-    /// <param name="MissedByRegister">The changes the music misses, per register.</param>
+    /// <param name="MissedByRegister">The changes the music misses, per register - $20 a chip.</param>
     public sealed record Report(int Calls, int Changes, int MusicChanges, int Detail, int Between,
                                 bool EvenCalls, int[] MissedByRegister)
     {
@@ -37,6 +37,7 @@ public static class Transcriber
     {
         var score = music ?? new MagPlay.Score.Score { Machine = recording.Machine };
         score.Machine = recording.Machine;
+        score.Chips = recording.Chips;
         score.ModeVolume = null;
         score.Raw.Between.Clear();
         score.Raw.Calls.Clear();
@@ -44,18 +45,19 @@ public static class Transcriber
         score.Raw.Between.AddRange(recording.Between);
 
         var player = new ScorePlayer(score);
-        var tuneState = Agreement.NewState();
-        var scoreState = Agreement.NewState();
+        var registers = ScorePlayer.Registers(score.Chips).ToArray();
+        var tuneState = Agreement.NewState(score.Chips);
+        var scoreState = Agreement.NewState(score.Chips);
         int changes = 0, musicChanges = 0, detail = 0;
-        var missed = new int[0x19];
+        var missed = new int[0x20 * score.Chips];
         for (int call = 0; call < recording.Calls.Count; call++)
         {
             var tune = recording.CallWrites[call];
             long at = player.Cycle;
             player.Call((number, writes) =>
             {
-                int replaced = 0;
-                for (int register = 0; register <= 0x18; register++)
+                UInt128 replaced = 0;
+                foreach (int register in registers)
                 {
                     int tuneFrom = tuneState[register], scoreFrom = scoreState[register];
                     var wanted = Agreement.Values(tune, register, tuneState);
@@ -73,7 +75,7 @@ public static class Transcriber
                     if (made.SequenceEqual(wanted))
                         continue;
 
-                    replaced |= 1 << register;
+                    replaced |= RawCall.Bit(register);
                     if (tuneTo == scoreTo)
                         detail++;
                 }
@@ -81,13 +83,13 @@ public static class Transcriber
                 if (replaced == 0)
                     return null;
                 var raw = new RawCall(replaced, [.. tune
-                    .Where(w => (replaced >> w.Register & 1) != 0)
+                    .Where(w => ((replaced >> w.Register) & 1) != 0)
                     .Select(w => new RawWrite((int)(w.Cycle - at), w.Register, w.Value))]);
                 score.Raw.Calls[number] = raw;
                 return raw;
             });
 
-            for (int register = 0; register <= 0x18; register++)
+            foreach (int register in registers)
                 Agreement.Values(player.CallWrites, register, scoreState);
         }
 

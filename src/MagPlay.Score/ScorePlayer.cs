@@ -33,33 +33,45 @@ public sealed class ScorePlayer
     private readonly List<TimedWrite> _streamWrites = [];
 
     /// <summary>What is on each register: what the player last wrote, 0 before it has - the SID
-    /// starts with every register 0, so writing 0 to one changes nothing.</summary>
-    private readonly int[] _written = new int[0x19];
+    /// starts with every register 0, so writing 0 to one changes nothing. $20 a chip.</summary>
+    private readonly int[] _written;
     private readonly StreamState?[] _streams = new StreamState?[4];
 
     private long _cycle;
     private int _call;
     private int _between;
     private readonly List<TimedWrite> _rawBetween;
-    private readonly int[] _before = new int[0x19];
+    private readonly int[] _before;
     private int _cyclesPerCall;
     private int _tempo;
     private (int First, int Second)? _funk;
-    private int _modeVolume;
-    private int _cutoff;
-    private int _filterControl;
-    private Program _filter = Program.Stopped;
+    private readonly ChipState[] _chips;
+
+    /// <summary>What a chip has besides its voices: filter, volume, and the filter program.</summary>
+    private sealed class ChipState
+    {
+        public int ModeVolume;
+        public int Cutoff;
+        public int FilterControl;
+        public Program Filter = Program.Stopped;
+    }
 
     public ScorePlayer(Score score)
     {
         _score = score;
-        _voices = [new VoiceState(0), new VoiceState(1), new VoiceState(2)];
+        _voices = [.. Enumerable.Range(0, 3 * score.Chips).Select(v => new VoiceState(v))];
+        _chips = [.. Enumerable.Range(0, score.Chips).Select(_ => new ChipState())];
+        _written = new int[0x20 * score.Chips];
+        _before = new int[_written.Length];
         _cyclesPerCall = Math.Max(1, score.CyclesPerCall);
         _tempo = Math.Max(1, score.Tempo);
         _funk = score.FunkTempo is { } funk ? (_tempo, funk) : null;
-        _modeVolume = (score.ModeVolume ?? 0) & 0xFF;
-        if (score.FilterProgram >= 0)
-            _filter = new Program(score.FilterProgram, 0, 0);
+        _chips[0].ModeVolume = (score.ModeVolume ?? 0) & 0xFF;
+        for (int chip = 0; chip < _chips.Length; chip++)
+        {
+            if (score.FilterPrograms[chip] >= 0)
+                _chips[chip].Filter = new Program(score.FilterPrograms[chip], 0, 0);
+        }
         _rawBetween = [.. score.Raw.Between.OrderBy(w => w.Cycle)];
         _cycle = score.CallCycles is { Count: > 0 } cycles ? cycles[0] : score.FirstCall;
 
@@ -67,7 +79,7 @@ public sealed class ScorePlayer
             voice.Ended = score.Voices[voice.Index].Order.Count == 0;
 
         if (score.ModeVolume is not null)
-            Write(0x18, _modeVolume);
+            Write(0x18, _chips[0].ModeVolume);
         var init = new List<TimedWrite>(_writes);
         _writes.Clear();
         for (; _between < _rawBetween.Count && _rawBetween[_between].Cycle < _cycle; _between++)
@@ -94,8 +106,15 @@ public sealed class ScorePlayer
                                  v.Instrument?.Number ?? 0, v.Wave.Playing, v.Pulses.Playing, v.Ended);
     }
 
-    /// <summary>The step of the filter program sounding after the last call; -1 for none.</summary>
-    public int FilterStep => _filter.Playing;
+    /// <summary>The step of the first chip's filter program sounding after the last call; -1 for none.</summary>
+    public int FilterStep => _chips[0].Filter.Playing;
+
+    /// <summary>The step of <paramref name="chip"/>'s filter program sounding after the last call.</summary>
+    public int FilterStepOf(int chip) => _chips[chip].Filter.Playing;
+
+    /// <summary>The registers the score has, as it numbers them: $00-$18 of each chip.</summary>
+    public static IEnumerable<int> Registers(int chips) =>
+        Enumerable.Range(0, chips).SelectMany(chip => Enumerable.Range(chip * 0x20, 0x19));
 
     /// <summary>The last call's own writes - the music's and the raw layer's for that call.</summary>
     public IReadOnlyList<TimedWrite> CallWrites => _writes;
@@ -120,11 +139,15 @@ public sealed class ScorePlayer
         foreach (var voice in _voices)
             PlayVoice(voice);
 
-        StepFilter();
-        Write(0x15, _cutoff & 0x07);
-        Write(0x16, (_cutoff >> 3) & 0xFF);
-        Write(0x17, _filterControl);
-        Write(0x18, _modeVolume);
+        for (int c = 0; c < _chips.Length; c++)
+        {
+            var chip = _chips[c];
+            StepFilter(c);
+            Write(c * 0x20 + 0x15, chip.Cutoff & 0x07);
+            Write(c * 0x20 + 0x16, (chip.Cutoff >> 3) & 0xFF);
+            Write(c * 0x20 + 0x17, chip.FilterControl);
+            Write(c * 0x20 + 0x18, chip.ModeVolume);
+        }
 
         var given = raw is not null ? raw(_call, _writes) : _score.Raw.Calls.GetValueOrDefault(_call);
         if (given is not null)
@@ -149,7 +172,7 @@ public sealed class ScorePlayer
     private void WriteRawCall(RawCall raw)
     {
         _writes.RemoveAll(w => raw.Replaces(w.Register));
-        for (int r = 0; r <= 0x18; r++)
+        foreach (int r in Registers(_chips.Length))
         {
             if (!raw.Replaces(r))
                 continue;
@@ -159,7 +182,7 @@ public sealed class ScorePlayer
 
         foreach (var write in raw.Writes)
         {
-            if (write.Register is < 0 or > 0x18)
+            if (!IsRegister(write.Register))
                 continue;
             _written[write.Register] = write.Value & 0xFF;
             _writes.Add(new TimedWrite(_cycle + write.Offset, write.Register, write.Value & 0xFF));
@@ -169,9 +192,17 @@ public sealed class ScorePlayer
 
     // ------------------------------------------------------------------ voices
 
+    private bool IsRegister(int register) => register >= 0 && register < 0x20 * _chips.Length && (register & 0x1F) <= 0x18;
+
     private sealed class VoiceState(int index)
     {
         public int Index { get; } = index;
+
+        /// <summary>The chip the voice is on.</summary>
+        public int Chip => Index / 3;
+
+        /// <summary>Its first register, as the score numbers them.</summary>
+        public int Base => Score.RegisterOf(Index, 0);
 
         public bool Ended;
         public int Entry = -1;
@@ -447,7 +478,7 @@ public sealed class ScorePlayer
         if (instrument.PulseProgram >= 0)
             voice.Pulses = new Program(instrument.PulseProgram, 0, 0);
         if (instrument.FilterProgram >= 0)
-            _filter = new Program(instrument.FilterProgram, 0, 0);
+            _chips[voice.Chip].Filter = new Program(instrument.FilterProgram, 0, 0);
         voice.FirstCall = instrument.FirstControl is not null;
         if (voice.FirstCall)
             voice.PendingFrequency = frequency;
@@ -470,11 +501,11 @@ public sealed class ScorePlayer
             case SetControl e: voice.Control = e.Value & 0xFF; break;
             case SetWaveProgram e: voice.Wave = new Program(e.Step, 0, 0); break;
             case SetPulseProgram e: voice.Pulses = new Program(e.Step, 0, 0); break;
-            case SetFilterProgram e: _filter = new Program(e.Step, 0, 0); break;
-            case FilterControl e: _filterControl = e.Value & 0xFF; break;
-            case FilterCutoff e: _cutoff = e.Value & 0x7FF; break;
-            case MasterVolume e: _modeVolume = (_modeVolume & 0xF0) | (e.Value & 0x0F); break;
-            case FilterMode e: _modeVolume = (e.Value & 0xF0) | (_modeVolume & 0x0F); break;
+            case SetFilterProgram e: _chips[voice.Chip].Filter = new Program(e.Step, 0, 0); break;
+            case FilterControl e: _chips[voice.Chip].FilterControl = e.Value & 0xFF; break;
+            case FilterCutoff e: _chips[voice.Chip].Cutoff = e.Value & 0x7FF; break;
+            case MasterVolume e: _chips[voice.Chip].ModeVolume = (_chips[voice.Chip].ModeVolume & 0xF0) | (e.Value & 0x0F); break;
+            case FilterMode e: _chips[voice.Chip].ModeVolume = (e.Value & 0xF0) | (_chips[voice.Chip].ModeVolume & 0x0F); break;
             case FunkTempo e: _funk = (Math.Max(1, e.First), Math.Max(1, e.Second)); break;
             case Tempo { ThisVoiceOnly: true } e: voice.Tempo = Math.Max(1, e.Calls); break;
             case Tempo e:
@@ -620,7 +651,7 @@ public sealed class ScorePlayer
                     return (0, 0);
 
                 case RawStep raw:
-                    WriteRaw(voice, raw.Writes);
+                    WriteRaw(voice.Chip, voice, raw.Writes);
                     return (Math.Max(1, raw.Calls), 0);
 
                 default:
@@ -652,35 +683,36 @@ public sealed class ScorePlayer
         }, add => voice.Pulse = (voice.Pulse + add) & 0xFFF);
     }
 
-    private void StepFilter()
+    private void StepFilter(int c)
     {
-        _filter = Step(_filter, _score.FilterTable, step =>
+        var chip = _chips[c];
+        chip.Filter = Step(chip.Filter, _score.FilterTable, step =>
         {
             switch (step)
             {
                 case FilterStep filter:
                     if (filter.Control is { } control)
-                        _filterControl = control & 0xFF;
+                        chip.FilterControl = control & 0xFF;
                     if (filter.Mode is { } mode)
-                        _modeVolume = (mode & 0xF0) | (_modeVolume & 0x0F);
+                        chip.ModeVolume = (mode & 0xF0) | (chip.ModeVolume & 0x0F);
                     if (filter.Cutoff is { } cutoff)
-                        _cutoff = cutoff & 0x7FF;
+                        chip.Cutoff = cutoff & 0x7FF;
                     else
-                        _cutoff = (_cutoff + filter.Add) & 0x7FF;
+                        chip.Cutoff = (chip.Cutoff + filter.Add) & 0x7FF;
                     return (Math.Max(1, filter.Calls), filter.Add);
 
                 case EffectStep effect:
-                    Apply(_voices[0], effect.Effect);
+                    Apply(_voices[c * 3], effect.Effect);
                     return (0, 0);
 
                 case RawStep raw:
-                    WriteRaw(null, raw.Writes);
+                    WriteRaw(c, null, raw.Writes);
                     return (Math.Max(1, raw.Calls), 0);
 
                 default:
                     return (1, 0);
             }
-        }, add => _cutoff = (_cutoff + add) & 0x7FF);
+        }, add => chip.Cutoff = (chip.Cutoff + add) & 0x7FF);
     }
 
     /// <summary>
@@ -732,7 +764,7 @@ public sealed class ScorePlayer
 
     private void WriteVoice(VoiceState voice)
     {
-        int b = voice.Index * 7;
+        int b = voice.Base;
         Write(b + 0, voice.Frequency & 0xFF);
         Write(b + 1, (voice.Frequency >> 8) & 0xFF);
         Write(b + 2, voice.Pulse & 0xFF);
@@ -752,14 +784,15 @@ public sealed class ScorePlayer
         Write(b + 4, control);
     }
 
-    /// <summary>A raw step's writes, as written, and the voice and chip state carried on from them.</summary>
-    private void WriteRaw(VoiceState? voice, IReadOnlyList<(int Register, int Value)> writes)
+    /// <summary>A raw step's writes, as written, and the voice and chip state carried on from them:
+    /// registers 0-6 the voice's own, the others <paramref name="chip"/>'s.</summary>
+    private void WriteRaw(int chip, VoiceState? voice, IReadOnlyList<(int Register, int Value)> writes)
     {
         foreach (var (register, value) in writes)
         {
-            int target = register is >= 0 and <= 6 && voice is not null ? voice.Index * 7 + register : register;
-            if (target is < 0 or > 0x18)
+            if (register is < 0 or > 0x18)
                 continue;
+            int target = register <= 6 && voice is not null ? voice.Base + register : chip * 0x20 + register;
 
             Write(target, value & 0xFF, force: true);
             Carry(target, value);
@@ -769,10 +802,12 @@ public sealed class ScorePlayer
     /// <summary>The voice or chip state a write to <paramref name="target"/> sets.</summary>
     private void Carry(int target, int value)
     {
+        var chip = _chips[target >> 5];
+        int register = target & 0x1F;
         {
-            int offset = target % 7;
-            var owner = target < 0x15 ? _voices[target / 7] : null;
-            switch (target)
+            int offset = register % 7;
+            var owner = register < 0x15 ? _voices[(target >> 5) * 3 + register / 7] : null;
+            switch (register)
             {
                 case < 0x15 when offset == 0: owner!.Frequency = (owner.Frequency & 0xFF00) | (value & 0xFF); break;
                 case < 0x15 when offset == 1: owner!.Frequency = (owner.Frequency & 0x00FF) | ((value & 0xFF) << 8); break;
@@ -784,10 +819,10 @@ public sealed class ScorePlayer
                     break;
                 case < 0x15 when offset == 5: owner!.AttackDecay = value & 0xFF; break;
                 case < 0x15: owner!.SustainRelease = value & 0xFF; break;
-                case 0x15: _cutoff = (_cutoff & 0x7F8) | (value & 0x07); break;
-                case 0x16: _cutoff = (_cutoff & 0x007) | ((value & 0xFF) << 3); break;
-                case 0x17: _filterControl = value & 0xFF; break;
-                default: _modeVolume = value & 0xFF; break;
+                case 0x15: chip.Cutoff = (chip.Cutoff & 0x7F8) | (value & 0x07); break;
+                case 0x16: chip.Cutoff = (chip.Cutoff & 0x007) | ((value & 0xFF) << 3); break;
+                case 0x17: chip.FilterControl = value & 0xFF; break;
+                default: chip.ModeVolume = value & 0xFF; break;
             }
         }
     }
@@ -801,12 +836,12 @@ public sealed class ScorePlayer
         _ => 0xFF,
     })];
 
-    /// <summary>The bits of <paramref name="register"/> the SID keeps.</summary>
-    public static int UsedBits(int register) => Used[register];
+    /// <summary>The bits of <paramref name="register"/> the SID keeps - on any chip.</summary>
+    public static int UsedBits(int register) => Used[Math.Min(0x18, register & 0x1F)];
 
     private void Write(int register, int value, bool force = false)
     {
-        int used = Used[register];
+        int used = UsedBits(register);
         if (!force && (_written[register] & used) == (value & used))
             return;
 
@@ -854,8 +889,8 @@ public sealed class ScorePlayer
                 }
 
                 int value = sample.Values[stream.Position++];
-                if (sample.VolumeNibble && sample.Register == 0x18)
-                    value = (_modeVolume & 0xF0) | (value & 0x0F);
+                if (sample.VolumeNibble && (sample.Register & 0x1F) == 0x18 && sample.Register >> 5 < _chips.Length)
+                    value = (_chips[sample.Register >> 5].ModeVolume & 0xF0) | (value & 0x0F);
                 _streamWrites.Add(new TimedWrite(Math.Max(from, (long)stream.Next), sample.Register, value & 0xFF));
                 stream.Next += Math.Max(1, sample.CyclesPerValue);
             }
