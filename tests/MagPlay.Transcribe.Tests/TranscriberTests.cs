@@ -68,6 +68,39 @@ public class TranscriberTests
     }
 
     [Fact]
+    public void A_kick_and_bass_is_one_instrument_its_notes_the_bass_it_settles_on()
+    {
+        // The arpeggiator's notes as a bass under a kick: each note's first call on C-6 whatever
+        // the note, the bass from the next call on. Its very first call, before any note, sets
+        // C-4 and moves on, so the notes start from E-4.
+        var code = new byte[0x80];
+        Array.Copy(Arpeggiator().Data, code, 0x10);
+        int kick = Notes[C4 + 24];
+        byte[] play =
+        [
+            0xAE, 0x00, 0xC0, 0xE8, 0xE0, 0x08, 0xD0, 0x19, 0xA2, 0x00,   // ldx $c000 / inx / cpx #8 / bne more / ldx #0
+            0xA9, (byte)kick, 0x8D, 0x00, 0xD4, 0xA9, (byte)(kick >> 8), 0x8D, 0x01, 0xD4,
+            0xA9, 0x40, 0x8D, 0x04, 0xD4, 0xA9, 0x41, 0x8D, 0x04, 0xD4,
+            0x4C, 0x4B, 0x10,                                           // jmp store
+            0xE0, 0x01, 0xD0, 0x16,                                     // more: cpx #1 / bne store
+            0xAC, 0x01, 0xC0, 0xB9, 0x60, 0x10, 0x8D, 0x00, 0xD4, 0xB9, 0x64, 0x10, 0x8D, 0x01, 0xD4,
+            0xC8, 0x98, 0x29, 0x03, 0x8D, 0x01, 0xC0,
+            0x8E, 0x00, 0xC0, 0x60,                                     // store: stx $c000 / rts
+        ];
+        play.CopyTo(code, 0x10);
+        Array.Copy(Arpeggiator().Data, 0x60, code, 0x60, 8);
+        var recording = Recording.Record(Tune(code, play: 0x1010), 1, 2.0);
+        var (score, _) = Transcriber.Transcribe(recording, Music.Of(recording));
+
+        Assert.True(Agreement.Measure(recording, score).Exact);
+        Assert.Single(score.Instruments);
+        var played = score.Voices[0].Order
+            .SelectMany(e => Enumerable.Repeat(score.PatternNumber(e.Pattern)!.Rows.Select(r => r.Note.Kind == RowNoteKind.Note ? r.Note.Note + e.Transpose : -1), e.Repeat))
+            .SelectMany(n => n).Where(n => n >= 0).ToList();
+        Assert.Equal([E4, G4, C5, C4, E4, G4], played.Take(6));
+    }
+
+    [Fact]
     public void A_score_that_is_all_raw_plays_the_tune_back_exactly()
     {
         var recording = Recording.Record(Arpeggiator(), 1, 2.0);

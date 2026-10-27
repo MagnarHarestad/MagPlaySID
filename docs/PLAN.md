@@ -254,6 +254,18 @@ on the C64 and then ran it again to record it, every digi write kept: 14 million
 On the 471: the LMan RSIDs and Hi Fi Sky now have notes (94.7-99.7% of their changes); mean
 music share 96.5%; all still exact.
 
+**A note is the note it plays, not its drum.** Magnar's Demo_Coder_tune_1: kick-and-bass
+instruments came out as many, each with the bass some semitones from the row's note (+1, +4,
+-1, -13...), and the rows showed the kick's pitch, not the bass. A note was named after its first
+in-tune pitch - the kick's, the same whatever the bass - so every interval was an instrument of
+its own. Now a note founding an instrument is named after the pitch it holds longest (of pitches
+held as long, the first: an arpeggio's root), and a note joining one may be named after any note
+that lines its pitches up with the instrument's - so a drum's short note that never reaches the
+pitch its long ones hold is still one of them. Demo_Coder_tune_1, three minutes: 132 instruments
+to 118, the held pitch the row's note in all those that hold one, 55 that did not before. On the
+471: 14,522 instruments to 13,905, fewer in 140 tunes, more in 6, no tune's music share down by
+more than 0.1 point; all still exact.
+
 **A piano along the bottom** (`PianoView`): the SID's eight octaves, C-0 to B-7, each voice's key
 lit in the voice's scope colour as bright as its envelope, so a release fades on the key. Read
 from the chip at the sample being heard - the engine keeps each voice's frequency, control byte

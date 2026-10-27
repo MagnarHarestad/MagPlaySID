@@ -488,15 +488,17 @@ public static class Music
         foreach (int i in Enumerable.Range(0, spans.Length).OrderByDescending(i => spans[i].End - spans[i].Tail - spans[i].Start + Math.Max(0, spans[i].PulseCalls)))
         {
             var heard = Sound.Hear(score.NoteTable, frames, spans[i]);
-            int number = sounds.FindIndex(s => s.Plays(heard));
+            int note = heard.Note;
+            int number = sounds.FindIndex(s => s.Plays(heard, score.NoteTable) is { } named && (note = named) >= 0);
             if (number < 0)
             {
                 sounds.Add(heard);
                 number = sounds.Count - 1;
+                note = heard.Note;
             }
             else
             {
-                sounds[number].Join(heard);
+                sounds[number].Join(heard, score.NoteTable, note);
             }
             // A note sounding with another envelope than its instrument's sets it on its row.
             var sound = sounds[number];
@@ -507,7 +509,7 @@ public static class Music
                 effects.Add(new SetSustainRelease(heard.SustainRelease));
             if (spans[i].Width is { } set)
                 effects.Add(new SetPulse(set));
-            rows[i] = Row.Of(heard.Note, number + 1, [.. effects]);
+            rows[i] = Row.Of(note, number + 1, [.. effects]);
         }
 
         return grid.Lay([.. spans.Select((span, i) => (span.Start, rows[i]))], frames.Length);
@@ -541,9 +543,9 @@ public static class Music
     }
 
     /// <summary>A call of a wave program: the control byte, the envelope where it changes - null
-    /// where it is as on the call before - and every way of saying the pitch that fits each note
-    /// the program plays.</summary>
-    private sealed record WaveCall(int Control, int? AttackDecay, int? SustainRelease, HashSet<Pitch> Pitches);
+    /// where it is as on the call before - every way of saying the pitch that fits each note the
+    /// program plays, and the frequency the note it was heard in played there.</summary>
+    private sealed record WaveCall(int Control, int? AttackDecay, int? SustainRelease, HashSet<Pitch> Pitches, int Frequency);
 
     /// <summary>A call of a pulse program: the width set outright, or moved by an amount.</summary>
     private readonly record struct PulseCall(bool Set, int Value);
@@ -591,7 +593,8 @@ public static class Music
             {
                 var f = frames[c];
                 wave.Add(new WaveCall(f.Control, f.AttackDecay != was.AttackDecay ? f.AttackDecay : null,
-                                      f.SustainRelease != was.SustainRelease ? f.SustainRelease : null, Pitches(table, note, f.Frequency)));
+                                      f.SustainRelease != was.SustainRelease ? f.SustainRelease : null, Pitches(table, note, f.Frequency),
+                                      f.Frequency));
                 was = f;
             }
 
@@ -620,14 +623,26 @@ public static class Music
             };
         }
 
-        /// <summary>The note a note is: its first pitch that is one of the table's.</summary>
+        /// <summary>
+        /// The note a note is: the pitch of the table's it holds longest with a waveform that has one
+        /// - the bass a kick drum settles on, not the drum's own pitches before it; of pitches held
+        /// as long, the first - an arpeggio's root. Else its first pitch that is one of the table's.
+        /// </summary>
         private static int BaseNote(int[] table, Frame[] frames, int start, int end)
         {
-            for (int c = start; c < end; c++)
+            int held = -1, longest = 0;
+            for (int c = start; c < end;)
             {
-                if (frames[c].Tonal && Array.BinarySearch(table, frames[c].Frequency) is >= 0 and var n)
-                    return n;
+                int run = 1;
+                while (c + run < end && frames[c + run].Frequency == frames[c].Frequency && frames[c + run].Tonal == frames[c].Tonal)
+                    run++;
+                if (frames[c].Tonal && run > longest && Array.BinarySearch(table, frames[c].Frequency) is >= 0 and var n)
+                    (held, longest) = (n, run);
+                c += run;
             }
+            if (held >= 0)
+                return held;
+
             for (int c = start; c < end; c++)
             {
                 if (Array.BinarySearch(table, frames[c].Frequency) is >= 0 and var n)
@@ -651,25 +666,57 @@ public static class Music
             return pitches;
         }
 
-        /// <summary>Plays <paramref name="other"/>'s note as it sounds: the same start and
-        /// quietening, and for as many calls as it lasts the same as this does.</summary>
-        public bool Plays(Sound other)
+        /// <summary>
+        /// Plays <paramref name="other"/>'s note as it sounds - the same start and quietening, and
+        /// for as many calls as it lasts the same as this does - and the note it is then: its own,
+        /// or one its pitches line up with this one's from. A drum's short note that never reaches
+        /// the pitch its long ones hold is still one of them, from the note they are. Null when no
+        /// note it could be is played so.
+        /// </summary>
+        public int? Plays(Sound other, int[] table)
         {
             if (other.First != First || other.Tail != Tail || other.TailEnvelope != TailEnvelope)
-                return false;
+                return null;
             if ((other.Pulse is null) != (Pulse is null))
-                return false;
+                return null;
             if (Pulse is { } pulse && !Fits(pulse, other.Pulse!))
-                return false;
+                return null;
 
             for (int c = 0; c < other.Wave.Count; c++)
             {
                 var mine = Wave[Math.Min(c, Wave.Count - 1)];
                 var theirs = other.Wave[c];
                 if (mine.Control != theirs.Control || mine.AttackDecay != theirs.AttackDecay || mine.SustainRelease != theirs.SustainRelease)
-                    return false;
+                    return null;
             }
-            return Fits([.. Wave.Select(w => w.Pitches)], [.. other.Wave.Select(w => w.Pitches)]);
+
+            var pitches = Wave.Select(w => w.Pitches).ToList();
+            foreach (int note in NotesFor(other, table))
+            {
+                if (Fits(pitches, [.. other.Wave.Select(w => Pitches(table, note, w.Frequency))]))
+                    return note;
+            }
+            return null;
+        }
+
+        /// <summary>Calls at the start of a note looked at for the notes it could be.</summary>
+        private const int LinedUpCalls = 4;
+
+        /// <summary>The notes <paramref name="other"/> could be: its own, then those that put one of
+        /// its first pitches where this program has one in semitones from its note.</summary>
+        private IEnumerable<int> NotesFor(Sound other, int[] table)
+        {
+            yield return other.Note;
+            for (int c = 0; c < Math.Min(LinedUpCalls, Math.Min(Wave.Count, other.Wave.Count)); c++)
+            {
+                if (Array.BinarySearch(table, other.Wave[c].Frequency) is not (>= 0 and var heard))
+                    continue;
+                foreach (var pitch in Wave[c].Pitches)
+                {
+                    if (pitch.Kind == PitchKind.Relative && heard - pitch.Value is >= 0 and var note && note < table.Length && note != other.Note)
+                        yield return note;
+                }
+            }
         }
 
         /// <summary>Some way of saying each call fits both: call by call while <paramref name="mine"/>
@@ -694,12 +741,12 @@ public static class Music
             return true;
         }
 
-        /// <summary>Takes <paramref name="other"/>'s note on: only the ways of saying each call that
-        /// fit it too are kept.</summary>
-        public void Join(Sound other)
+        /// <summary>Takes <paramref name="other"/>'s note on, as note <paramref name="note"/>: only the
+        /// ways of saying each call that fit it too are kept.</summary>
+        public void Join(Sound other, int[] table, int note)
         {
             for (int c = 0; c < other.Wave.Count; c++)
-                Wave[Math.Min(c, Wave.Count - 1)].Pitches.IntersectWith(other.Wave[c].Pitches);
+                Wave[Math.Min(c, Wave.Count - 1)].Pitches.IntersectWith(Pitches(table, note, other.Wave[c].Frequency));
             if (Pulse is { } pulse)
             {
                 for (int c = 0; c < other.Pulse!.Count; c++)
