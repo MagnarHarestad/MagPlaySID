@@ -112,6 +112,11 @@ public sealed class C64 : IMemoryBus
     /// <summary>The cycle each call started on: an IRQ taken while no other IRQ was being run.</summary>
     public IReadOnlyList<long> Calls => _calls;
 
+    /// <summary>Which writes are recorded, by what they were written from; all when null. A tune
+    /// transcribed for a view keeps its player's writes only - not a digi's many thousands. The
+    /// chip model a read of voice 3 starts is then played only the writes kept before it.</summary>
+    public Func<WriteContext, bool>? Keep { get; set; }
+
     /// <summary>A call is starting: the IRQ is about to be taken, nothing of it run yet.</summary>
     public event Action? CallStarting;
 
@@ -267,10 +272,10 @@ public sealed class C64 : IMemoryBus
                 if ((address & 0x1F) > 0x18)
                     break;
                 _chip?.Write(Cpu.AccessCycle, chip + 1, address & 0x1F, value);
-                if (_record)
+                if (_record && Context() is var extra && Keep?.Invoke(extra) != false)
                 {
                     _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
-                    _extraSidWriteContexts[chip].Add(Context());
+                    _extraSidWriteContexts[chip].Add(extra);
                 }
                 break;
             case < 0xD800: WriteSid(address & 0x1F, value); break;
@@ -302,13 +307,18 @@ public sealed class C64 : IMemoryBus
         if (!_record)
             return;
 
-        _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));
-        _sidWriteContexts.Add(Context());
         if (_sid is not null)
         {
             ClockSidTo(Cpu.AccessCycle);
             _sid.Write(register, value);
         }
+
+        // A write not kept is lost to a chip model started later - see Keep.
+        var context = Context();
+        if (Keep?.Invoke(context) == false)
+            return;
+        _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));
+        _sidWriteContexts.Add(context);
     }
 
     private byte ReadSid(int chip, int register)

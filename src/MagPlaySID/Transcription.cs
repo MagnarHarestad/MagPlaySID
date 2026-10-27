@@ -18,10 +18,22 @@ internal sealed class Transcription
 
     public required Transcriber.Report Report { get; init; }
 
-    /// <param name="seconds">How much of the tune: its measured length.</param>
-    public static Transcription Make(SidFile file, int song, double seconds, CancellationToken cancel)
+    /// <summary>The first <paramref name="seconds"/> of the tune - quick to make, to show while the
+    /// whole of it is.</summary>
+    public static Transcription Opening(SidFile file, int song, double seconds, CancellationToken cancel) =>
+        Of(Recording.Record(file, song, seconds), cancel);
+
+    /// <summary>The whole tune, to its loop, and its length - measured and recorded in one run of
+    /// the C64, keeping only what the tune's player writes.</summary>
+    public static (Transcription Transcription, SidSongLength.Result? Length) Whole(SidFile file, int song, CancellationToken cancel)
     {
-        var recording = Recording.Record(file, song, seconds);
+        var (recording, length) = Recording.RecordWhole(file, song);
+        cancel.ThrowIfCancellationRequested();
+        return (Of(recording, cancel), length);
+    }
+
+    private static Transcription Of(Recording recording, CancellationToken cancel)
+    {
         cancel.ThrowIfCancellationRequested();
         var (score, report) = Transcriber.Transcribe(recording, Music.Of(recording));
         cancel.ThrowIfCancellationRequested();

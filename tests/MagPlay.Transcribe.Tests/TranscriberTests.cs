@@ -1,3 +1,4 @@
+using MagPlay.C64;
 using MagPlay.Score;
 using MagSid.Playback;
 
@@ -143,6 +144,46 @@ public class TranscriberTests
         Assert.Contains(recording.CallWrites.SelectMany(c => c), w => w.Register == 0x24);
         Assert.NotEmpty(score.Voices[3].Order);
         Assert.True(report.Music > 0.9);
+    }
+
+    [Fact]
+    public void A_tune_that_plays_from_its_main_loop_has_its_bursts_of_writes_as_calls()
+    {
+        // An RSID whose init never returns: the arpeggiator's setup, then a loop that waits for
+        // raster line $80 and calls its play routine once a frame - no interrupt in it.
+        var arpeggiator = Arpeggiator();
+        var code = new byte[0xA0];
+        Array.Copy(arpeggiator.Data, code, arpeggiator.Data.Length);
+        byte[] jump = [0x4C, 0x70, 0x10];
+        byte[] loop =
+        [
+            0xA9, 0x0F, 0x8D, 0x18, 0xD4, 0xA9, 0x09, 0x8D, 0x05, 0xD4, 0xA9, 0xA0, 0x8D, 0x06, 0xD4,
+            0xAD, 0x12, 0xD0, 0xC9, 0x80, 0xD0, 0xF9,   // wait: lda $d012 / cmp #$80 / bne wait
+            0x20, 0x10, 0x10,                           // jsr play
+            0xAD, 0x12, 0xD0, 0xC9, 0x80, 0xF0, 0xF9,   // lda $d012 / cmp #$80 / beq - off the line
+            0x4C, 0x7F, 0x10,                           // jmp wait
+        ];
+        jump.CopyTo(code, 0);
+        loop.CopyTo(code, 0x70);
+        var recording = Recording.Record(Tune(code, rsid: true), 1, 2.0);
+        var (score, report) = Transcriber.Transcribe(recording, Music.Of(recording));
+
+        Assert.Equal(WriteContext.Main, recording.Player);
+        Assert.InRange(recording.Calls.Count, 98, 101);
+        Assert.True(Agreement.Measure(recording, score).Exact);
+        Assert.True(report.Music > 0.9);
+        Assert.Equal(8, score.Tempo);
+    }
+
+    [Fact]
+    public void A_whole_tune_is_recorded_to_its_loop_with_its_player_only()
+    {
+        var (recording, length) = Recording.RecordWhole(Arpeggiator(), 1);
+
+        Assert.NotNull(length);
+        Assert.Equal(WriteContext.Call, recording.Player);
+        Assert.Empty(recording.Between.Where(w => w.Register != 0x18 && w.Register != 0x05 && w.Register != 0x06));
+        Assert.InRange(recording.Calls.Count, length.TotalFrames, length.TotalFrames + 60);
     }
 
     [Fact]

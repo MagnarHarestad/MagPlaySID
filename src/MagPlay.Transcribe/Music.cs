@@ -222,8 +222,18 @@ public static class Music
     /// are left to it; with funk tempo every row says its length, since a row split for two notes
     /// would put the turn of A and B out of step.
     /// </summary>
-    internal sealed record Grid(int A, int B, int Origin)
+    /// <param name="Shifts">Calls where a straight grid starts again - the music moved by a call or
+    /// a few, a bar of another length, and went on in rows of the same length from there.</param>
+    internal sealed record Grid(int A, int B, int Origin, IReadOnlyList<int>? Shifts = null)
     {
+        /// <summary>Gaps between note starts that have to be whole rows for a row length to be the
+        /// tune's, when no one phase puts nine notes in ten on a row.</summary>
+        private const double GapsOnRows = 0.9;
+
+        /// <summary>Notes after a note off the grid that have to be on the phase it starts for the
+        /// grid to start again there; fewer, and it is a note delayed.</summary>
+        private const int ShiftHolds = 3;
+
         public bool Funk => A != B;
 
         private int Period => Funk ? A + B : A;
@@ -240,6 +250,8 @@ public static class Music
             int b = funk ?? a;
             if (starts.Count == 0)
                 return new Grid(a, b, 0);
+            if (a == 1 && funk is null && Shifting(starts.Distinct().ToList()) is { } shifting)
+                return shifting;
 
             var grid = Enumerable.Range(0, a + (funk is null ? 0 : b))
                 .SelectMany(phase => funk is null ? [new Grid(a, b, phase)] : new[] { new Grid(a, b, phase), new Grid(b, a, phase) })
@@ -247,6 +259,38 @@ public static class Music
             while (grid.Origin + grid.Period <= starts[0])
                 grid = grid with { Origin = grid.Origin + grid.Period };
             return grid;
+        }
+
+        /// <summary>
+        /// A grid for a tune no one phase fits: the longest row length that nine gaps between note
+        /// starts in ten are whole rows of, starting again wherever the notes move off it and stay
+        /// off - the phase a tune is in moving by a call at a bar of another length. Null when no
+        /// row length is.
+        /// </summary>
+        private static Grid? Shifting(List<int> starts)
+        {
+            if (starts.Count < 2)
+                return null;
+            var gaps = starts.Zip(starts.Skip(1), (x, y) => y - x).ToList();
+            int length = Enumerable.Range(2, 15).Reverse().FirstOrDefault(a => gaps.Count(g => g % a == 0) >= gaps.Count * GapsOnRows);
+            if (length == 0)
+                return null;
+
+            var shifts = new List<int>();
+            int phase = starts[0];
+            for (int i = 1; i < starts.Count; i++)
+            {
+                int start = starts[i];
+                if ((start - phase) % length == 0)
+                    continue;
+                var after = starts.Skip(i + 1).Take(ShiftHolds).ToList();
+                if (after.Count == ShiftHolds && after.All(t => (t - start) % length == 0))
+                {
+                    shifts.Add(start);
+                    phase = start;
+                }
+            }
+            return new Grid(length, length, starts[0], shifts);
         }
 
         /// <summary>The calls <paramref name="starts"/> are into their rows, all told.</summary>
@@ -293,8 +337,26 @@ public static class Music
 
             if (Origin > 0)
                 Region(0, Origin, own: true);
-            for (gridRow = 0; CallOf(gridRow) < end; gridRow++)
-                Region(CallOf(gridRow), CallOf(gridRow + 1), own: Funk);
+            if (Shifts is not { Count: > 0 } shifts)
+            {
+                for (gridRow = 0; CallOf(gridRow) < end; gridRow++)
+                    Region(CallOf(gridRow), CallOf(gridRow + 1), own: Funk);
+                return rows;
+            }
+
+            // Rows of A from the origin; where the grid starts again, the row before it ends there.
+            int at = Origin, shift = 0;
+            for (gridRow = 0; at < end; gridRow++)
+            {
+                while (shift < shifts.Count && shifts[shift] <= at)
+                    shift++;
+                int to = at + A;
+                bool cut = shift < shifts.Count && shifts[shift] < to;
+                if (cut)
+                    to = shifts[shift];
+                Region(at, to, own: cut);
+                at = to;
+            }
             return rows;
         }
     }

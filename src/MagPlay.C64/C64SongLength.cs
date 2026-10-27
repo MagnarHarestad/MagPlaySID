@@ -24,12 +24,15 @@ public static class C64SongLength
     /// <summary>The length in calls - "frames" - and the call rate they are timed at: the tune's
     /// own, from its first call to the one it loops on. Null when the tune cannot be started, has no
     /// calls, or shows no repeating state within <paramref name="maxSeconds"/>.</summary>
-    public static SidSongLength.Result? Measure(SidFile file, int song, double maxSeconds = MaxSeconds)
-    {
-        if (SidTune.Unsupported(file) is not null)
-            return null;
+    public static SidSongLength.Result? Measure(SidFile file, int song, double maxSeconds = MaxSeconds) =>
+        SidTune.Unsupported(file) is not null ? null : Measure(SidTune.Load(file, song, record: false), maxSeconds);
 
-        var tune = SidTune.Load(file, song, record: false);
+    /// <summary>The length of <paramref name="tune"/>, run from where it is until it loops or
+    /// <paramref name="maxSeconds"/> have played - recording as it was loaded to, so a tune can be
+    /// measured and recorded in one run. It is left where the loop was found.</summary>
+    public static SidSongLength.Result? Measure(SidTune tune, double maxSeconds = MaxSeconds)
+    {
+        var file = tune.File;
         var computer = tune.Computer;
         var pages = new bool[256];
         pages[0] = true;
@@ -40,7 +43,7 @@ public static class C64SongLength
         var seen = new Dictionary<ulong, int>();
         int calls = 0;
         SidSongLength.Result? found = null;
-        computer.CallStarting += () =>
+        void Watch()
         {
             if (found is not null)
                 return;
@@ -64,9 +67,10 @@ public static class C64SongLength
             }
 
             seen[hash] = calls++;
-        };
+        }
 
         long end = (long)(maxSeconds * Machines.ClockHz(computer.Machine));
+        computer.CallStarting += Watch;
         try
         {
             while (found is null && computer.Cycle < end)
@@ -75,6 +79,10 @@ public static class C64SongLength
         catch (SidPlaybackException)
         {
             return null;
+        }
+        finally
+        {
+            computer.CallStarting -= Watch;
         }
 
         return found;

@@ -231,6 +231,29 @@ real 50.12. A tune that never repeats within twenty minutes takes some twenty se
 A PSID's init or play routine in the I/O area ($D000-$DFFF) is called with all RAM banked in, as
 libsidplayfp does; two of Magnar's test tunes start at $DFF6 and did nothing before.
 
+**Tunes that play outside an IRQ, and the wait for a long digi.** Hi Fi Sky plays its music from
+its main loop and voice 3 as a digi from an NMI - 11,000 writes a second - so its IRQs, the only
+calls the transcriber knew, wrote nothing: no notes, all raw. And the app measured a tune's length
+on the C64 and then ran it again to record it, every digi write kept: 14 million for its 7:43.
+
+- **The player is found where it runs.** When the IRQs write nothing to the SID, the main loop's
+  or the NMI's writes, cut into bursts by gaps of 4,000 cycles, are the calls - if the bursts come
+  at a player's rate (2-500 a second) and are as short (128 writes on average at most); a digi's
+  NMIs make long bursts of thousands. Bursts whole frames apart are a player called each frame
+  that writes only when it has something to say, and the frames between are calls too
+  (`Recording.Player`).
+- **A grid that starts again.** When no one phase puts nine notes in ten on a row, the row length
+  is the longest that nine gaps between notes in ten are whole rows of, and the grid starts again
+  where the notes move off it and the next three stay - Hi Fi Sky moves by a call now and then
+  and goes on in rows of 6; a lone late note is still delayed (ND).
+- **One run for length and recording** (`Recording.RecordWhole`): the player found in the tune's
+  first ten seconds, the C64 keeps its writes only (`C64.Keep`) while the length is measured, and
+  the recording ends at the loop. The app shows the first 30 seconds' transcription at once and
+  the whole tune's when it is done: Hi Fi Sky's 7:43 in some eleven seconds and 60 MB.
+
+On the 471: the LMan RSIDs and Hi Fi Sky now have notes (94.7-99.7% of their changes); mean
+music share 96.5%; all still exact.
+
 **A piano along the bottom** (`PianoView`): the SID's eight octaves, C-0 to B-7, each voice's key
 lit in the voice's scope colour as bright as its envelope, so a release fades on the key. Read
 from the chip at the sample being heard - the engine keeps each voice's frequency, control byte

@@ -24,6 +24,9 @@ internal sealed class PlayerWindow : Window
 {
     private static readonly FontFamily Mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
+    /// <summary>Seconds of a tune transcribed first, to show while the whole of it is.</summary>
+    private const int OpeningSeconds = 30;
+
     private readonly SpectrumView _spectrum = new();
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
@@ -317,9 +320,9 @@ internal sealed class PlayerWindow : Window
         output?.Dispose();
     }
 
-    /// <summary>Measures the tune and transcribes it, off the UI thread, while it already plays;
-    /// the view starts following when it is done. Measured on the C64 it plays on, so the length
-    /// is in the time it plays in - and an RSID has one.</summary>
+    /// <summary>Transcribes the tune off the UI thread while it already plays: its first half
+    /// minute first, shown at once, then the whole of it to its loop with its length - measured on
+    /// the C64 it plays on, so the length is in the time it plays in, and an RSID has one.</summary>
     private void Transcribe(int song)
     {
         _transcribing?.Cancel();
@@ -331,28 +334,44 @@ internal sealed class PlayerWindow : Window
         _retroStatus.Text = "Transcribing...";
         var file = _file!;
 
+        void Show(Action shown) => Dispatcher.UIThread.Post(() =>
+        {
+            if (!cancel.IsCancellationRequested && _file == file && _song == song)
+                shown();
+        });
+
         Task.Run(() =>
         {
-            var length = C64SongLength.Measure(file, song);
-            double seconds = length is null ? 180 : length.TotalFrames / length.CallsPerSecond;
-            return (length, Transcription.Make(file, song, Math.Clamp(seconds + 1, 1, 600), cancel.Token));
-        }, cancel.Token).ContinueWith(task => Dispatcher.UIThread.Post(() =>
-        {
-            if (cancel.IsCancellationRequested || _file != file || _song != song)
-                return;
-
-            if (!task.IsCompletedSuccessfully)
+            try
             {
-                _retroStatus.Text = task.Exception?.GetBaseException() is { } ex
-                    ? $"No rows to show: {ex.Message}"
-                    : "No rows to show.";
-                return;
-            }
+                var opening = Transcription.Opening(file, song, OpeningSeconds, cancel.Token);
+                Show(() =>
+                {
+                    if (_transcription is not null)
+                        return;
+                    _transcription = opening;
+                    _view.SetScore(opening.Score, opening.Timeline);
+                    _retroStatus.Text = $"The first {OpeningSeconds} seconds - the whole tune is on its way";
+                });
 
-            (_length, _transcription) = task.Result;
-            _view.SetScore(_transcription.Score, _transcription.Timeline);
-            _retroStatus.Text = _transcription.Describe();
-        }), TaskScheduler.Default);
+                var (whole, length) = Transcription.Whole(file, song, cancel.Token);
+                Show(() =>
+                {
+                    (_transcription, _length) = (whole, length);
+                    _view.SetScore(whole.Score, whole.Timeline);
+                    _retroStatus.Text = whole.Describe();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Show(() => _retroStatus.Text = _transcription is null
+                    ? $"No rows to show: {ex.Message}"
+                    : $"Only the first {OpeningSeconds} seconds: {ex.Message}");
+            }
+        }, cancel.Token);
     }
 
     private void TogglePause()
