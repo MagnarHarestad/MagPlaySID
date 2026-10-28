@@ -13,7 +13,14 @@
     <ApplicationManifest>..\MagSid.Editor.Avalonia\app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>MagPlaySID.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- The website's logo as the app's icon, 16 to 256 pixels: on the .exe as ApplicationIcon, and
+       embedded for the window's title bar and taskbar on every system. -->
+  <ItemGroup>
+    <EmbeddedResource Include="MagPlaySID.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />

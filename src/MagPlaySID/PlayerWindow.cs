@@ -56,6 +56,8 @@ internal sealed class PlayerWindow : Window
     public PlayerWindow(string? path = null)
     {
         Title = "MagPlaySID";
+        if (typeof(PlayerWindow).Assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)) is { } icon)
+            Icon = new WindowIcon(typeof(PlayerWindow).Assembly.GetManifestResourceStream(icon)!);
         Width = 1180;
         Height = 900;
         MinWidth = 900;
