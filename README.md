@@ -8,6 +8,10 @@ see how a tune is built. Windows, macOS and Linux.
 By Magnar Harestad of Censor Design. Built on the engine of the
 [MagSID editor](https://github.com/MagnarHarestad/MagSID), whose projects are still in this tree.
 
+**Website and download: [magnarharestad.github.io/MagPlaySID](https://magnarharestad.github.io/MagPlaySID/)** -
+packages for Windows, macOS and Linux on the [releases](https://github.com/MagnarHarestad/MagPlaySID/releases)
+page, built by `.github/workflows/magplaysid-release.yml` from a tag `v0.1` and the like (`packaging/magplaysid`).
+
 ```bash
 dotnet run --project src/MagPlaySID -c Release -- tune.sid
 ```

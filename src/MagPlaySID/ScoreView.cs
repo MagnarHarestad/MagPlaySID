@@ -288,7 +288,7 @@ internal sealed class ScoreView : Control
     private static string Describe(TableStep step) => step switch
     {
         WaveStep w => $"{(w.Control is { } c ? c.ToString("X2") : "..")} {Pitch(w.Pitch)}{Calls(w.Calls)}",
-        PulseStep p => $"{(p.Width is { } width ? $"={width:X3}" : "    ")} {Add(p.Add)}{Calls(p.Calls)}",
+        PulseStep p => $"{(p.Width is { } width ? $"={width:X3}" : p.Add == 0 ? "hold" : "    ")} {Add(p.Add)}{Calls(p.Calls)}",
         FilterStep f => $"{(f.Cutoff is { } cut ? $"={cut:X3}" : "    ")} {Add(f.Add)}" +
                         $"{(f.Control is { } fc ? $" res {fc:X2}" : "")}{(f.Mode is { } m ? $" mode {m >> 4:X}" : "")}{Calls(f.Calls)}",
         EffectStep e => e.Effect.Label,

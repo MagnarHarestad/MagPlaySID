@@ -1,0 +1,189 @@
+name: magplaysid-release
+
+# A tag v0.1 builds MagPlaySID's packages - the Mac app for Apple Silicon and Intel, Windows and
+# Linux - and opens a DRAFT release with them, to be looked over and published by hand; the
+# website's downloads follow the latest published release. Run by hand from the Actions tab it
+# builds the packages as artifacts only, with no release.
+#
+# The Mac app is signed with a Developer ID and notarised when the repository has the secrets
+# release.yml lists; ad hoc otherwise, and macOS then has to be told once to open it.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp on a trial build (no release is made)
+        default: 0.0-trial
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        env:
+          TRIAL: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$TRIAL" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Test the player, the C64 and the transcriber
+        run: |
+          for project in tests/MagSid.Sid.Tests tests/MagSid.Playback.Tests tests/MagPlay.Score.Tests tests/MagPlay.C64.Tests tests/MagPlay.Transcribe.Tests; do
+            dotnet test "$project" -c Release --logger "console;verbosity=minimal" || exit 1
+          done
+
+  macos:
+    needs: [version, test]
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    env:
+      HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      HAS_API_KEY: ${{ secrets.APPLE_API_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Put the Developer ID certificate in a keychain of its own
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          if [ -z "$identity" ]; then
+            echo "The certificate holds no Developer ID Application identity." >&2
+            exit 1
+          fi
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+      - name: Put the notarisation key in place
+        if: env.HAS_CERTIFICATE == 'true' && env.HAS_API_KEY == 'true'
+        env:
+          API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          echo "$API_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          {
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/notary.p8"
+            echo "APPLE_API_KEY_ID=$API_KEY_ID"
+            echo "APPLE_API_ISSUER=$API_ISSUER"
+          } >> "$GITHUB_ENV"
+      - name: Package MagPlaySID.app
+        run: bash packaging/magplaysid/package-macos.sh ${{ matrix.rid }} ${{ needs.version.outputs.version }}
+      - name: Remove the keychain and the key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/MagPlaySID-*.zip
+          if-no-files-found: error
+
+  portable:
+    needs: [version, test]
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Package
+        shell: bash
+        run: bash packaging/magplaysid/package.sh ${{ matrix.rid }} ${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: |
+            out/${{ matrix.rid }}/MagPlaySID-*.zip
+            out/${{ matrix.rid }}/MagPlaySID-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, macos, portable]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NOTARISED: ${{ secrets.MACOS_CERTIFICATE_P12 != '' && secrets.APPLE_API_KEY_P8 != '' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: (cd dist && sha256sum MagPlaySID-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Open a draft release
+        run: |
+          # Single quotes: the Terminal line's backticks are Markdown, not a command to run here.
+          if [ "$NOTARISED" = true ]; then
+            mac="Signed with a Developer ID and notarised by Apple: it opens with a double-click."
+          else
+            mac='It is not notarised by Apple yet, so macOS stops it the first time it is opened:
+
+          - **macOS 15 Sequoia and later:** open MagPlaySID once and close the warning, then go to **System Settings → Privacy & Security**, scroll down to MagPlaySID and choose **Open Anyway**.
+          - **macOS 14 and earlier:** right-click MagPlaySID, choose **Open**, then **Open** again.
+          - If macOS says MagPlaySID *is damaged and can'"'"'t be opened*, remove the mark macOS puts on downloads, in Terminal: `xattr -dr com.apple.quarantine /Applications/MagPlaySID.app` - only for software you trust.'
+          fi
+          cat > notes.md <<NOTES
+          MagPlaySID $VERSION - plays any C64 \`.sid\` on an emulated C64 and shows it as tracker rows. More on [the website](https://magnarharestad.github.io/MagPlaySID/).
+
+          | Download | For |
+          |---|---|
+          | \`MagPlaySID-$VERSION-windows-x64.zip\` | Windows 10 and 11 |
+          | \`MagPlaySID-$VERSION-macos-arm64.zip\` | Macs with Apple Silicon (M1 and later) |
+          | \`MagPlaySID-$VERSION-macos-x64.zip\` | Macs with an Intel processor |
+          | \`MagPlaySID-$VERSION-linux-x64.tar.gz\` | Linux on x64 |
+
+          Nothing to install: .NET is inside each package.
+
+          **Windows:** unzip and run MagPlaySID.exe. It is not code-signed, so SmartScreen may ask the first time: **More info**, then **Run anyway**.
+
+          **macOS:** unzip and move MagPlaySID to Applications. $mac
+
+          **Linux:** unpack and run \`./MagPlaySID\`; README.txt says how to add it to the menu.
+
+          SHA-256 checksums are in SHA256SUMS.txt.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --draft \
+            --title "MagPlaySID $VERSION" --notes-file notes.md

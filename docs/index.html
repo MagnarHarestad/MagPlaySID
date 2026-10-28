@@ -3,140 +3,103 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MagSID - a C64 music tracker for Windows</title>
-<meta name="description" content="MagSID - a Windows tracker for Commodore 64 music, with a tiny SID player that plays exactly what you hear in the editor.">
+<title>MagPlaySID - plays any C64 .sid and shows how it is built</title>
+<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music.">
 <link rel="icon" href="favicon.png">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=1">
 </head>
 <body>
-<header><div class="wrap"><img src="favicon.png" alt=""><a class="brand" href="./">MagSID</a>
-  <nav><a href="#features">Features</a><a href="#songs">Songs</a><a href="#start">Get started</a><a href="#license">License</a><a href="https://github.com/MagnarHarestad/MagSID">Source</a></nav></div></header>
+<header><div class="wrap"><img src="favicon.png" alt=""><a class="brand" href="./">MagPlaySID</a>
+  <nav><a href="#features">Features</a><a href="#start">Get started</a><a href="#how">How it works</a><a href="#license">License</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a><a href="https://github.com/MagnarHarestad/MagPlaySID">Source</a></nav></div></header>
 
 <main class="wrap">
   <section class="hero">
-    <img src="logo.png" alt="MagSID logo">
-    <h1>MagSID Editor <span id="version">v1.51</span></h1>
-    <p class="released">Release date: <time id="released" datetime="2026-10-16">2026-10-16</time></p>
-    <p>A Windows tracker for Commodore 64 music. Write in a classic tracker grid or a DAW-style piano roll,
-      hear it through reSID, and export a <code>.sid</code> that plays exactly the same on the real machine.</p>
+    <img src="logo.png" alt="MagPlaySID logo">
+    <h1>MagPlaySID <span id="version">v0.1</span></h1>
+    <p class="released">Release date: <time id="released" datetime="2026-10-29">2026-10-29</time></p>
+    <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
+      it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
+      in rows that scroll with the music.</p>
     <div class="download">
-      <a class="button" href="https://github.com/MagnarHarestad/MagSID/releases/latest">Download for Windows</a>
-      <small>Free and open source · Windows 10/11, 64-bit · needs the .NET 8 Desktop Runtime</small>
+      <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
+      <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
+      <p class="also"><span class="tag">Preview</span> Also for
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v0.1/MagPlaySID-0.1-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v0.1/MagPlaySID-0.1-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v0.1/MagPlaySID-0.1-linux-x64.tar.gz">Linux · x64</a>
+        <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
+        <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
   </section>
 
   <figure class="shot">
-    <img src="screenshots/daw-arrange.png" width="1440" height="858" alt="The DAW view: three channel lanes in Arrange, and the lead pattern open in the piano roll">
-    <figcaption>The DAW view - the song's three channels in Arrange, the selected pattern in the piano roll.</figcaption>
+    <img src="screenshots/player.png" width="1180" height="900" alt="MagPlaySID playing Outlaws: a spectrum, a scope per voice, the tune's rows with the selected voice's instrument beside them, and a piano along the bottom">
+    <figcaption>Playing <i>Outlaws</i> - the spectrum, a scope per voice, the tune's rows scrolling, the instrument sounding and its programs, and the keys each voice is on.</figcaption>
   </figure>
 
   <h2 id="features">What it does</h2>
-  <p class="lead">Two views of the same song, a player that fits in a few hundred bytes, and nothing else to install.</p>
+  <p class="lead">Any tune, played as the C64 plays it, and read back as a score.</p>
   <div class="grid">
-    <div class="card"><div class="i">🎹</div><h3>Retro and DAW</h3><p>A classic tracker grid for typing fast, and an arrangement with a piano roll for seeing the whole song - drag clips between channels, split, glue and erase them. Both edit the same song at once.</p></div>
-    <div class="card"><div class="i">⏺️</div><h3>Record from MIDI</h3><p>Play into the piano roll from a MIDI keyboard, with a one-bar pre-roll, an optional click, and punch-in between the locators. Hold a chord to make an arpeggio.</p></div>
-    <div class="card"><div class="i">🔊</div><h3>The real SID sound</h3><p>Every note is played through reSID, the reference SID emulation, on a 6581 or an 8580. The waveform strip shows what the chip actually outputs.</p></div>
-    <div class="card"><div class="i">💾</div><h3>Tiny player</h3><p>The C64 player is written in 6502 assembly and only carries the effects a song uses. A finished song, player included, is around 750-1250 bytes.</p></div>
-    <div class="card"><div class="i">🎯</div><h3>Exact export</h3><p>Export to <code>.sid</code> at any load address. The editor builds the file itself, byte for byte what the assembler would make - no assembler or emulator needed.</p></div>
-    <div class="card"><div class="i">📼</div><h3>Built-in SID player</h3><p>Open any <code>.sid</code> to play it, with a spectrum and a scope per voice, and save it as WAV, MP3 or FLAC.</p></div>
-    <div class="card"><div class="i">🎼</div><h3>Import MIDI</h3><p>Turn a .mid file into a song the C64 way: bass and drums on channel 1, the chords read bar by bar as arpeggios, the lead on top - and each General MIDI sound mapped to an instrument from the demo songs, or one picked from the sound bank.</p></div>
-    <div class="card"><div class="i">🎛️</div><h3>Sound bank</h3><p>25 sounds from the demo songs - instruments, drums, and arpeggios at three speeds. Click a card to hear it, double-click to add it. Save any instrument as a small JSON file to build up your own.</p></div>
+    <div class="card"><div class="i">💾</div><h3>Any .sid</h3><p>PSID and RSID, PAL and NTSC, played on the raster or a CIA timer, once a frame or many times. The tune's own 6502 code runs on an emulated C64 - its timers, interrupts and memory banking - and every write reaches the SID on the cycle it was made.</p></div>
+    <div class="card"><div class="i">🔊</div><h3>Digis</h3><p>Samples streamed from an NMI play as they are written, thousands of times a second - the drums and voices of ThcMOD and LMan's tunes, which a player that calls a tune once a frame never hears.</p></div>
+    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, the whole tune soon after.</p></div>
+    <div class="card"><div class="i">📜</div><h3>Rows that scroll</h3><p>Each voice's rows - note, instrument, effects - go past as they sound. Click a voice to see its instrument: envelope, hard restart, and the wave, pulse and filter programs, the step sounding lit.</p></div>
+    <div class="card"><div class="i">🎹</div><h3>A piano</h3><p>Eight octaves along the bottom, each voice's key lit in its colour as loud as its envelope - an arpeggio, a slide or a drum shows as it plays.</p></div>
+    <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice.</p></div>
+    <div class="card"><div class="i">⏱️</div><h3>Its length</h3><p>Measured on the C64 by watching for the tune's memory to come round again - an RSID's too - so the clock says how long it plays before it repeats.</p></div>
+    <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code> from the desktop onto the window, open one, or name it on the command line. Space pauses, and the rows stop with the music.</p></div>
   </div>
-
-  <div class="shots">
-    <figure class="shot">
-      <img src="screenshots/retro.png" width="1440" height="858" alt="The Retro view: instrument list and editor on the left, tracker grid on the right">
-      <figcaption>Retro - the tracker grid, with the instrument and its programs beside it.</figcaption>
-    </figure>
-    <figure class="shot">
-      <img src="screenshots/daw-instrument.png" width="1440" height="858" alt="The DAW instrument page: oscillator, envelope, vibrato, and the wave, note and filter programs">
-      <figcaption>The instrument page - oscillator, envelope, vibrato, and the programs that run per frame.</figcaption>
-    </figure>
-  </div>
-
-  <h2>Small by design</h2>
-  <p class="lead">Code for an effect is only assembled when a song uses it.</p>
-  <table class="sizes">
-    <tr><th>Player build</th><th>Code size</th></tr>
-    <tr><td>No optional effects</td><td>462 bytes</td></tr>
-    <tr><td>With slides</td><td>533 bytes</td></tr>
-    <tr><td>With vibrato</td><td>574 bytes</td></tr>
-    <tr><td>With both</td><td>608 bytes</td></tr>
-    <tr><td>Soft hard restart, when used</td><td>+10 bytes</td></tr>
-  </table>
 
   <figure class="shot">
-    <img src="screenshots/sid-player.png" width="880" height="560" alt="The SID player playing Outlaws: a spectrum and three voice scopes" style="margin:0 auto">
-    <figcaption>The SID player, playing an exported song.</figcaption>
+    <img src="screenshots/satellite.png" width="1180" height="900" alt="MagPlaySID playing Satellite, an instrument's wave and pulse programs beside the rows">
+    <figcaption>Playing <i>Satellite</i> - an instrument with a control byte of its own on a note's first call, its wave program from the next, its pulse sweeping.</figcaption>
   </figure>
-
-  <h2 id="songs">Songs to try</h2>
-  <p class="lead">Download a file and open it in the editor. They live in the source repository, next to the code.</p>
-  <div class="files">
-    <div>
-      <h3>Demo songs <small>Menu → Open</small></h3>
-      <ul>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/Airstrike.s" data-file="Airstrike.s">Airstrike</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/BellaCiao.s" data-file="BellaCiao.s">BellaCiao</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/Breakdance.s" data-file="Breakdance.s">Breakdance</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/CityBomber4k%28Megastyle%29.s" data-file="CityBomber4k(Megastyle).s">CityBomber4k(Megastyle)</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/Fairlighty.s" data-file="Fairlighty.s">Fairlighty</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/Lightforce.s" data-file="Lightforce.s">Lightforce</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/Magnificent.s" data-file="Magnificent.s">Magnificent</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/MysData2026%20-%20Clarity.s" data-file="MysData2026 - Clarity.s">MysData2026 - Clarity</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/Outlaws.s" data-file="Outlaws.s">Outlaws</a></li>
-        <li><a href="https://raw.githubusercontent.com/MagnarHarestad/MagSID/main/SongData/SOS.s" data-file="SOS.s">SOS</a></li>
-      </ul>
-      <p class="more"><a href="https://github.com/MagnarHarestad/MagSID/tree/main/SongData">SongData on GitHub</a></p>
-    </div>
-    <div>
-      <h3>MIDI files <small>Menu → Import MIDI</small></h3>
-      <table class="midi">
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/carmen-prelude.mid">Carmen – Prelude</a></td><td>G. Bizet</td><td><a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>, Alex O&#x27;S</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/the-entertainer.mid">The Entertainer</a></td><td>S. Joplin</td><td><a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>, R. D. Tennent, for 4 recorders</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/fur-elise.mid">Für Elise</a></td><td>L. V. Beethoven</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/greensleeves.mid">Greensleeves</a></td><td>Traditional</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/hall-of-the-mountain-king.mid">In the Hall of the Mountain King</a></td><td>E. Grieg</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/invention-8.mid">Invention No. 8</a></td><td>J. S. Bach</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/liberty-bell-march.mid">The Liberty Bell March</a></td><td>J. P. Sousa</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/minute-waltz.mid">Minute Waltz</a></td><td>F. F. Chopin</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/moonlight-sonata.mid">Moonlight Sonata</a></td><td>L. V. Beethoven</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/premiere-arabesque.mid">Première Arabesque</a></td><td>C. Debussy</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/rondo-alla-turca.mid">Rondo alla Turca</a></td><td>W. A. Mozart</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/toccata-and-fugue-in-d-minor.mid">Toccata and Fugue in D Minor</a></td><td>J. S. Bach</td><td>Public domain</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/wedding-march.mid">Wedding March</a></td><td>F. Mendelssohn-Bartholdy</td><td><a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>, Alexander Brock</td></tr>
-        <tr><td><a href="https://github.com/MagnarHarestad/MagSID/raw/main/midifiles/eine-kleine-nachtmusik.mid">Eine kleine Nachtmusik</a></td><td>W. A. Mozart</td><td>Public domain</td></tr>
-      </table>
-      <p class="more">From the <a href="https://www.mutopiaproject.org">Mutopia Project</a> and <a href="https://imslp.org">IMSLP</a>. Full credits in <a href="https://github.com/MagnarHarestad/MagSID/blob/main/midifiles/README.md">midifiles/README.md</a>.</p>
-    </div>
-  </div>
 
   <h2 id="start">Get started</h2>
   <ol class="steps">
-    <li>Install the <a href="https://dotnet.microsoft.com/download/dotnet/8.0">.NET 8 Desktop Runtime</a> for x64, if Windows doesn't already have it.</li>
-    <li>Download the zip from the <a href="https://github.com/MagnarHarestad/MagSID/releases/latest">latest release</a>, unpack it anywhere and run <code>MagSID-Editor.exe</code>. There is no installer.</li>
-    <li>Open a song from the <a href="https://github.com/MagnarHarestad/MagSID/tree/main/SongData">example songs</a> with <b>Menu → Open</b> (F10). F1 plays from the top, F2 from the cursor, F4 stops.</li>
-    <li><b>Menu → About</b> lists every key and control.</li>
+    <li>Download the package for your system from the <a href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">latest release</a>. .NET is inside - there is nothing else to install.</li>
+    <li><b>Windows:</b> unzip it anywhere and run <code>MagPlaySID.exe</code>. <b>Linux:</b> unpack it and run <code>./MagPlaySID</code>. <b>Mac:</b> unzip it and move MagPlaySID to Applications.</li>
+    <li>Drop a <code>.sid</code> on the window, or choose <b>Open .sid...</b>. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
+    <li>Click a scope to mute its voice; click a voice's rows to see its instrument.</li>
   </ol>
-  <div class="note">The exe is not code-signed, so Windows SmartScreen may say it comes from an unknown publisher. Choose <b>More info → Run anyway</b>.</div>
+  <div class="note">The Windows exe is not code-signed, so Windows SmartScreen may say it comes from an unknown publisher. Choose <b>More info → Run anyway</b>.</div>
+  <div class="note mac" id="mac">
+    <p><b>On a Mac</b>, the app is not notarised by Apple yet, so macOS stops it the first time it is opened:</p>
+    <ul>
+      <li><b>macOS 15 Sequoia and later:</b> try to open MagPlaySID once and close the warning. Then go to <b>System Settings → Privacy &amp; Security</b>, scroll down to the line about MagPlaySID and choose <b>Open Anyway</b>.</li>
+      <li><b>macOS 14 and earlier:</b> right-click MagPlaySID, choose <b>Open</b>, then <b>Open</b> again.</li>
+      <li>If macOS says MagPlaySID <i>is damaged and can't be opened</i>, it is the mark macOS puts on everything downloaded from the internet, not the app. Remove it in Terminal:</li>
+    </ul>
+    <pre><code>xattr -dr com.apple.quarantine /Applications/MagPlaySID.app</code></pre>
+    <p class="small">That tells macOS to stop checking this one app, so only do it for software you trust. Either way it is needed once, not every time.</p>
+  </div>
+
+  <h2 id="how">How it works</h2>
+  <p class="lead">The sound is the tune's own; the score is a reading of it, checked against it.</p>
+  <div class="grid">
+    <div class="card"><h3>A C64 for every tune</h3><p>CIA timers, the raster interrupt, NMIs, banked memory, and a 6510 that makes each memory access on the cycle the real chip does - its throw-away reads included, which some digi players depend on.</p></div>
+    <div class="card"><h3>A score that plays back exactly</h3><p>The transcription is played as it is made, and every register it gets wrong is written as the tune wrote it - so the score always makes the tune's own writes. All 471 tunes tried play back exactly.</p></div>
+    <div class="card"><h3>How much is understood</h3><p>What the notes and instruments make, rather than raw writes, is the measure: 96.5% of the tunes' register changes on average. The rest is kept as written, never guessed.</p></div>
+  </div>
+  <p class="more" style="color:var(--dim);font-size:14px;margin-top:14px">The plan and the measurements, step by step: <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/docs/PLAN.md">docs/PLAN.md</a>.</p>
 
   <section class="legal">
     <h2 id="license">License and credits</h2>
-    <p>MagSID is by Magnar Harestad of Censor Design. A big thanks and shoutout to my fellow Censor Design members:
-      Krikkit, Slaygon, Bob and Swallow for design inspirations, technical advices, tools &amp; SVN repo + infrastructure.</p>
-    <p><b>Your music is yours.</b> Exported <code>.sid</code> files - the player code and the song data in them - may be used
-      freely, in any release, commercial or not.</p>
-    <p>The editor is free software under the <a href="https://github.com/MagnarHarestad/MagSID/blob/main/LICENSE">GNU General Public License, version 2 or later</a>,
-      and comes with no warranty. Its SID emulation is a C# translation of <b>reSID</b> by Dag Lem; audio and MIDI use
-      <b>NAudio</b> by Mark Heath (MIT). See <a href="https://github.com/MagnarHarestad/MagSID/blob/main/THIRD-PARTY-NOTICES.md">third-party notices</a>.</p>
+    <p>MagPlaySID is by Magnar Harestad of Censor Design, built on the engine of the
+      <a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a>. A big thanks and shoutout to my fellow
+      Censor Design members: Krikkit, Slaygon, Bob and Swallow.</p>
+    <p>It is free software under the <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/LICENSE">GNU General Public License, version 2 or later</a>,
+      and comes with no warranty. Its SID emulation is a C# translation of <b>reSID</b> by Dag Lem; sound goes through
+      <b>PortAudio</b>, and the window is <b>Avalonia</b>. See <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/THIRD-PARTY-NOTICES.md">third-party notices</a>.
+      The tunes belong to their composers - MagPlaySID only plays and reads them.</p>
   </section>
 </main>
 
-<footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagSID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagSID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagSID/issues">Report a problem</a></div></footer>
+<footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version and release date under the logo follow the latest release; v1.51 and its date stand
-// until GitHub answers, or if it does not.
-fetch('https://api.github.com/repos/MagnarHarestad/MagSID/releases/latest')
+// The version, the release date and the downloads follow the latest release; v0.1 stands until
+// GitHub answers, or if it does not.
+fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
   .then(release => {
     if (!release || !/^v\d/.test(release.tag_name)) return;
@@ -147,22 +110,15 @@ fetch('https://api.github.com/repos/MagnarHarestad/MagSID/releases/latest')
       time.textContent = day;
       time.dateTime = day;
     }
+    const asset = suffix => (release.assets || []).find(a => a.name.endsWith(suffix));
+    for (const [id, suffix] of [['windows', '-windows-x64.zip'], ['macos-arm64', '-macos-arm64.zip'],
+                                ['macos-x64', '-macos-x64.zip'], ['linux-x64', '-linux-x64.tar.gz']]) {
+      const found = asset(suffix);
+      if (found) document.getElementById(id).href = found.browser_download_url;
+    }
+    document.getElementById('notes').href = release.html_url;
   })
   .catch(() => {});
-
-// GitHub serves a .s file as text, which a browser shows instead of saving; fetch it and save it
-// under its own name. If that fails the link still opens the text.
-document.querySelectorAll('a[data-file]').forEach(link => link.addEventListener('click', async event => {
-  event.preventDefault();
-  try {
-    const response = await fetch(link.href);
-    if (!response.ok) throw new Error(response.status);
-    const url = URL.createObjectURL(await response.blob());
-    const save = Object.assign(document.createElement('a'), { href: url, download: link.dataset.file });
-    document.body.appendChild(save); save.click(); save.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch { location.href = link.href; }
-}));
 </script>
 </body>
 </html>
