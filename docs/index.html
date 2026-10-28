@@ -77,9 +77,9 @@
   <h2 id="how">How it works</h2>
   <p class="lead">The sound is the tune's own; the score is a reading of it, checked against it.</p>
   <div class="grid">
-    <div class="card"><h3>A C64 for every tune</h3><p>CIA timers, the raster interrupt, NMIs, banked memory, and a 6510 that makes each memory access on the cycle the real chip does - its throw-away reads included, which some digi players depend on.</p></div>
-    <div class="card"><h3>A score that plays back exactly</h3><p>The transcription is played as it is made, and every register it gets wrong is written as the tune wrote it - so the score always makes the tune's own writes. All 471 tunes tried play back exactly.</p></div>
-    <div class="card"><h3>How much is understood</h3><p>What the notes and instruments make, rather than raw writes, is the measure: 96.5% of the tunes' register changes on average. The rest is kept as written, never guessed.</p></div>
+    <div class="card"><h3>C64 timers and IRQs</h3><p>CIA timers, the raster interrupt, NMIs, banked memory, and a 6510 that makes each memory access on the cycle the real chip does - its throw-away reads included, which some digi players depend on.</p></div>
+    <div class="card"><h3>A score that plays back exactly</h3><p>The transcription is played as it is made, and every register it gets wrong is written as the tune wrote it - so the score always makes the tune's own writes.</p></div>
+    <div class="card"><h3>How much is understood</h3><p>What the notes and instruments make, rather than raw writes, is the measure: 96.5% of the tunes' register changes on average.</p></div>
   </div>
   <p class="more" style="color:var(--dim);font-size:14px;margin-top:14px">The plan and the measurements, step by step: <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/docs/PLAN.md">docs/PLAN.md</a>.</p>
 
