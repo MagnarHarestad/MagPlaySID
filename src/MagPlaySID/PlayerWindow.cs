@@ -112,13 +112,30 @@ internal sealed class PlayerWindow : Window
         _details.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _details.Margin = new Thickness(0, 2, 0, 0);
 
+        // Under the tune's name and details, in the player's own colours rather than the theme's.
         _open.Content = "Open .sid...";
         _open.Click += (_, _) => _ = OpenAsync();
+        _open.HorizontalAlignment = HorizontalAlignment.Left;
+        _open.Margin = new Thickness(0, 10, 0, 0);
+        _open.Padding = new Thickness(14, 5);
+        _open.FontSize = 12;
+        _open.CornerRadius = new CornerRadius(4);
+        _open.BorderThickness = new Thickness(1);
+        var panel = SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground);
+        var border = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder);
+        var lit = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(1), 40));
+        var edge = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(1), 150));
+        foreach (var (key, value) in new (string, IBrush)[]
+        {
+            ("ButtonBackground", panel), ("ButtonBackgroundPointerOver", lit), ("ButtonBackgroundPressed", panel),
+            ("ButtonBorderBrush", border), ("ButtonBorderBrushPointerOver", edge), ("ButtonBorderBrushPressed", edge),
+            ("ButtonForeground", SidPlayerPalette.Brush(SidPlayerPalette.Control)),
+            ("ButtonForegroundPointerOver", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
+            ("ButtonForegroundPressed", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
+        })
+            _open.Resources[key] = value;
 
-        var header = new DockPanel { Margin = new Thickness(18, 12, 18, 6) };
-        DockPanel.SetDock(_open, Dock.Right);
-        header.Children.Add(_open);
-        header.Children.Add(new StackPanel { Children = { _title, _details } });
+        var header = new StackPanel { Margin = new Thickness(18, 12, 18, 6), Children = { _title, _details, _open } };
 
         BuildScopes(3);
 
