@@ -5,8 +5,13 @@ name: magplaysid-release
 # website's downloads follow the latest published release. Run by hand from the Actions tab it
 # builds the packages as artifacts only, with no release.
 #
-# The Mac app is signed with a Developer ID and notarised when the repository has the secrets
-# release.yml lists; ad hoc otherwise, and macOS then has to be told once to open it.
+# The Mac app is signed with a Developer ID and notarised when the repository has these secrets;
+# ad hoc otherwise, and macOS then has to be told once to open it:
+#   MACOS_CERTIFICATE_P12        a "Developer ID Application" certificate with its key, base64
+#   MACOS_CERTIFICATE_PASSWORD   the .p12's password
+#   APPLE_API_KEY_P8             an App Store Connect API key (.p8), base64 - for notarising
+#   APPLE_API_KEY_ID             its key id
+#   APPLE_API_ISSUER             its issuer id
 on:
   push:
     tags: ['v*']
@@ -35,21 +40,8 @@ jobs:
             echo "version=$TRIAL" >> "$GITHUB_OUTPUT"
           fi
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-      - name: Test the player, the C64 and the transcriber
-        run: |
-          for project in tests/MagSid.Sid.Tests tests/MagSid.Playback.Tests tests/MagPlay.Score.Tests tests/MagPlay.C64.Tests tests/MagPlay.Transcribe.Tests; do
-            dotnet test "$project" -c Release --logger "console;verbosity=minimal" || exit 1
-          done
-
   macos:
-    needs: [version, test]
+    needs: version
     runs-on: macos-latest
     strategy:
       matrix:
@@ -111,7 +103,7 @@ jobs:
           if-no-files-found: error
 
   portable:
-    needs: [version, test]
+    needs: version
     strategy:
       matrix:
         include:

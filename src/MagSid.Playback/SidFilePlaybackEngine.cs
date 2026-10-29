@@ -7,12 +7,12 @@ namespace MagSid.Playback;
 /// Plays a <c>.sid</c> file by running its own 6502 code.
 ///
 /// This is what replaced launching VICE's vsid.exe, and it is not merely the same thing without the
-/// dependency. <see cref="SongPlaybackEngine"/> plays what the song <em>means</em>, through a C# port
+/// dependency. <c>SongPlaybackEngine</c> plays what the song <em>means</em>, through a C# port
 /// of musicplayer.s; this plays the bytes that were actually written to the file, by executing them.
 /// So it answers a different question - "is the file I just exported right?" - and the two agreeing is
 /// evidence neither gives alone. SidFilePlaybackTests leans on exactly that.
 ///
-/// The loop is <see cref="SongPlaybackEngine"/>'s, with <c>cpu.Call(play)</c> where that one calls the
+/// The loop is <c>SongPlaybackEngine</c>'s, with <c>cpu.Call(play)</c> where that one calls the
 /// sequencer: register writes are interleaved at frame boundaries rather than issued up front, so a
 /// note lands on the right SID cycle relative to the audio around it.
 /// </summary>

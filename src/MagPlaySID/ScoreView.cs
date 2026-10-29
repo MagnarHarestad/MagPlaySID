@@ -4,7 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using MagPlay.Score;
-using MagSid.Editor.Avalonia.Player;
+using MagPlaySid.Player;
 
 namespace MagPlaySid;
 

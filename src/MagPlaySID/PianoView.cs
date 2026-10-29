@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using MagPlay.C64;
-using MagSid.Editor.Avalonia.Player;
+using MagPlaySid.Player;
 
 namespace MagPlaySid;
 

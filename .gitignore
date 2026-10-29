@@ -3,29 +3,11 @@ bin/
 obj/
 .vs/
 
-# Sound Forge peak caches, regenerated on demand from the .wav beside them.
-*.sfk
-
-# Audio the player exports. Rendered from a .sid on demand, so committing one stores a
-# large file whose source is already here - and the save dialog opens on SongData.
-*.mp3
-*.wav
-
-# Exported .sid files. Built from the song beside them on demand, the same as the audio.
-SongData/*.sid
-
 # OS
 Thumbs.db
 desktop.ini
 
-# Publish output from a build to an explicit folder, used when the running editor holds the
-# default one.
+# Publish output from a build to an explicit folder, used when the running app holds the
+# default one; and the release packages.
 publish-latest/
 /out/
-
-# Import SID benchmark: the song lists name local files, and the results are per machine.
-tools/ImportBench/lists/
-tools/ImportBench/results/
-
-# The MSIX build: its publish, layout and package, and the Store identity from Partner Center.
-packaging/msix/out/

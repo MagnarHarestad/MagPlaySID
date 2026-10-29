@@ -182,7 +182,7 @@ public sealed class Instrument
     ///
     /// <see cref="ArpeggioEnding.Root"/> here (not the property's own <see cref="ArpeggioEnding"/>
     /// default of <see cref="ArpeggioEnding.Loop"/>) is deliberately scoped to *new*
-    /// instruments only: <see cref="MagSid.Core.Serialization.PatternsFileReader"/> constructs a
+    /// instruments only: <c>PatternsFileReader</c> constructs a
     /// bare <c>Instrument</c> and never touches this property when a file's own ARP section is absent,
     /// so every already-saved instrument keeps reading as Loop, exactly as it always has - only
     /// what "Add" hands you changed. Setting it on the shared property initializer instead would

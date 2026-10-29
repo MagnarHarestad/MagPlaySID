@@ -14,8 +14,4 @@
     <ProjectReference Include="..\MagSid.Core\MagSid.Core.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="MagPlay.Score.Tests" />
-  </ItemGroup>
-
 </Project>

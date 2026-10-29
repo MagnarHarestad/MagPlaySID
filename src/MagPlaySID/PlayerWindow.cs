@@ -5,9 +5,8 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using MagSid.Editor.Avalonia;
 using MagPlay.C64;
-using MagSid.Editor.Avalonia.Player;
+using MagPlaySid.Player;
 using MagSid.Playback;
 
 namespace MagPlaySid;

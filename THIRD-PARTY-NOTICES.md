@@ -1,13 +1,13 @@
 # Third-party notices
 
-MagSID Editor contains or is derived from the following third-party software.
+MagPlaySID contains or is derived from the following third-party software.
 
 ## reSID
 
 `src/MagSid.Sid` is a C# translation of reSID, the MOS6581/8580 SID emulator engine by Dag Lem.
 It follows reSID's `sid`, `voice`, `wave`, `envelope`, `filter` and `extfilt` classes; it was changed
 in translation - only the single-cycle `clock()` path is ported, not the bulk-clocking or windowed-sinc
-resampling paths - and is used by the editor for all of its audio.
+resampling paths - and is used by MagPlaySID for all of its audio.
 
 ```
 reSID, a MOS6581 SID emulator engine.
@@ -28,9 +28,8 @@ The GNU General Public License, version 2, is in [LICENSE](LICENSE).
 
 ## NAudio
 
-The editor uses NAudio 2.2.1 (NAudio, NAudio.Core, NAudio.Midi, NAudio.Wasapi, NAudio.WinMM,
-NAudio.Asio, NAudio.WinForms) for audio output, audio file export and MIDI input. It is included in
-`MagSID-Editor.exe`.
+MagPlaySID uses NAudio.Core 2.2.1 for its audio buffers and FFT. It is included in the
+MagPlaySID executable.
 
 ```
 Copyright 2020 Mark Heath

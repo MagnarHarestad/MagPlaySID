@@ -14,8 +14,4 @@
     <ProjectReference Include="..\MagPlay.Score\MagPlay.Score.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="MagPlay.Transcribe.Tests" />
-  </ItemGroup>
-
 </Project>
