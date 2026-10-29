@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -42,6 +43,8 @@ internal sealed class PlayerWindow : Window
     private readonly PianoView _piano = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly bool[] _muted = new bool[9];
+    private readonly Settings _settings = Settings.Load();
+    private readonly MenuItem _checkForUpdates = new();
 
     private SidFile? _file;
     private C64PlaybackEngine? _engine;
@@ -103,6 +106,7 @@ internal sealed class PlayerWindow : Window
         ShowEmpty();
         if (path is not null)
             Opened += (_, _) => Load(path);
+        Opened += async (_, _) => await CheckForUpdatesAsync();
     }
 
     private Control BuildLayout()
@@ -120,23 +124,10 @@ internal sealed class PlayerWindow : Window
         _open.Margin = new Thickness(0, 10, 0, 0);
         _open.Padding = new Thickness(14, 5);
         _open.FontSize = 12;
-        _open.CornerRadius = new CornerRadius(4);
-        _open.BorderThickness = new Thickness(1);
-        var panel = SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground);
-        var border = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder);
-        var lit = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(1), 40));
-        var edge = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(1), 150));
-        foreach (var (key, value) in new (string, IBrush)[]
-        {
-            ("ButtonBackground", panel), ("ButtonBackgroundPointerOver", lit), ("ButtonBackgroundPressed", panel),
-            ("ButtonBorderBrush", border), ("ButtonBorderBrushPointerOver", edge), ("ButtonBorderBrushPressed", edge),
-            ("ButtonForeground", SidPlayerPalette.Brush(SidPlayerPalette.Control)),
-            ("ButtonForegroundPointerOver", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
-            ("ButtonForegroundPressed", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
-        })
-            _open.Resources[key] = value;
+        InPlayerColours(_open);
 
-        var header = new StackPanel { Margin = new Thickness(18, 12, 18, 6), Children = { _title, _details, _open } };
+        var details = new StackPanel { Children = { _title, _details, _open } };
+        var header = new Grid { Margin = new Thickness(18, 12, 18, 6), Children = { details, BuildMenu() } };
 
         BuildScopes(3);
 
@@ -192,6 +183,79 @@ internal sealed class PlayerWindow : Window
         root.Children.Add(_piano);
         root.Children.Add(retro);
         return root;
+    }
+
+    /// <summary>A button in the player's own colours rather than the theme's.</summary>
+    private static void InPlayerColours(Button button)
+    {
+        button.CornerRadius = new CornerRadius(4);
+        button.BorderThickness = new Thickness(1);
+        var panel = SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground);
+        var border = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder);
+        var lit = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(1), 40));
+        var edge = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(1), 150));
+        foreach (var (key, value) in new (string, IBrush)[]
+        {
+            ("ButtonBackground", panel), ("ButtonBackgroundPointerOver", lit), ("ButtonBackgroundPressed", panel),
+            ("ButtonBorderBrush", border), ("ButtonBorderBrushPointerOver", edge), ("ButtonBorderBrushPressed", edge),
+            ("ButtonForeground", SidPlayerPalette.Brush(SidPlayerPalette.Control)),
+            ("ButtonForegroundPointerOver", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
+            ("ButtonForegroundPressed", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
+        })
+            button.Resources[key] = value;
+    }
+
+    /// <summary>The menu behind the three lines at the top right.</summary>
+    private Button BuildMenu()
+    {
+        _checkForUpdates.Header = "Check for updates at start";
+        _checkForUpdates.ToggleType = MenuItemToggleType.CheckBox;
+        _checkForUpdates.IsChecked = _settings.CheckForUpdates == true;
+        _checkForUpdates.Click += (_, _) =>
+        {
+            _settings.CheckForUpdates = _checkForUpdates.IsChecked;
+            _settings.Save();
+        };
+
+        var menu = new Button
+        {
+            Content = new PathIcon
+            {
+                Data = Geometry.Parse("M0,0 H16 V2 H0 Z M0,6 H16 V8 H0 Z M0,12 H16 V14 H0 Z"),
+                Width = 16,
+                Height = 14,
+            },
+            Padding = new Thickness(9, 7),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _checkForUpdates } },
+        };
+        ToolTip.SetTip(menu, "Menu");
+        AutomationProperties.SetName(menu, "Menu");
+        InPlayerColours(menu);
+        return menu;
+    }
+
+    /// <summary>The first start asks whether to look for updates - off until the user says yes,
+    /// and asked once, either way. Then, when it is on, a newer release is offered.</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_settings.CheckForUpdates is null)
+        {
+            _settings.CheckForUpdates = await MessageWindow.AskAsync(this, "Check for updates?",
+                "Should MagPlaySID check for a newer version each time it starts? It asks the website " +
+                "which version is the latest, and nothing else.\n\nThis can be changed later in the menu at the top right.");
+            _settings.Save();
+            _checkForUpdates.IsChecked = _settings.CheckForUpdates == true;
+        }
+
+        if (_settings.CheckForUpdates != true || await UpdateCheck.NewerVersionAsync() is not { } newer)
+            return;
+
+        if (await MessageWindow.AskAsync(this, "A newer MagPlaySID",
+                $"MagPlaySID {UpdateCheck.Describe(newer)} is out - this is {UpdateCheck.Describe(UpdateCheck.Current)}. " +
+                "Open the website to download it?", "Open the website", "Not now"))
+            await Launcher.LaunchUriAsync(new Uri(UpdateCheck.Website));
     }
 
     /// <summary>A scope for each voice - three a chip, headed as the score's columns are - made

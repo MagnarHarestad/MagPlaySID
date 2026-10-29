@@ -15,7 +15,7 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v0.1</span></h1>
+    <h1>MagPlaySID <span id="version">v1.0</span></h1>
     <p class="released">Release date: <time id="released" datetime="2026-10-29">2026-10-29</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
@@ -24,9 +24,9 @@
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also"><span class="tag">Preview</span> Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v0.1/MagPlaySID-0.1-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v0.1/MagPlaySID-0.1-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v0.1/MagPlaySID-0.1-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.0/MagPlaySID-1.0-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.0/MagPlaySID-1.0-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.0/MagPlaySID-1.0-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -48,6 +48,7 @@
     <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice.</p></div>
     <div class="card"><div class="i">⏱️</div><h3>Its length</h3><p>Measured on the C64 by watching for the tune's memory to come round again - an RSID's too - so the clock says how long it plays before it repeats.</p></div>
     <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code> from the desktop onto the window, open one, or name it on the command line. Space pauses, and the rows stop with the music.</p></div>
+    <div class="card"><div class="i">🔔</div><h3>Up to date</h3><p>Asked once, the first time it starts: say yes and MagPlaySID looks for a newer version each time it opens, and offers this page when there is one. <b>Check for updates at start</b> in the menu at the top right turns it on or off.</p></div>
   </div>
 
   <figure class="shot">
@@ -97,7 +98,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v0.1 stands until
+// The version, the release date and the downloads follow the latest release; v1.0 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
