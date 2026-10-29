@@ -78,7 +78,7 @@ internal sealed class PlayerWindow : Window
 
     public PlayerWindow(string? path = null)
     {
-        Title = "MagPlaySID";
+        Title = UpdateCheck.Product;
         if (typeof(PlayerWindow).Assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)) is { } icon)
             Icon = new WindowIcon(typeof(PlayerWindow).Assembly.GetManifestResourceStream(icon)!);
         Width = 1180;
@@ -390,7 +390,7 @@ internal sealed class PlayerWindow : Window
         _next.IsEnabled = loaded && (_file!.Songs > 1 || _queueTune is not null);
         if (!loaded)
         {
-            _title.Text = "MagPlaySID";
+            _title.Text = UpdateCheck.Product;
             _details.Text = "Plays a .sid and shows it as tracker rows";
             _retroStatus.Text = "";
         }
@@ -515,7 +515,7 @@ internal sealed class PlayerWindow : Window
         _file = file;
         _path = path;
         _song = file.StartSong;
-        Title = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : $"{file.Name} - MagPlaySID";
+        Title = $"{(string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : file.Name)} - {UpdateCheck.Product}";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
         ShowEmpty();
         Restart();

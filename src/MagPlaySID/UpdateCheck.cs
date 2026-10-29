@@ -47,6 +47,9 @@ internal static class UpdateCheck
     private static Version Normalise(Version v) =>
         new(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
 
+    /// <summary>The app and its version, as the window's title and header give it: MagPlaySID v1.1.</summary>
+    public static string Product => $"MagPlaySID {Describe(Current)}";
+
     /// <summary>A version as the releases name it: v0.2, not 0.2.0.0.</summary>
     public static string Describe(Version v) =>
         "v" + (v.Revision > 0 ? v.ToString(4) : v.Build > 0 ? v.ToString(3) : v.ToString(2));
