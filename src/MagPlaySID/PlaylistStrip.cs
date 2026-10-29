@@ -16,7 +16,7 @@ namespace MagPlaySid;
 /// <summary>
 /// The strip down the left of the window: the playlists - a folder dropped on the window, and the
 /// favourites the user made from tunes they played - and below them the tunes of the one chosen.
-/// A click on a tune plays it, and the playlist from there. Shown once there is a playlist.
+/// A click on a tune plays it, and the playlist from there. Shown or hidden from the window's menu.
 /// </summary>
 internal sealed class PlaylistStrip : Border
 {
@@ -51,6 +51,12 @@ internal sealed class PlaylistStrip : Border
     /// <summary>A tune chosen to play, and the playlist to go on with after it.</summary>
     public event Action<Playlist, PlaylistTune>? Play;
 
+    /// <summary>A playlist was made or a folder opened: the strip should be shown, if it is not.</summary>
+    public event Action? ShowRequested;
+
+    /// <summary>Whether there is any playlist - a folder's or a favourite.</summary>
+    public bool HasPlaylists => _lists.Count > 0;
+
     public PlaylistStrip(Window owner)
     {
         _owner = owner;
@@ -79,7 +85,6 @@ internal sealed class PlaylistStrip : Border
         if (_lists.Count > 0)
             _listBox.SelectedIndex = 0;
         ReadHeaders(_favourites.SelectMany(p => p.Tunes));
-        IsVisible = _lists.Count > 0;
         ApplyScale();
     }
 
@@ -162,7 +167,6 @@ internal sealed class PlaylistStrip : Border
         _empty.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _empty.TextWrapping = TextWrapping.Wrap;
         _empty.Margin = new Thickness(18, 8, 18, 0);
-        _empty.Text = "No tunes yet. Play one, then add it here with Add to playlist - or right-click a tune in another playlist.";
 
         Restyle(_tuneBox);
         _tuneBox.ItemTemplate = new FuncDataTemplate<PlaylistTune>((_, _) => TuneRow(), supportsRecycling: true);
@@ -302,7 +306,11 @@ internal sealed class PlaylistStrip : Border
         _tuneBox.ItemsSource = playlist?.Tunes;
         _heading.Text = playlist?.Name ?? "";
         _playAll.IsEnabled = playlist is { Tunes.Count: > 0 };
-        _empty.IsVisible = playlist is { IsFolder: false, Tunes.Count: 0 };
+        _playAll.IsVisible = playlist is not null;
+        _empty.Text = playlist is null
+            ? "No playlists yet. Drop a folder of .sid tunes on the window to play them all, or start a playlist of favourites with +."
+            : "No tunes yet. Play one, then add it here with Add to playlist - or right-click a tune in another playlist.";
+        _empty.IsVisible = playlist is null || playlist is { IsFolder: false, Tunes.Count: 0 };
         Count();
         if (_playing is not null && playlist?.Tunes.Contains(_playing) == true)
             _tuneBox.SelectedItem = _playing;
@@ -323,7 +331,7 @@ internal sealed class PlaylistStrip : Border
         _folder = new Playlist(name, isFolder: true, paths);
         _lists.Insert(0, _folder);
         _listBox.SelectedItem = _folder;
-        IsVisible = true;
+        ShowRequested?.Invoke();
         ReadHeaders(_folder.Tunes);
         return _folder;
     }
@@ -401,7 +409,7 @@ internal sealed class PlaylistStrip : Border
         if (path is not null)
             Add(playlist, path);
         Favourites.Save(_favourites);
-        IsVisible = true;
+        ShowRequested?.Invoke();
         _listBox.SelectedItem = playlist;
     }
 
@@ -425,7 +433,7 @@ internal sealed class PlaylistStrip : Border
         Favourites.Save(_favourites);
         if (_listBox.SelectedItem is null && _lists.Count > 0)
             _listBox.SelectedIndex = 0;
-        IsVisible = _lists.Count > 0;
+        ShowTunes();
     }
 
     /// <summary>Names and authors from the tunes' headers, read off the UI thread and shown as they come.</summary>

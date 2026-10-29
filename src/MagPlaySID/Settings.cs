@@ -26,6 +26,10 @@ internal sealed class Settings
     /// quarter larger. Small, the size it always was, until it is chosen.</summary>
     public bool BigFont { get; set; }
 
+    /// <summary>Whether the playlist strip is shown - Show playlists in the menu. Null until the user
+    /// has chosen: shown then when there are favourites to show.</summary>
+    public bool? ShowPlaylists { get; set; }
+
     public static Settings Load()
     {
         try

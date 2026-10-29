@@ -58,6 +58,7 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _checkForUpdates = new();
     private readonly MenuItem _smallFont = new();
     private readonly MenuItem _bigFont = new();
+    private readonly MenuItem _showPlaylists = new();
     private readonly PlaylistStrip _strip;
 
     private SidFile? _file;
@@ -90,8 +91,10 @@ internal sealed class PlayerWindow : Window
 
         _strip = new PlaylistStrip(this);
         _strip.Play += PlayFromList;
+        _strip.ShowRequested += () => ShowPlaylists(true);
         Content = BuildLayout();
         ShowFontSize();
+        ShowPlaylists(_settings.ShowPlaylists ?? _strip.HasPlaylists, remember: false);
 
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
@@ -271,6 +274,10 @@ internal sealed class PlayerWindow : Window
             _settings.Save();
         };
 
+        _showPlaylists.Header = "Show playlists";
+        _showPlaylists.ToggleType = MenuItemToggleType.CheckBox;
+        _showPlaylists.Click += (_, _) => ShowPlaylists(_showPlaylists.IsChecked);
+
         _smallFont.Header = "Small font";
         _bigFont.Header = "Big font";
         foreach (var (item, big) in new[] { (_smallFont, false), (_bigFont, true) })
@@ -296,12 +303,25 @@ internal sealed class PlayerWindow : Window
             Padding = new Thickness(9, 7),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
         InPlayerColours(menu);
         return menu;
+    }
+
+    /// <summary>The playlist strip shown or hidden, the menu's tick with it - and the choice kept,
+    /// unless it is only the start's default.</summary>
+    private void ShowPlaylists(bool show, bool remember = true)
+    {
+        _strip.IsVisible = show;
+        _showPlaylists.IsChecked = show;
+        if (remember && _settings.ShowPlaylists != show)
+        {
+            _settings.ShowPlaylists = show;
+            _settings.Save();
+        }
     }
 
     /// <summary>How much larger than the small size the text is: 1, or <see cref="BigFont"/>.</summary>
