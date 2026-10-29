@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -16,7 +17,9 @@ namespace MagPlaySid;
 /// MagPlaySID's window: a .sid plays - opened, dropped on the window from Explorer, Finder or the
 /// desktop, or named on the command line - with the MagSID player's spectrum and a scope per
 /// voice, below them the tune transcribed into a score whose rows scroll with the music, and at
-/// the bottom a keyboard lit by the notes the voices play.
+/// the bottom a keyboard lit by the notes the voices play. A folder dropped on it becomes a
+/// playlist down the left, its tunes played one after another; favourite playlists are made there
+/// from any tune played.
 /// The sound is always the tune's own 6502 code, run on the C64 - any tune, RSIDs and digis too;
 /// the score is only a view of it.
 /// </summary>
@@ -26,6 +29,12 @@ internal sealed class PlayerWindow : Window
 
     /// <summary>Seconds of a tune transcribed first, to show while the whole of it is.</summary>
     private const int OpeningSeconds = 30;
+
+    /// <summary>The big text against the small: a quarter larger.</summary>
+    private const double BigFont = 1.25;
+
+    /// <summary>How long a playlist's tune plays when its length cannot be measured.</summary>
+    private static readonly TimeSpan UnmeasuredLength = TimeSpan.FromMinutes(3);
 
     private readonly SpectrumView _spectrum = new();
     private VoiceScopeView[] _scopes = [];
@@ -39,18 +48,30 @@ internal sealed class PlayerWindow : Window
     private readonly TextBlock _empty = new();
     private readonly TextBlock _retroStatus = new();
     private readonly Button _open = new();
+    private readonly Button _favourite = new();
+    private readonly TextBlock _favouriteText = new() { Text = "Add to playlist", VerticalAlignment = VerticalAlignment.Center };
     private readonly ScoreView _view = new();
     private readonly PianoView _piano = new();
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly bool[] _muted = new bool[9];
     private readonly Settings _settings = Settings.Load();
     private readonly MenuItem _checkForUpdates = new();
+    private readonly MenuItem _smallFont = new();
+    private readonly MenuItem _bigFont = new();
+    private readonly PlaylistStrip _strip;
 
     private SidFile? _file;
     private C64PlaybackEngine? _engine;
     private IAudioOutput? _output;
     private SidSongLength.Result? _length;
     private int _song;
+    private string? _path;
+
+    /// <summary>The playlist playing and its tune: the next follows when this one ends.</summary>
+    private Playlist? _queue;
+    private PlaylistTune? _queueTune;
+    /// <summary>The tune's length could not be measured: <see cref="UnmeasuredLength"/> stands in.</summary>
+    private bool _lengthUnknown;
 
     private Transcription? _transcription;
     private CancellationTokenSource? _transcribing;
@@ -67,7 +88,10 @@ internal sealed class PlayerWindow : Window
         Background = SidPlayerPalette.Brush(SidPlayerPalette.Background);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
+        _strip = new PlaylistStrip(this);
+        _strip.Play += PlayFromList;
         Content = BuildLayout();
+        ShowFontSize();
 
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
@@ -86,14 +110,18 @@ internal sealed class PlayerWindow : Window
             }
         };
 
-        // A .sid dropped anywhere on the window loads and plays.
+        // A .sid dropped anywhere on the window loads and plays; a folder - or several tunes -
+        // becomes a playlist, played from its first tune.
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, (_, e) =>
             e.DragEffects = e.DataTransfer.TryGetFile() is not null ? DragDropEffects.Copy : DragDropEffects.None);
         AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (e.DataTransfer.TryGetFile()?.TryGetLocalPath() is { } dropped)
-                Load(dropped);
+            var dropped = (e.DataTransfer.TryGetFiles() ?? []).Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
+            if (dropped is [var one] && File.Exists(one))
+                PlayFile(one);
+            else if (dropped.Count > 0)
+                _ = OpenFolderAsync(dropped);
         });
 
         Closed += (_, _) =>
@@ -105,15 +133,13 @@ internal sealed class PlayerWindow : Window
 
         ShowEmpty();
         if (path is not null)
-            Opened += (_, _) => Load(path);
+            Opened += (_, _) => PlayFile(path);
         Opened += async (_, _) => await CheckForUpdatesAsync();
     }
 
     private Control BuildLayout()
     {
-        _title.FontSize = 20;
         _title.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
-        _details.FontSize = 11.5;
         _details.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _details.Margin = new Thickness(0, 2, 0, 0);
 
@@ -123,16 +149,35 @@ internal sealed class PlayerWindow : Window
         _open.HorizontalAlignment = HorizontalAlignment.Left;
         _open.Margin = new Thickness(0, 10, 0, 0);
         _open.Padding = new Thickness(14, 5);
-        _open.FontSize = 12;
         InPlayerColours(_open);
 
-        var details = new StackPanel { Children = { _title, _details, _open } };
+        // Beside it, the tune playing into a favourite playlist.
+        _favourite.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 7,
+            Children = { PlaylistStrip.HeartGlyph(), _favouriteText },
+        };
+        _favourite.Margin = new Thickness(8, 10, 0, 0);
+        _favourite.Padding = new Thickness(12, 5);
+        InPlayerColours(_favourite);
+        var addTo = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+        addTo.Opening += (_, _) =>
+        {
+            addTo.Items.Clear();
+            if (_path is not null)
+                foreach (var item in _strip.AddToItems(_path))
+                    addTo.Items.Add(item);
+        };
+        _favourite.Flyout = addTo;
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { _open, _favourite } };
+        var details = new StackPanel { Children = { _title, _details, buttons } };
         var header = new Grid { Margin = new Thickness(18, 12, 18, 6), Children = { details, BuildMenu() } };
 
         BuildScopes(3);
 
         _elapsed.FontFamily = Mono;
-        _elapsed.FontSize = 16;
         _elapsed.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
         _elapsed.VerticalAlignment = VerticalAlignment.Center;
         _elapsed.Margin = new Thickness(14, 0);
@@ -152,7 +197,6 @@ internal sealed class PlayerWindow : Window
 
         _empty.Text = "Open a .sid file - or drop one here";
         _empty.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
-        _empty.FontSize = 14;
         _empty.HorizontalAlignment = HorizontalAlignment.Center;
         _empty.VerticalAlignment = VerticalAlignment.Center;
 
@@ -165,7 +209,6 @@ internal sealed class PlayerWindow : Window
         _view.Width = _view.ContentWidth;
         _view.Focusable = false;
         _retroStatus.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
-        _retroStatus.FontSize = 12;
         _retroStatus.Margin = new Thickness(0, 0, 0, 4);
         var retro = new DockPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(18, 4, 18, 8) };
         DockPanel.SetDock(_retroStatus, Dock.Top);
@@ -173,6 +216,8 @@ internal sealed class PlayerWindow : Window
         retro.Children.Add(_view);
 
         var root = new DockPanel();
+        DockPanel.SetDock(_strip, Dock.Left);
+        root.Children.Add(_strip);
         foreach (var top in new Control[] { header, spectrumHost, _scopeRow, transport })
         {
             DockPanel.SetDock(top, Dock.Top);
@@ -181,7 +226,13 @@ internal sealed class PlayerWindow : Window
         _piano.Margin = new Thickness(18, 0, 18, 12);
         DockPanel.SetDock(_piano, Dock.Bottom);
         root.Children.Add(_piano);
-        root.Children.Add(retro);
+        // Sideways when the rows are wider than the window: big text, or a 2SID or 3SID tune's columns.
+        root.Children.Add(new ScrollViewer
+        {
+            Content = retro,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        });
         return root;
     }
 
@@ -208,6 +259,9 @@ internal sealed class PlayerWindow : Window
     /// <summary>The menu behind the three lines at the top right.</summary>
     private Button BuildMenu()
     {
+        var openFolder = new MenuItem { Header = "Open folder..." };
+        openFolder.Click += (_, _) => _ = PickFolderAsync();
+
         _checkForUpdates.Header = "Check for updates at start";
         _checkForUpdates.ToggleType = MenuItemToggleType.CheckBox;
         _checkForUpdates.IsChecked = _settings.CheckForUpdates == true;
@@ -216,6 +270,20 @@ internal sealed class PlayerWindow : Window
             _settings.CheckForUpdates = _checkForUpdates.IsChecked;
             _settings.Save();
         };
+
+        _smallFont.Header = "Small font";
+        _bigFont.Header = "Big font";
+        foreach (var (item, big) in new[] { (_smallFont, false), (_bigFont, true) })
+        {
+            item.ToggleType = MenuItemToggleType.Radio;
+            item.GroupName = "Font";
+            item.Click += (_, _) =>
+            {
+                _settings.BigFont = big;
+                _settings.Save();
+                ShowFontSize();
+            };
+        }
 
         var menu = new Button
         {
@@ -228,12 +296,39 @@ internal sealed class PlayerWindow : Window
             Padding = new Thickness(9, 7),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _checkForUpdates } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
         InPlayerColours(menu);
         return menu;
+    }
+
+    /// <summary>How much larger than the small size the text is: 1, or <see cref="BigFont"/>.</summary>
+    private double TextScale => _settings.BigFont ? BigFont : 1;
+
+    /// <summary>Every text in the window at the size chosen in the menu - the small one is the size
+    /// it always was - and the menu's choice ticked.</summary>
+    private void ShowFontSize()
+    {
+        double scale = TextScale;
+        _title.FontSize = 20 * scale;
+        _details.FontSize = 11.5 * scale;
+        _open.FontSize = 12 * scale;
+        _favouriteText.FontSize = 12 * scale;
+        _strip.TextScale = scale;
+        _elapsed.FontSize = 16 * scale;
+        _empty.FontSize = 14 * scale;
+        _retroStatus.FontSize = 12 * scale;
+        _view.TextScale = scale;
+        _piano.TextScale = scale;
+        foreach (var scope in _scopes)
+        {
+            scope.TextScale = scale;
+            scope.InvalidateVisual();
+        }
+        _smallFont.IsChecked = !_settings.BigFont;
+        _bigFont.IsChecked = _settings.BigFont;
     }
 
     /// <summary>The first start asks whether to look for updates - off until the user says yes,
@@ -274,6 +369,7 @@ internal sealed class PlayerWindow : Window
             var scope = new VoiceScopeView(i, voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null)
             {
                 Margin = new Thickness(i == 0 ? 0 : 5, 0, i == voices - 1 ? 0 : 5, 0),
+                TextScale = TextScale,
             };
             scope.MuteToggled += (voice, muted) =>
             {
@@ -290,8 +386,8 @@ internal sealed class PlayerWindow : Window
     {
         bool loaded = _file is not null;
         _empty.IsVisible = !loaded;
-        _previous.IsEnabled = _playPause.IsEnabled = loaded;
-        _next.IsEnabled = loaded && _file!.Songs > 1;
+        _previous.IsEnabled = _playPause.IsEnabled = _favourite.IsEnabled = loaded;
+        _next.IsEnabled = loaded && (_file!.Songs > 1 || _queueTune is not null);
         if (!loaded)
         {
             _title.Text = "MagPlaySID";
@@ -310,10 +406,97 @@ internal sealed class PlayerWindow : Window
         });
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
-            Load(path);
+            PlayFile(path);
     }
 
-    private void Load(string path)
+    private async Task PickFolderAsync()
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Play a folder of .sid tunes",
+            AllowMultiple = false,
+        });
+
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path)
+            await OpenFolderAsync([path]);
+    }
+
+    /// <summary>The tunes in folders - and any tunes - dropped or chosen, as the folder playlist,
+    /// played from the first.</summary>
+    private async Task OpenFolderAsync(IReadOnlyList<string> paths)
+    {
+        var tunes = await Task.Run(() => Playlist.FindTunes(paths));
+        string name = paths is [var one] && Directory.Exists(one)
+            ? Path.GetFileName(Path.TrimEndingDirectorySeparator(one)) is { Length: > 0 } folder ? folder : one
+            : "Dropped tunes";
+        if (tunes.Count == 0)
+        {
+            await MessageWindow.ShowAsync(this, "No tunes", $"There is no .sid in {name}.");
+            return;
+        }
+
+        var playlist = _strip.ShowFolder(name, tunes);
+        PlayFromList(playlist, playlist.Tunes[0]);
+    }
+
+    /// <summary>One tune, on its own - whatever playlist was playing stops there.</summary>
+    private void PlayFile(string path)
+    {
+        _queue = null;
+        _queueTune = null;
+        _strip.ShowPlaying(null, null);
+        Load(path);
+    }
+
+    /// <summary>A playlist's tune, and the rest after it; one that will not play is passed over.</summary>
+    private void PlayFromList(Playlist playlist, PlaylistTune tune)
+    {
+        for (PlaylistTune? next = tune; next is not null; next = playlist.After(next))
+        {
+            _queue = playlist;
+            _queueTune = next;
+            _strip.ShowPlaying(playlist, next);
+            if (Load(next.Path, quiet: true))
+                return;
+        }
+
+        EndOfPlaylist();
+    }
+
+    private void PlayNextInList()
+    {
+        if (_queue is { } playlist && _queueTune is { } tune && playlist.After(tune) is { } next)
+            PlayFromList(playlist, next);
+        else
+            EndOfPlaylist();
+    }
+
+    /// <summary>The last tune played: it stops there, paused, until the user picks another.</summary>
+    private void EndOfPlaylist()
+    {
+        _queueTune = null;
+        if (_engine is { } engine)
+        {
+            engine.Paused = true;
+            _playPause.Glyph = TransportGlyph.Play;
+        }
+        if (_file is not null)
+            ShowEmpty();
+    }
+
+    /// <summary>Whether the playlist's tune has played: its whole length once - to where it would
+    /// start again - or the tune stopped.</summary>
+    private bool TuneEnded(C64PlaybackEngine engine, long at)
+    {
+        if (engine.Failure is not null)
+            return true;
+        TimeSpan? end = _length?.Total ?? (_lengthUnknown ? UnmeasuredLength : null);
+        return end is { } length && at / (double)C64PlaybackEngine.SampleRate >= Math.Max(1, length.TotalSeconds);
+    }
+
+    /// <summary>Plays the tune at <paramref name="path"/>: false, and nothing changed, when it
+    /// cannot be - said in a message unless <paramref name="quiet"/>, as a playlist passes it over.</summary>
+    private bool Load(string path, bool quiet = false)
     {
         SidFile file;
         try
@@ -324,16 +507,19 @@ internal sealed class PlayerWindow : Window
         }
         catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException)
         {
-            _ = MessageWindow.ShowAsync(this, "Cannot play this .sid", ex.Message);
-            return;
+            if (!quiet)
+                _ = MessageWindow.ShowAsync(this, "Cannot play this .sid", ex.Message);
+            return false;
         }
 
         _file = file;
+        _path = path;
         _song = file.StartSong;
         Title = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : $"{file.Name} - MagPlaySID";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
         ShowEmpty();
         Restart();
+        return true;
     }
 
     private string DescribeFile()
@@ -412,6 +598,7 @@ internal sealed class PlayerWindow : Window
         _transcribing = cancel;
         _transcription = null;
         _length = null;
+        _lengthUnknown = false;
         _view.SetScore(null, null);
         _retroStatus.Text = "Transcribing...";
         var file = _file!;
@@ -440,6 +627,7 @@ internal sealed class PlayerWindow : Window
                 Show(() =>
                 {
                     (_transcription, _length) = (whole, length);
+                    _lengthUnknown = length is null;
                     _view.SetScore(whole.Score, whole.Timeline);
                     _retroStatus.Text = whole.Describe();
                 });
@@ -449,6 +637,7 @@ internal sealed class PlayerWindow : Window
             }
             catch (Exception ex)
             {
+                Show(() => _lengthUnknown = true);
                 Show(() => _retroStatus.Text = _transcription is null
                     ? $"No rows to show: {ex.Message}"
                     : $"Only the first {OpeningSeconds} seconds: {ex.Message}");
@@ -465,10 +654,15 @@ internal sealed class PlayerWindow : Window
         _playPause.Glyph = _engine.Paused ? TransportGlyph.Play : TransportGlyph.Pause;
     }
 
+    /// <summary>The tune's next song - or, for a tune of one song in a playlist, the next tune.</summary>
     private void NextSong()
     {
         if (_file is not { Songs: > 1 } file)
+        {
+            if (_queueTune is not null)
+                PlayNextInList();
             return;
+        }
 
         _song = _song >= file.Songs ? 1 : _song + 1;
         Restart();
@@ -480,6 +674,12 @@ internal sealed class PlayerWindow : Window
             return;
 
         long at = engine.TuneSampleAt(output.SamplesPlayed);
+        if (_queueTune is not null && !engine.Paused && TuneEnded(engine, at))
+        {
+            PlayNextInList();
+            return;
+        }
+
         _spectrum.Update(engine, at);
         foreach (var scope in _scopes)
             scope.Update(engine, at);

@@ -18,17 +18,21 @@ namespace MagPlaySid;
 /// </summary>
 internal sealed class ScoreView : Control
 {
-    private const double RowHeight = 17;
-    private const double FontSize = 13;
-    private const double HeaderHeight = 26;
+    /// <summary>How much larger than the small size the text is - the rows, their spacing and the
+    /// columns all grow with it.</summary>
+    private double _scale = 1;
+
+    private double RowHeight => 17 * _scale;
+    private double FontSize => 13 * _scale;
+    private double HeaderHeight => 26 * _scale;
     /// <summary>Characters a voice's column has: fewer, the more voices there are.</summary>
     private int VoiceChars => Voices switch { <= 3 => 24, <= 6 => 17, _ => 11 };
-    private const double Gap = 14;
+    private double Gap => 14 * _scale;
 
     private static readonly Typeface Mono = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"));
     private static readonly Typeface Bold = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"), FontStyle.Normal, FontWeight.Bold);
 
-    private readonly double _charWidth = Measure("0").Width;
+    private double _charWidth;
 
     private MagPlay.Score.Score? _score;
     private ScoreTimeline? _timeline;
@@ -45,6 +49,21 @@ internal sealed class ScoreView : Control
     private double TrackerWidth => Voices * VoiceWidth + (Voices - 1) * Gap;
 
     private double PanelWidth => 30 * _charWidth;
+
+    public ScoreView() => _charWidth = Measure("0").Width;
+
+    /// <summary>1 for the small text, more for bigger: the view is as wide again as it needs.</summary>
+    public double TextScale
+    {
+        get => _scale;
+        set
+        {
+            _scale = value;
+            _charWidth = Measure("0").Width;
+            Width = ContentWidth;
+            InvalidateVisual();
+        }
+    }
 
     public void SetScore(MagPlay.Score.Score? score, ScoreTimeline? timeline)
     {
@@ -111,7 +130,7 @@ internal sealed class ScoreView : Control
         {
             double left = v * (VoiceWidth + Gap);
             var colour = SidPlayerPalette.VoiceColour(v % 3);
-            Text(context, Name(v), left + 4, 5, v == _selected ? colour : SidPlayerPalette.WithAlpha(colour, 140), bold: true);
+            Text(context, Name(v), left + 4, 5 * _scale, v == _selected ? colour : SidPlayerPalette.WithAlpha(colour, 140), bold: true);
             if (v == _selected)
                 context.FillRectangle(new SolidColorBrush(colour), new Rect(left, HeaderHeight - 3, VoiceWidth, 2));
         }
@@ -198,7 +217,7 @@ internal sealed class ScoreView : Control
         var position = timeline.PositionOf(_selected, call);
         var colour = SidPlayerPalette.VoiceColour(_selected % 3);
         var dim = SidPlayerPalette.Subtitle;
-        double y = 5;
+        double y = 5 * _scale;
 
         void Line(string text, Color ink, bool bold = false)
         {
@@ -318,10 +337,10 @@ internal sealed class ScoreView : Control
 
     // ------------------------------------------------------------------ text
 
-    private static FormattedText Measure(string text, Color? ink = null, bool bold = false) =>
+    private FormattedText Measure(string text, Color? ink = null, bool bold = false) =>
         new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, bold ? Bold : Mono, FontSize,
             new SolidColorBrush(ink ?? SidPlayerPalette.Control));
 
-    private static void Text(DrawingContext context, string text, double x, double y, Color ink, bool bold = false) =>
+    private void Text(DrawingContext context, string text, double x, double y, Color ink, bool bold = false) =>
         context.DrawText(Measure(text, ink, bold), new Point(x, y));
 }

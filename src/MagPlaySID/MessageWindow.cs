@@ -16,6 +16,53 @@ internal static class MessageWindow
     public static Task<bool> AskAsync(Window owner, string title, string message, string yes = "Yes", string no = "No") =>
         ShowAsync(owner, title, message, yes, no);
 
+    /// <summary>A line of text asked for - a playlist's name - or null when the window is closed or
+    /// left empty.</summary>
+    public static async Task<string?> PromptAsync(Window owner, string title, string message, string text = "", string ok = "OK")
+    {
+        var box = new TextBox { Text = text };
+        var save = new Button { Content = ok, MinWidth = 80, IsDefault = true };
+        var cancel = new Button { Content = "Cancel", MinWidth = 80, IsCancel = true };
+        string? answer = null;
+        var window = new Window
+        {
+            Title = title,
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(18),
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                    box,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right,
+                        Margin = new Thickness(0, 4, 0, 0), Children = { save, cancel },
+                    },
+                },
+            },
+        };
+        save.Click += (_, _) =>
+        {
+            answer = string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim();
+            window.Close();
+        };
+        cancel.Click += (_, _) => window.Close();
+        window.Opened += (_, _) =>
+        {
+            box.Focus();
+            box.SelectAll();
+        };
+
+        await window.ShowDialog(owner);
+        return answer;
+    }
+
     private static async Task<bool> ShowAsync(Window owner, string title, string message, string yes, string? no)
     {
         bool answer = false;

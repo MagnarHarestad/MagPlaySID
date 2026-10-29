@@ -32,6 +32,18 @@ internal sealed class PianoView : Control
 
     /// <summary>How brightly each key is lit by each voice, 0-1.</summary>
     private readonly double[,] _lit = new double[Keys, 3];
+    private double _textScale = 1;
+
+    /// <summary>1 for the small text, more for bigger: the octaves' names under the keys.</summary>
+    public double TextScale
+    {
+        get => _textScale;
+        set
+        {
+            _textScale = value;
+            InvalidateVisual();
+        }
+    }
 
     public PianoView()
     {
@@ -106,7 +118,7 @@ internal sealed class PianoView : Control
         for (int octave = 0; octave < Octaves; octave++)
         {
             var label = new FormattedText($"C{octave}", System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                                          Typeface.Default, 9, SidPlayerPalette.Brush(SidPlayerPalette.Subtitle));
+                                          Typeface.Default, 9 * _textScale, SidPlayerPalette.Brush(SidPlayerPalette.Subtitle));
             context.DrawText(label, new Point(keys.X + octave * 7 * white + (white - label.Width) / 2, keys.Bottom - label.Height - 1));
         }
     }

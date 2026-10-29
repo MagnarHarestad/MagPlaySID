@@ -10,14 +10,21 @@ namespace MagPlaySid;
 /// </summary>
 internal sealed class Settings
 {
-    private static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MagPlaySID", "settings.json");
+    /// <summary>Where MagPlaySID keeps what it remembers - the favourite playlists too.</summary>
+    public static readonly string Folder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MagPlaySID");
+
+    private static readonly string FilePath = Path.Combine(Folder, "settings.json");
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     /// <summary>Whether a newer release is looked for at start. Null until the user has been
     /// asked, which is the first time MagPlaySID starts: off until they say yes.</summary>
     public bool? CheckForUpdates { get; set; }
+
+    /// <summary>The bigger of the two text sizes - the rows, the tune's details and the labels a
+    /// quarter larger. Small, the size it always was, until it is chosen.</summary>
+    public bool BigFont { get; set; }
 
     public static Settings Load()
     {

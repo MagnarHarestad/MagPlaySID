@@ -29,6 +29,9 @@ internal sealed class VoiceScopeView : Control
     private readonly Pen _trace;
 
     private bool _muted;
+
+    /// <summary>1 for the small text, more for bigger: the voice's name in the corner.</summary>
+    public double TextScale { get; set; } = 1;
     private float _level;
 
     /// <param name="name">What the scope is labelled; VOICE and the voice's number when left out.</param>
@@ -116,8 +119,8 @@ internal sealed class VoiceScopeView : Control
 
         string text = _muted ? $"{_name}  MUTED" : _name;
         var label = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-            LabelFace, 10, new SolidColorBrush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170)));
-        context.DrawText(label, new Point(8, bounds.Height - 17));
+            LabelFace, 10 * TextScale, new SolidColorBrush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170)));
+        context.DrawText(label, new Point(8, bounds.Height - label.Height - 4));
     }
 
     private void DrawTrace(DrawingContext context, Rect bounds, double midY)
