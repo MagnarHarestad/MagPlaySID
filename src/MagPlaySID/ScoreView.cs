@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using MagPlay.Score;
 using MagPlaySid.Player;
 
@@ -34,6 +35,15 @@ internal sealed class ScoreView : Control
 
     private double _charWidth;
 
+    /// <summary>Text laid out once and drawn again on every frame it shows: a row scrolling past is
+    /// the same text for as long as it is on screen. Emptied for a new tune or a new size. A
+    /// TextLayout, not a FormattedText: drawing one of those lays it out again every time - 11 KB a
+    /// draw, measured, against a TextLayout's 4 bytes.</summary>
+    private readonly Dictionary<(string Text, Color Ink, bool Bold), TextLayout> _laidOut = [];
+
+    /// <summary>A played row's text, by its pattern, row and transpose: made once, not every frame.</summary>
+    private readonly Dictionary<(int Pattern, int Row, int Transpose), string> _rowTexts = [];
+
     private MagPlay.Score.Score? _score;
     private ScoreTimeline? _timeline;
     private double _call;
@@ -50,7 +60,7 @@ internal sealed class ScoreView : Control
 
     private double PanelWidth => 30 * _charWidth;
 
-    public ScoreView() => _charWidth = Measure("0").Width;
+    public ScoreView() => _charWidth = Measure("0").WidthIncludingTrailingWhitespace;
 
     /// <summary>1 for the small text, more for bigger: the view is as wide again as it needs.</summary>
     public double TextScale
@@ -59,7 +69,8 @@ internal sealed class ScoreView : Control
         set
         {
             _scale = value;
-            _charWidth = Measure("0").Width;
+            Forget();
+            _charWidth = Measure("0").WidthIncludingTrailingWhitespace;
             Width = ContentWidth;
             InvalidateVisual();
         }
@@ -69,6 +80,8 @@ internal sealed class ScoreView : Control
     {
         _score = score;
         _timeline = timeline;
+        Forget();
+        _rowTexts.Clear();
         _call = 0;
         _selected = Math.Min(_selected, Voices - 1);
         Width = ContentWidth;
@@ -89,7 +102,11 @@ internal sealed class ScoreView : Control
             long from = timeline.CycleOf(call), to = timeline.CycleOf(call + 1);
             into = to > from ? Math.Clamp((cycle - from) / (double)(to - from), 0, 1) : 0;
         }
-        _call = call + into;
+        // Drawn again only when the rows move: paused, they stand still.
+        double now = call + into;
+        if (now == _call)
+            return;
+        _call = now;
         InvalidateVisual();
     }
 
@@ -120,7 +137,7 @@ internal sealed class ScoreView : Control
 
         using (context.PushClip(new Rect(0, HeaderHeight, TrackerWidth, bounds.Height - HeaderHeight)))
         {
-            context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 18)),
+            context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 18)),
                                   new Rect(0, line, TrackerWidth, RowHeight));
             for (int v = 0; v < Voices; v++)
                 DrawVoice(context, score, timeline, v, v * (VoiceWidth + Gap), line, perCall, bounds.Height);
@@ -132,7 +149,7 @@ internal sealed class ScoreView : Control
             var colour = SidPlayerPalette.VoiceColour(v % 3);
             Text(context, Name(v), left + 4, 5 * _scale, v == _selected ? colour : SidPlayerPalette.WithAlpha(colour, 140), bold: true);
             if (v == _selected)
-                context.FillRectangle(new SolidColorBrush(colour), new Rect(left, HeaderHeight - 3, VoiceWidth, 2));
+                context.FillRectangle(SidPlayerPalette.Brush(colour), new Rect(left, HeaderHeight - 3, VoiceWidth, 2));
         }
 
         DrawPanel(context, score, timeline, TrackerWidth + Gap, bounds.Height);
@@ -164,13 +181,13 @@ internal sealed class ScoreView : Control
             var played = rows[i];
             if (played.Row == 0 && y > HeaderHeight)
             {
-                var pen = new Pen(new SolidColorBrush(SidPlayerPalette.WithAlpha(colour, 70)));
+                var pen = SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(colour, 70));
                 context.DrawLine(pen, new Point(left, y - 1), new Point(left + VoiceWidth, y - 1));
             }
 
             if (y - last < RowHeight * 0.75)
             {
-                context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(colour, 120)), new Rect(left - 5, y, 3, 2));
+                context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(colour, 120)), new Rect(left - 5, y, 3, 2));
                 continue;
             }
             last = y;
@@ -181,7 +198,9 @@ internal sealed class ScoreView : Control
             var ink = sounding ? SidPlayerPalette.Title
                 : empty ? SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 110)
                 : SidPlayerPalette.WithAlpha(colour, 220);
-            Text(context, RowText(row, played), left + 4, y + 1, ink, bold: sounding);
+            if (!_rowTexts.TryGetValue((played.Pattern, played.Row, played.Transpose), out var text))
+                _rowTexts[(played.Pattern, played.Row, played.Transpose)] = text = RowText(row, played);
+            Text(context, text, left + 4, y + 1, ink, bold: sounding);
             if (played.Row == 0)
                 Text(context, EntryText(played), left + VoiceWidth - 7 * _charWidth, y + 1, SidPlayerPalette.WithAlpha(colour, 150));
         }
@@ -296,7 +315,7 @@ internal sealed class ScoreView : Control
         {
             bool lit = step == sounding;
             if (lit)
-                context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(_selected % 3), 60)),
+                context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(_selected % 3), 60)),
                                       new Rect(left - 3, y - 1, PanelWidth - 4, RowHeight));
             Text(context, $"{step - start:X2} {Describe(table[step])}", left, y,
                  lit ? SidPlayerPalette.Title : SidPlayerPalette.Control, bold: lit);
@@ -337,10 +356,27 @@ internal sealed class ScoreView : Control
 
     // ------------------------------------------------------------------ text
 
-    private FormattedText Measure(string text, Color? ink = null, bool bold = false) =>
-        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, bold ? Bold : Mono, FontSize,
-            new SolidColorBrush(ink ?? SidPlayerPalette.Control));
+    private TextLayout Measure(string text, Color? ink = null, bool bold = false)
+    {
+        var key = (text, ink ?? SidPlayerPalette.Control, bold);
+        if (_laidOut.TryGetValue(key, out var laidOut))
+            return laidOut;
+        // A bound on what is kept: a long tune's rows, not every row of every tune heard.
+        if (_laidOut.Count >= 4096)
+            Forget();
+        laidOut = new TextLayout(text, bold ? Bold : Mono, FontSize, SidPlayerPalette.Brush(key.Item2));
+        _laidOut[key] = laidOut;
+        return laidOut;
+    }
+
+    /// <summary>The text laid out so far let go: a new tune's rows, or a new size.</summary>
+    private void Forget()
+    {
+        foreach (var laidOut in _laidOut.Values)
+            laidOut.Dispose();
+        _laidOut.Clear();
+    }
 
     private void Text(DrawingContext context, string text, double x, double y, Color ink, bool bold = false) =>
-        context.DrawText(Measure(text, ink, bold), new Point(x, y));
+        Measure(text, ink, bold).Draw(context, new Point(x, y));
 }

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using MagPlay.C64;
 using MagPlaySid.Player;
 
@@ -30,8 +31,19 @@ internal sealed class PianoView : Control
     private static readonly Color Ebony = Color.FromRgb(0x16, 0x16, 0x22);
     private static readonly Color EbonyEdge = Color.FromRgb(0x30, 0x30, 0x46);
 
-    /// <summary>How brightly each key is lit by each voice, 0-1.</summary>
-    private readonly double[,] _lit = new double[Keys, 3];
+    /// <summary>The white keys' face, made once.</summary>
+    private static readonly IBrush IvoryFace = new Avalonia.Media.Immutable.ImmutableLinearGradientBrush(
+        [new Avalonia.Media.Immutable.ImmutableGradientStop(0, Ivory), new Avalonia.Media.Immutable.ImmutableGradientStop(1, IvoryLow)],
+        startPoint: new RelativePoint(0, 0, RelativeUnit.Relative), endPoint: new RelativePoint(0, 1, RelativeUnit.Relative));
+
+    /// <summary>How brightly each key is lit by each voice, 0-1; and the frame's being worked out,
+    /// to draw again only when a key's light has changed.</summary>
+    private double[,] _lit = new double[Keys, 3];
+    private double[,] _next = new double[Keys, 3];
+
+    /// <summary>The octaves' names, laid out once for the text's size - as TextLayouts, which keep
+    /// their layout when drawn.</summary>
+    private TextLayout[]? _labels;
     private double _textScale = 1;
 
     /// <summary>1 for the small text, more for bigger: the octaves' names under the keys.</summary>
@@ -41,6 +53,9 @@ internal sealed class PianoView : Control
         set
         {
             _textScale = value;
+            foreach (var label in _labels ?? [])
+                label.Dispose();
+            _labels = null;
             InvalidateVisual();
         }
     }
@@ -53,7 +68,7 @@ internal sealed class PianoView : Control
     /// <summary>The keys the voices are on at sample <paramref name="at"/>; a muted voice lights none.</summary>
     public void Update(C64PlaybackEngine engine, long at, IReadOnlyList<bool> muted)
     {
-        Array.Clear(_lit);
+        Array.Clear(_next);
         for (int voice = 0; voice < 3 * engine.Chips; voice++)
         {
             if (muted[voice])
@@ -67,8 +82,21 @@ internal sealed class PianoView : Control
 
             int key = (int)Math.Round(note);
             if (key is >= 0 and < Keys)
-                _lit[key, voice % 3] = Math.Max(_lit[key, voice % 3], Math.Sqrt(envelope / 255.0));
+                _next[key, voice % 3] = Math.Max(_next[key, voice % 3], Math.Sqrt(envelope / 255.0));
         }
+
+        // Drawn again only when a light has changed - held notes and silence need no new frame.
+        bool changed = false;
+        for (int key = 0; key < Keys && !changed; key++)
+            for (int voice = 0; voice < 3; voice++)
+                if (Math.Abs(_next[key, voice] - _lit[key, voice]) > 0.004)
+                {
+                    changed = true;
+                    break;
+                }
+        if (!changed)
+            return;
+        (_lit, _next) = (_next, _lit);
         InvalidateVisual();
     }
 
@@ -82,17 +110,12 @@ internal sealed class PianoView : Control
     {
         var bounds = new Rect(Bounds.Size);
         context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground), bounds);
-        context.DrawRectangle(new Pen(SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder)), bounds);
+        context.DrawRectangle(SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder), bounds);
 
         var keys = bounds.Deflate(new Thickness(4, 4, 4, 5));
         double white = keys.Width / WhiteKeys;
-        var ivory = new LinearGradientBrush
-        {
-            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-            GradientStops = { new GradientStop(Ivory, 0), new GradientStop(IvoryLow, 1) },
-        };
-        var seam = new Pen(SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder));
+        var ivory = IvoryFace;
+        var seam = SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder);
 
         for (int key = 0; key < Keys; key++)
         {
@@ -110,16 +133,18 @@ internal sealed class PianoView : Control
                 continue;
             double x = keys.X + (key / 12 * 7 + WhiteOf[key % 12] + 1) * white - blackWidth / 2;
             var rect = new Rect(x, keys.Y, blackWidth, blackHeight);
-            context.DrawRectangle(new SolidColorBrush(Ebony), new Pen(new SolidColorBrush(EbonyEdge)), new RoundedRect(rect, 0, 0, 2, 2));
+            context.DrawRectangle(SidPlayerPalette.Brush(Ebony), SidPlayerPalette.Pen(EbonyEdge), new RoundedRect(rect, 0, 0, 2, 2));
             Light(context, key, new RoundedRect(rect.Deflate(1), 0, 0, 2, 2));
         }
 
         // C of each octave named under its key, as on the rows: C-0 to C-7.
+        _labels ??= Enumerable.Range(0, Octaves)
+            .Select(octave => new TextLayout($"C{octave}", Typeface.Default, 9 * _textScale, SidPlayerPalette.Brush(SidPlayerPalette.Subtitle)))
+            .ToArray();
         for (int octave = 0; octave < Octaves; octave++)
         {
-            var label = new FormattedText($"C{octave}", System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                                          Typeface.Default, 9 * _textScale, SidPlayerPalette.Brush(SidPlayerPalette.Subtitle));
-            context.DrawText(label, new Point(keys.X + octave * 7 * white + (white - label.Width) / 2, keys.Bottom - label.Height - 1));
+            var label = _labels[octave];
+            label.Draw(context, new Point(keys.X + octave * 7 * white + (white - label.Width) / 2, keys.Bottom - label.Height - 1));
         }
     }
 
@@ -132,7 +157,7 @@ internal sealed class PianoView : Control
             if (level <= 0)
                 continue;
             var colour = SidPlayerPalette.VoiceColour(voice);
-            context.DrawRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(colour, (int)(70 + 185 * level))), null, shape);
+            context.DrawRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(colour, (int)(70 + 185 * level))), null, shape);
         }
     }
 }

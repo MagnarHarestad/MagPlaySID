@@ -129,7 +129,7 @@ internal sealed class TransportButton : Control
         var colour = !IsEnabled ? SidPlayerPalette.ControlDisabled
             : _lit ? SidPlayerPalette.VoiceColour(1)
             : _hovered ? SidPlayerPalette.ControlHover : SidPlayerPalette.Control;
-        var brush = new SolidColorBrush(colour);
+        var brush = SidPlayerPalette.Brush(colour);
 
         double w = Bounds.Width, h = Bounds.Height;
         double inset = _pressed ? 2 : 0;

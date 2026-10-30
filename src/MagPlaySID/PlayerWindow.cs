@@ -88,6 +88,9 @@ internal sealed class PlayerWindow : Window
     private bool _finished;
     /// <summary>Fast-forward held - its button or F: on into the next song or tune, until let go.</summary>
     private bool _fastForwarding;
+    /// <summary>The tune's sample the meters last showed: they are worked out and painted again only
+    /// when it moves on.</summary>
+    private long _metersAt = -1;
     /// <summary>The tune's length could not be measured: <see cref="UnmeasuredLength"/> stands in.</summary>
     private bool _lengthUnknown;
 
@@ -681,6 +684,7 @@ internal sealed class PlayerWindow : Window
 
     private void Restart()
     {
+        _metersAt = -1;
         _spectrum.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
@@ -905,10 +909,16 @@ internal sealed class PlayerWindow : Window
             return;
         }
 
-        _spectrum.Update(engine, at);
-        foreach (var scope in _scopes)
-            scope.Update(engine, at);
-        _piano.Update(engine, at, _muted);
+        // The meters only when the tune has moved and the window can be seen: paused, or minimised,
+        // they would only work out and paint the same frame again, sixty times a second.
+        if (at != _metersAt && WindowState != WindowState.Minimized)
+        {
+            _metersAt = at;
+            _spectrum.Update(engine, at);
+            foreach (var scope in _scopes)
+                scope.Update(engine, at);
+            _piano.Update(engine, at, _muted);
+        }
 
         var position = PositionWithinSong(at);
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";

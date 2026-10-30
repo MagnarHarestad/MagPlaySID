@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using MagSid.Playback;
 
 namespace MagPlaySid.Player;
@@ -23,10 +24,14 @@ internal sealed class VoiceScopeView : Control
     private readonly string _name;
     private readonly Color _colour;
     private readonly IBrush _fill = SidPlayerPalette.PanelFill();
-    private readonly Pen _border = new(SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder));
-    private readonly Pen _centre = new(new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x30)));
-    private readonly Pen _glow;
-    private readonly Pen _trace;
+    private readonly IPen _border = SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder);
+    private readonly IPen _centre = SidPlayerPalette.Pen(Color.FromRgb(0x20, 0x20, 0x30));
+    private readonly IPen _glow;
+    private readonly IPen _trace;
+
+    /// <summary>The label, laid out once - again only when muting or the text's size changes it.</summary>
+    private TextLayout? _label;
+    private (bool Muted, double Scale) _labelFor;
 
     private bool _muted;
 
@@ -40,8 +45,8 @@ internal sealed class VoiceScopeView : Control
         _voice = voice;
         _name = name ?? $"VOICE {voice + 1}";
         _colour = SidPlayerPalette.VoiceColour(voice % 3);
-        _glow = new Pen(new SolidColorBrush(SidPlayerPalette.WithAlpha(_colour, 40)), 3.5);
-        _trace = new Pen(new SolidColorBrush(_colour), 1.4);
+        _glow = SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(_colour, 40), 3.5);
+        _trace = SidPlayerPalette.Pen(_colour, 1.4);
         Cursor = new Cursor(StandardCursorType.Hand);
     }
 
@@ -107,20 +112,24 @@ internal sealed class VoiceScopeView : Control
         context.DrawLine(_centre, new Point(0, midY), new Point(bounds.Width, midY));
 
         // The voice's level down the left edge, so a silent or muted voice is obvious.
-        context.FillRectangle(new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x28)), new Rect(1, 1, 3, bounds.Height - 2));
+        context.FillRectangle(SidPlayerPalette.Brush(Color.FromRgb(0x1A, 0x1A, 0x28)), new Rect(1, 1, 3, bounds.Height - 2));
         double level = bounds.Height * Math.Clamp(_level, 0f, 1f);
         if (level > 1 && !_muted)
-            context.FillRectangle(new SolidColorBrush(SidPlayerPalette.WithAlpha(_colour, 190)), new Rect(1, bounds.Height - 1 - level, 3, level));
+            context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(_colour, 190)), new Rect(1, bounds.Height - 1 - level, 3, level));
 
         if (!_muted)
             DrawTrace(context, bounds, midY);
 
         context.DrawRectangle(_border, bounds.Deflate(0.5));
 
-        string text = _muted ? $"{_name}  MUTED" : _name;
-        var label = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-            LabelFace, 10 * TextScale, new SolidColorBrush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170)));
-        context.DrawText(label, new Point(8, bounds.Height - label.Height - 4));
+        if (_label is null || _labelFor != (_muted, TextScale))
+        {
+            _labelFor = (_muted, TextScale);
+            _label?.Dispose();
+            _label = new TextLayout(_muted ? $"{_name}  MUTED" : _name, LabelFace, 10 * TextScale,
+                SidPlayerPalette.Brush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170)));
+        }
+        _label.Draw(context, new Point(8, bounds.Height - _label.Height - 4));
     }
 
     private void DrawTrace(DrawingContext context, Rect bounds, double midY)

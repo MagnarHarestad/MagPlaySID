@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using MagPlaySid.Player;
 
 namespace MagPlaySid;
@@ -22,6 +23,10 @@ internal sealed class SongPill : Control
     private double _progress;
     private bool _hovered;
     private bool _pressed;
+
+    /// <summary>The number, laid out once for each look it takes - lit, hovered, plain.</summary>
+    private readonly Dictionary<(bool Lit, bool Hovered), TextLayout> _numbers = [];
+    private IPen? _arc;
 
     public SongPill(int song, double scale)
     {
@@ -105,21 +110,22 @@ internal sealed class SongPill : Control
         if (_lit)
         {
             // A disc in the accent inside a dark track, the song's progress going round the track.
-            context.DrawEllipse(null, new Pen(SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder), ring), centre, radius, radius);
+            context.DrawEllipse(null, SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder, ring), centre, radius, radius);
             double disc = radius - ring * 1.5;
-            context.DrawEllipse(new SolidColorBrush(accent), null, centre, disc, disc);
+            context.DrawEllipse(SidPlayerPalette.Brush(accent), null, centre, disc, disc);
         }
         else
         {
             var fill = _hovered ? SidPlayerPalette.WithAlpha(accent, 40) : SidPlayerPalette.PanelBackground;
             var edge = _hovered ? SidPlayerPalette.WithAlpha(accent, 170) : SidPlayerPalette.PanelBorder;
-            context.DrawEllipse(new SolidColorBrush(fill), new Pen(new SolidColorBrush(edge), ring), centre, radius, radius);
+            context.DrawEllipse(SidPlayerPalette.Brush(fill), SidPlayerPalette.Pen(edge, ring), centre, radius, radius);
         }
 
         // The song's progress, clockwise from the top, in the accent on the dark track.
         if (_lit && _progress > 0)
         {
-            var pen = new Pen(new SolidColorBrush(accent), ring, lineCap: PenLineCap.Round);
+            var pen = _arc ??= new Avalonia.Media.Immutable.ImmutablePen(
+                (Avalonia.Media.IImmutableBrush)SidPlayerPalette.Brush(accent), ring, lineCap: PenLineCap.Round);
             if (_progress >= 0.999)
                 context.DrawEllipse(null, pen, centre, radius, radius);
             else
@@ -137,10 +143,12 @@ internal sealed class SongPill : Control
             }
         }
 
-        var ink = _lit ? SidPlayerPalette.Background : _hovered ? SidPlayerPalette.ControlHover : SidPlayerPalette.Control;
-        var text = new FormattedText(Song.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture,
-                                     FlowDirection.LeftToRight, _lit ? MonoBold : Mono,
-                                     (Song >= 100 ? 9.5 : Song >= 10 ? 11 : 12) * _scale, new SolidColorBrush(ink));
-        context.DrawText(text, new Point(centre.X - text.Width / 2, centre.Y - text.Height / 2));
+        if (!_numbers.TryGetValue((_lit, _hovered), out var text))
+        {
+            var ink = _lit ? SidPlayerPalette.Background : _hovered ? SidPlayerPalette.ControlHover : SidPlayerPalette.Control;
+            _numbers[(_lit, _hovered)] = text = new TextLayout(Song.ToString(CultureInfo.InvariantCulture), _lit ? MonoBold : Mono,
+                (Song >= 100 ? 9.5 : Song >= 10 ? 11 : 12) * _scale, SidPlayerPalette.Brush(ink));
+        }
+        text.Draw(context, new Point(centre.X - text.Width / 2, centre.Y - text.Height / 2));
     }
 }

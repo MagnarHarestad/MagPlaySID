@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using Avalonia;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 
 namespace MagPlaySid.Player;
 
@@ -58,7 +60,16 @@ internal static class SidPlayerPalette
 
     public static Color WithAlpha(Color colour, int alpha) => Color.FromArgb((byte)alpha, colour.R, colour.G, colour.B);
 
-    public static IBrush Brush(Color colour) => new SolidColorBrush(colour);
+    private static readonly ConcurrentDictionary<Color, ImmutableSolidColorBrush> Brushes = new();
+    private static readonly ConcurrentDictionary<(Color, double), ImmutablePen> Pens = new();
+
+    /// <summary>The brush of a colour - one, made once and never changed: the views ask for their
+    /// colours on every frame, and a new brush each time is that much garbage a second.</summary>
+    public static IBrush Brush(Color colour) => Brushes.GetOrAdd(colour, c => new ImmutableSolidColorBrush(c));
+
+    /// <summary>A pen of a colour and thickness, as <see cref="Brush"/> is: made once.</summary>
+    public static IPen Pen(Color colour, double thickness = 1) =>
+        Pens.GetOrAdd((colour, thickness), key => new ImmutablePen(Brushes.GetOrAdd(key.Item1, c => new ImmutableSolidColorBrush(c)), key.Item2));
 
     /// <summary>A panel's inset background - a hair lighter at the top, which reads as depth.</summary>
     public static IBrush PanelFill() => new LinearGradientBrush
