@@ -26,7 +26,6 @@ header nav a:hover { color:#fff; }
 .also a { color:var(--accent); text-decoration:none; border:1px solid var(--border); border-radius:8px; padding:5px 12px; background:var(--surface); }
 .also a:hover { border-color:var(--accent); }
 .also a.plain { border:0; background:none; padding:5px 2px; color:var(--dim); text-decoration:underline; }
-.also .tag { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--gold); border:1px solid var(--gold); border-radius:6px; padding:2px 7px; }
 .shot { margin:40px 0 0; }
 .shot img { display:block; border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,.45); }
 .shot figcaption { color:var(--dim); font-size:14px; margin-top:10px; text-align:center; }
