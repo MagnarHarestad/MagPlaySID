@@ -6,7 +6,7 @@
 <title>MagPlaySID - plays any C64 .sid and shows how it is built</title>
 <meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text or sheet music.">
 <link rel="icon" href="favicon.png">
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <header><div class="wrap"><img src="favicon.png" alt=""><a class="brand" href="./">MagPlaySID</a>
@@ -98,6 +98,16 @@
       <b>PortAudio</b>, and the window is <b>Avalonia</b>. See <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/THIRD-PARTY-NOTICES.md">third-party notices</a>.
       The tunes belong to their composers - MagPlaySID only plays and reads them.</p>
   </section>
+
+  <section class="feedback">
+    <h2 id="feedback">Leave feedback</h2>
+    <p class="lead">One line is enough. It opens as an issue on GitHub, filled in and ready for you to press <b>Create</b>. You need a free GitHub account, and the issue is public.</p>
+    <form id="feedback-form" action="https://github.com/MagnarHarestad/MagPlaySID/issues/new" method="get" target="_blank">
+      <input id="feedback-text" name="title" type="text" maxlength="140" required autocomplete="off" aria-label="Your feedback, in one line" placeholder="What works, what doesn't, what you'd like next">
+      <button class="button" type="submit">Open on GitHub</button>
+    </form>
+    <p class="sent" id="feedback-sent" role="status"></p>
+  </section>
 </main>
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
@@ -124,6 +134,26 @@ fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
     document.getElementById('notes').href = release.html_url;
   })
   .catch(() => {});
+
+// The one-liner as a new issue on GitHub, its title marked as feedback. GitHub's own page creates
+// it: a page like this one holds no key to do so, and the visitor signs in there. Without
+// JavaScript the form still gets there, with the line as the title alone.
+document.getElementById('feedback-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const input = document.getElementById('feedback-text');
+  const text = input.value.trim();
+  if (!text) {
+    input.value = '';
+    input.focus();
+    return;
+  }
+  const version = document.getElementById('version').textContent;
+  const title = encodeURIComponent('Feedback: ' + text);
+  const body = encodeURIComponent('Sent from the website, MagPlaySID ' + version + '.');
+  window.open(event.target.action + '?title=' + title + '&body=' + body, '_blank', 'noopener');
+  input.value = '';
+  document.getElementById('feedback-sent').textContent = 'Opened on GitHub in a new tab - press Create there to send it.';
+});
 </script>
 </body>
 </html>

@@ -51,6 +51,13 @@ h2 + .lead { color:var(--dim); margin:0 0 8px; }
 .note pre code { background:none; padding:0; font-size:13.5px; color:var(--accent); user-select:all; white-space:pre; }
 .note p.small { color:var(--dim); font-size:14px; }
 .legal p { color:var(--dim); }
+.feedback form { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+.feedback input { flex:1 1 280px; min-width:0; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:11px 14px; font:inherit; }
+.feedback input::placeholder { color:var(--dim); }
+.feedback input:focus { outline:none; border-color:var(--accent); }
+.feedback .button { border:0; cursor:pointer; font-family:inherit; font-size:16px; padding:11px 22px; }
+.feedback .lead b { color:var(--text); }
+.feedback .sent { color:var(--green); font-size:14px; margin:10px 0 0; min-height:1.6em; }
 footer { border-top:1px solid var(--border); color:var(--dim); font-size:13px; margin-top:64px; }
 footer .wrap { padding:20px; display:flex; gap:16px; flex-wrap:wrap; }
 footer a { color:var(--dim); }
