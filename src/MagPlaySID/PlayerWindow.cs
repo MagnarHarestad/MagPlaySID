@@ -37,9 +37,6 @@ internal sealed class PlayerWindow : Window
     /// <summary>How many times its speed a tune plays while it fast-forwards.</summary>
     private const int FastForwardSpeed = 4;
 
-    /// <summary>Into a tune further than this, Previous starts it again rather than going back a tune.</summary>
-    private static readonly TimeSpan PreviousRestarts = TimeSpan.FromSeconds(3);
-
     /// <summary>How long a playlist's tune plays when its length cannot be measured.</summary>
     private static readonly TimeSpan UnmeasuredLength = TimeSpan.FromMinutes(3);
 
@@ -233,7 +230,7 @@ internal sealed class PlayerWindow : Window
         _previous.Click += PreviousTune;
         _fastForward.Held += () => FastForward(true);
         _fastForward.LetGo += () => FastForward(false);
-        ToolTip.SetTip(_previous, "Previous tune - or this one from its start");
+        ToolTip.SetTip(_previous, "Previous tune in the playlist - or this one from its start");
         ToolTip.SetTip(_fastForward, "Hold to fast-forward, 4x (or hold F)");
         ToolTip.SetTip(_next, "Next tune in the playlist");
         _playPause.Click += TogglePause;
@@ -526,7 +523,7 @@ internal sealed class PlayerWindow : Window
         bool loaded = _file is not null;
         _empty.IsVisible = !loaded;
         _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = _favourite.IsEnabled = loaded;
-        _next.IsEnabled = loaded && _queueTune is not null && !_finished;
+        ShowNextTune();
         _songRow.IsVisible = loaded && _file!.Songs > 1;
         if (!loaded)
         {
@@ -790,16 +787,21 @@ internal sealed class PlayerWindow : Window
         _playPause.Glyph = _engine.Paused ? TransportGlyph.Play : TransportGlyph.Pause;
     }
 
-    /// <summary>Back a tune in the playlist, early in this one - past <see cref="PreviousRestarts"/>,
-    /// or with no tune before it, this one from its start.</summary>
+    /// <summary>Back a tune in the playlist, at one press - or, with no tune before it, this one
+    /// from its start.</summary>
     private void PreviousTune()
     {
-        if (_queue is { } playlist && _queueTune is { } tune && playlist.Before(tune) is { } before
-            && Elapsed() < PreviousRestarts)
+        if (_queue is { } playlist && _queueTune is { } tune && playlist.Before(tune) is { } before)
             PlayFromList(playlist, before);
         else
             Restart();
     }
+
+    /// <summary>Next tune on only where there is one: off on the playlist's last - wherever a drag
+    /// has put it - and with no playlist.</summary>
+    private void ShowNextTune() =>
+        _next.IsEnabled = _file is not null && !_finished
+                          && _queue is { } playlist && _queueTune is { } tune && playlist.After(tune) is not null;
 
     /// <summary>On a tune in the playlist - whatever song of this one plays.</summary>
     private void NextTune()
@@ -838,11 +840,6 @@ internal sealed class PlayerWindow : Window
         Key.Right => NextTune,
         _ => null,
     };
-
-    /// <summary>How far into the song the listener is: the tune's own time, not the device's.</summary>
-    private TimeSpan Elapsed() => _engine is { } engine && _output is { } output
-        ? TimeSpan.FromSeconds(engine.TuneSampleAt(output.SamplesPlayed) / (double)C64PlaybackEngine.SampleRate)
-        : TimeSpan.Zero;
 
     /// <summary>A pill for each of the tune's songs, at the text's size.</summary>
     private void BuildSongPills()
@@ -885,6 +882,7 @@ internal sealed class PlayerWindow : Window
             return;
 
         long at = engine.TuneSampleAt(output.SamplesPlayed);
+        ShowNextTune();
         if (_queueTune is not null && !_finished && !engine.Paused && TuneEnded(engine, at))
         {
             if (_settings.PlayEverySong && engine.Failure is null && _file is { } file && _song < file.Songs)
