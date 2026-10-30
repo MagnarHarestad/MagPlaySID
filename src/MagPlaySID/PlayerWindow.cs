@@ -85,6 +85,8 @@ internal sealed class PlayerWindow : Window
     private PlaylistTune? _queueTune;
     /// <summary>The playlist's last tune has played: nothing follows it.</summary>
     private bool _finished;
+    /// <summary>Fast-forward held - its button or F: on into the next song or tune, until let go.</summary>
+    private bool _fastForwarding;
     /// <summary>The tune's length could not be measured: <see cref="UnmeasuredLength"/> stands in.</summary>
     private bool _lengthUnknown;
 
@@ -128,15 +130,27 @@ internal sealed class PlayerWindow : Window
         };
 
         // The shortcuts before any control: the arrows would otherwise move the keyboard's focus.
-        // Shift too: on some keyboards + is a shifted key.
+        // Shift too: on some keyboards + is a shifted key. F fast-forwards while it is held.
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift && Shortcut(e.Key) is { } shortcut)
+            if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.None)
+            {
+                FastForward(true);
+                e.Handled = true;
+            }
+            else if (e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift && Shortcut(e.Key) is { } shortcut)
             {
                 shortcut();
                 e.Handled = true;
             }
         }, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, (_, e) =>
+        {
+            if (e.Key == Key.F)
+                FastForward(false);
+        }, RoutingStrategies.Tunnel);
+        // A key let go in another window is not heard here: leaving the window lets go.
+        Deactivated += (_, _) => FastForward(false);
 
         // A .sid dropped anywhere on the window loads and plays; a folder - or several tunes -
         // becomes a playlist, played from its first tune.
@@ -228,9 +242,10 @@ internal sealed class PlayerWindow : Window
         _elapsed.Text = "00:00 - --:--";
 
         _previous.Click += PreviousTune;
-        _fastForward.Click += ToggleFastForward;
+        _fastForward.Held += () => FastForward(true);
+        _fastForward.LetGo += () => FastForward(false);
         ToolTip.SetTip(_previous, "Previous tune - or this one from its start");
-        ToolTip.SetTip(_fastForward, "Fast-forward, 4x (F)");
+        ToolTip.SetTip(_fastForward, "Hold to fast-forward, 4x (or hold F)");
         ToolTip.SetTip(_next, "Next tune in the playlist");
         _playPause.Click += TogglePause;
         _next.Click += NextTune;
@@ -643,7 +658,8 @@ internal sealed class PlayerWindow : Window
         }
 
         _playPause.Glyph = TransportGlyph.Pause;
-        _fastForward.Lit = false;
+        _engine.Speed = _fastForwarding ? FastForwardSpeed : 1;
+        _fastForward.Lit = _fastForwarding;
         _details.Text = DescribeFile();
         LightSongPills();
     }
@@ -750,16 +766,17 @@ internal sealed class PlayerWindow : Window
         Restart();
     }
 
-    private void ToggleFastForward()
+    /// <summary>Fast-forward on while it is held, off when it is let go.</summary>
+    private void FastForward(bool on)
     {
-        if (_engine is not { } engine)
-            return;
-        engine.Speed = engine.Speed > 1 ? 1 : FastForwardSpeed;
-        _fastForward.Lit = engine.Speed > 1;
+        _fastForwarding = on && _file is not null;
+        if (_engine is { } engine)
+            engine.Speed = _fastForwarding ? FastForwardSpeed : 1;
+        _fastForward.Lit = _fastForwarding;
     }
 
     /// <summary>The keys without a modifier: 1-9 a song, + and - the next or last song, the arrows
-    /// the next or previous tune, F fast-forward.</summary>
+    /// the next or previous tune. F, held, is fast-forward's, beside these.</summary>
     private Action? Shortcut(Key key) => key switch
     {
         >= Key.D1 and <= Key.D9 => () => PlaySong(key - Key.D0),
@@ -768,7 +785,6 @@ internal sealed class PlayerWindow : Window
         Key.OemMinus or Key.Subtract => () => PlaySong(_song - 1),
         Key.Left => PreviousTune,
         Key.Right => NextTune,
-        Key.F => ToggleFastForward,
         _ => null,
     };
 

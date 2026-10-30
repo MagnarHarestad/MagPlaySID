@@ -32,6 +32,12 @@ internal sealed class TransportButton : Control
 
     public event Action? Click;
 
+    /// <summary>The button pressed, and let go - or the press lost: for what lasts as long as it is
+    /// held, as fast-forward does.</summary>
+    public event Action? Held;
+
+    public event Action? LetGo;
+
     public TransportGlyph Glyph
     {
         get => _glyph;
@@ -72,6 +78,11 @@ internal sealed class TransportButton : Control
         _pressed = true;
         InvalidateVisual();
         base.OnPointerPressed(e);
+        if (IsEnabled && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            _held = true;
+            Held?.Invoke();
+        }
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -80,8 +91,27 @@ internal sealed class TransportButton : Control
         _pressed = false;
         InvalidateVisual();
         base.OnPointerReleased(e);
+        EndHold();
         if (click)
             Click?.Invoke();
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        EndHold();
+    }
+
+    private bool _held;
+
+    /// <summary>Let go wherever the pointer is - a hold ends with the press, not with the pointer
+    /// leaving the button.</summary>
+    private void EndHold()
+    {
+        if (!_held)
+            return;
+        _held = false;
+        LetGo?.Invoke();
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
