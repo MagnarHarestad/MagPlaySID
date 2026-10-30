@@ -30,6 +30,10 @@ internal sealed class Settings
     /// has chosen: shown then when there are favourites to show.</summary>
     public bool? ShowPlaylists { get; set; }
 
+    /// <summary>Whether a playlist plays every song of a tune - all its sub-tunes, one after another -
+    /// before the next tune, or only the song it starts on.</summary>
+    public bool PlayEverySong { get; set; }
+
     public static Settings Load()
     {
         try

@@ -25,6 +25,7 @@ internal sealed class PlaylistTune : Observable
 {
     private string _title;
     private string _author = "";
+    private int _songs = 1;
     private int _number;
     private bool _playing;
 
@@ -40,20 +41,23 @@ internal sealed class PlaylistTune : Observable
 
     public string Author { get => _author; set => Set(ref _author, value); }
 
+    /// <summary>How many songs - sub-tunes - the tune holds, once its header has been read.</summary>
+    public int Songs { get => _songs; set => Set(ref _songs, value); }
+
     /// <summary>Its place in the playlist, from 1.</summary>
     public int Number { get => _number; set => Set(ref _number, value); }
 
     public bool IsPlaying { get => _playing; set => Set(ref _playing, value); }
 
-    /// <summary>The tune's name and author from its header - null when the file cannot be read.
-    /// Off the UI thread: a folder can hold thousands.</summary>
-    public (string Title, string Author)? ReadHeader()
+    /// <summary>The tune's name, author and number of songs from its header - null when the file
+    /// cannot be read. Off the UI thread: a folder can hold thousands.</summary>
+    public (string Title, string Author, int Songs)? ReadHeader()
     {
         try
         {
             var file = SidFile.Parse(File.ReadAllBytes(Path));
             string title = string.IsNullOrWhiteSpace(file.Name) ? System.IO.Path.GetFileNameWithoutExtension(Path) : file.Name.Trim();
-            return (title, file.Author?.Trim() ?? "");
+            return (title, file.Author?.Trim() ?? "", Math.Max(1, file.Songs));
         }
         catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException)
         {
@@ -94,6 +98,13 @@ internal sealed class Playlist : Observable
     {
         int at = Tunes.IndexOf(tune);
         return at >= 0 && at + 1 < Tunes.Count ? Tunes[at + 1] : null;
+    }
+
+    /// <summary>The tune before <paramref name="tune"/>; null before the first.</summary>
+    public PlaylistTune? Before(PlaylistTune tune)
+    {
+        int at = Tunes.IndexOf(tune);
+        return at > 0 ? Tunes[at - 1] : null;
     }
 
     private void Renumber()

@@ -5,10 +5,13 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using MagPlaySid.Player;
 
 namespace MagPlaySid;
@@ -16,7 +19,8 @@ namespace MagPlaySid;
 /// <summary>
 /// The strip down the left of the window: the playlists - a folder dropped on the window, and the
 /// favourites the user made from tunes they played - and below them the tunes of the one chosen.
-/// A click on a tune plays it, and the playlist from there. Shown or hidden from the window's menu.
+/// A click on a tune plays it, and the playlist from there; a tune held and dragged moves up or
+/// down the playlist. Shown or hidden from the window's menu.
 /// </summary>
 internal sealed class PlaylistStrip : Border
 {
@@ -47,6 +51,15 @@ internal sealed class PlaylistStrip : Border
     private Playlist? _folder;
     private PlaylistTune? _playing;
     private double _scale = 1;
+
+    /// <summary>How far a tune is dragged before it moves - less is a click.</summary>
+    private const double DragThreshold = 6;
+
+    private PlaylistTune? _dragTune;
+    private Point _dragStart;
+    private bool _dragging;
+    /// <summary>The click that ends a drag is not a click on the tune: it does not play it.</summary>
+    private bool _dragged;
 
     /// <summary>A tune chosen to play, and the playlist to go on with after it.</summary>
     public event Action<Playlist, PlaylistTune>? Play;
@@ -170,6 +183,11 @@ internal sealed class PlaylistStrip : Border
 
         Restyle(_tuneBox);
         _tuneBox.ItemTemplate = new FuncDataTemplate<PlaylistTune>((_, _) => TuneRow(), supportsRecycling: true);
+        // Before the rows and the list see the pointer: a press may start a drag.
+        _tuneBox.AddHandler(PointerPressedEvent, DragPressed, RoutingStrategies.Tunnel);
+        _tuneBox.AddHandler(PointerMovedEvent, DragMoved, RoutingStrategies.Tunnel);
+        _tuneBox.AddHandler(PointerReleasedEvent, DragReleased, RoutingStrategies.Tunnel);
+        _tuneBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Direct);
 
         var panel = new DockPanel();
         foreach (var docked in new Control[] { top, _listBox, divider, heading, _empty })
@@ -262,18 +280,36 @@ internal sealed class PlaylistStrip : Border
         author.Bind(TextBlock.TextProperty, new Binding(nameof(PlaylistTune.Author)));
         author.Bind(IsVisibleProperty, new Binding(nameof(PlaylistTune.Author)) { Converter = StringConverters.IsNotNullOrEmpty });
 
+        // A tune of several songs says how many, in a small badge at the end of its row.
+        var songs = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(6, 1),
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            BorderThickness = new Thickness(1),
+            BorderBrush = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder),
+            Child = new TextBlock { FontSize = 10 * _scale, Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle) },
+        };
+        ((TextBlock)songs.Child).Bind(TextBlock.TextProperty, new Binding(nameof(PlaylistTune.Songs)) { StringFormat = "{0} songs" });
+        songs.Bind(IsVisibleProperty, new Binding(nameof(PlaylistTune.Songs))
+        {
+            Converter = new FuncValueConverter<int, bool>(count => count > 1),
+        });
+
         var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, author } };
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions($"{30 * _scale},*"),
-            Children = { number, bars, names },
+            ColumnDefinitions = new ColumnDefinitions($"{30 * _scale},*,Auto"),
+            Children = { number, bars, names, songs },
         };
         Grid.SetColumn(names, 1);
+        Grid.SetColumn(songs, 2);
         var row = new Border { Padding = new Thickness(6, 6, 10, 6), Background = Brushes.Transparent, Child = grid };
 
         row.Tapped += (_, _) =>
         {
-            if (row.DataContext is PlaylistTune tune && Shown is { } playlist)
+            if (!_dragged && row.DataContext is PlaylistTune tune && Shown is { } playlist)
                 Play?.Invoke(playlist, tune);
         };
         row.ContextRequested += (_, e) =>
@@ -300,6 +336,100 @@ internal sealed class PlaylistStrip : Border
         foreach (var item in items)
             menu.Items.Add(item);
         menu.Open(target);
+    }
+
+    // ------------------------------------------------------------------ moving a tune
+
+    private void DragPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _dragged = false;
+        if (!e.GetCurrentPoint(_tuneBox).Properties.IsLeftButtonPressed
+            || (e.Source as StyledElement)?.DataContext is not PlaylistTune tune)
+            return;
+        _dragTune = tune;
+        _dragStart = e.GetPosition(_tuneBox);
+    }
+
+    /// <summary>The tune held follows the pointer: past the middle of the next row up or down, it
+    /// takes that row's place. Near the list's top or bottom, the list scrolls.</summary>
+    private void DragMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragTune is not { } tune || Shown is not { } playlist || !playlist.Tunes.Contains(tune))
+            return;
+
+        var at = e.GetPosition(_tuneBox);
+        if (!_dragging)
+        {
+            if (Math.Abs(at.Y - _dragStart.Y) < DragThreshold)
+                return;
+            _dragging = _dragged = true;
+            e.Pointer.Capture(_tuneBox);
+            _tuneBox.Cursor = new Cursor(StandardCursorType.SizeNorthSouth);
+            _tuneBox.SelectedItem = tune;
+        }
+
+        int from = playlist.Tunes.IndexOf(tune);
+        if (IndexAt(at.Y) is { } to && to != from)
+        {
+            playlist.Tunes.Move(from, to);
+            _tuneBox.SelectedItem = tune;
+        }
+        ScrollNearEdge(at.Y);
+        e.Handled = true;
+    }
+
+    private void DragReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_dragging)
+        {
+            e.Pointer.Capture(null);
+            e.Handled = true;
+        }
+        EndDrag();
+    }
+
+    /// <summary>The drag over: a favourite's new order kept. A folder's is for this run, as the
+    /// folder playlist is.</summary>
+    private void EndDrag()
+    {
+        if (_dragging && Shown is { IsFolder: false })
+            Favourites.Save(_favourites);
+        _dragTune = null;
+        _dragging = false;
+        _tuneBox.Cursor = null;
+    }
+
+    /// <summary>The place in the playlist of the row at <paramref name="y"/> in the list - the first
+    /// or last row shown when it is above or below them all.</summary>
+    private int? IndexAt(double y)
+    {
+        int? first = null, last = null;
+        double top = double.MaxValue, bottom = double.MinValue;
+        foreach (var container in _tuneBox.GetRealizedContainers())
+        {
+            if (container.TranslatePoint(default, _tuneBox) is not { } origin)
+                continue;
+            int index = _tuneBox.IndexFromContainer(container);
+            double height = container.Bounds.Height;
+            if (y >= origin.Y && y < origin.Y + height)
+                return index;
+            if (origin.Y < top)
+                (top, first) = (origin.Y, index);
+            if (origin.Y + height > bottom)
+                (bottom, last) = (origin.Y + height, index);
+        }
+        return y < top ? first : y >= bottom ? last : null;
+    }
+
+    private void ScrollNearEdge(double y)
+    {
+        if (_tuneBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } scroller)
+            return;
+        double edge = 24 * _scale, step = 12 * _scale;
+        if (y < edge)
+            scroller.Offset = scroller.Offset.WithY(Math.Max(0, scroller.Offset.Y - step));
+        else if (y > _tuneBox.Bounds.Height - edge)
+            scroller.Offset = scroller.Offset.WithY(scroller.Offset.Y + step);
     }
 
     /// <summary>The playlist whose tunes are shown.</summary>
@@ -450,7 +580,7 @@ internal sealed class PlaylistStrip : Border
             foreach (var tune in list)
             {
                 if (tune.ReadHeader() is { } header)
-                    Dispatcher.UIThread.Post(() => (tune.Title, tune.Author) = header, DispatcherPriority.Background);
+                    Dispatcher.UIThread.Post(() => (tune.Title, tune.Author, tune.Songs) = header, DispatcherPriority.Background);
             }
         });
     }

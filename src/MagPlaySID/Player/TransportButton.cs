@@ -10,6 +10,7 @@ internal enum TransportGlyph
     Previous,
     Play,
     Pause,
+    FastForward,
     Next,
 }
 
@@ -19,6 +20,7 @@ internal sealed class TransportButton : Control
     private TransportGlyph _glyph;
     private bool _hovered;
     private bool _pressed;
+    private bool _lit;
 
     public TransportButton(TransportGlyph glyph)
     {
@@ -36,6 +38,17 @@ internal sealed class TransportButton : Control
         set
         {
             _glyph = value;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Drawn in the accent while what it stands for is on - fast-forward, say.</summary>
+    public bool Lit
+    {
+        get => _lit;
+        set
+        {
+            _lit = value;
             InvalidateVisual();
         }
     }
@@ -84,6 +97,7 @@ internal sealed class TransportButton : Control
         context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
 
         var colour = !IsEnabled ? SidPlayerPalette.ControlDisabled
+            : _lit ? SidPlayerPalette.VoiceColour(1)
             : _hovered ? SidPlayerPalette.ControlHover : SidPlayerPalette.Control;
         var brush = new SolidColorBrush(colour);
 
@@ -103,6 +117,12 @@ internal sealed class TransportButton : Control
                 break;
             case TransportGlyph.Play:
                 Triangle(context, brush, box, pointingLeft: false);
+                break;
+            case TransportGlyph.FastForward:
+                // Two triangles nose to tail, as a tape deck marks it.
+                var half = new Rect(box.Left - (box.Width * 0.1), box.Top + (box.Height * 0.12), box.Width * 0.6, box.Height * 0.76);
+                Triangle(context, brush, half, pointingLeft: false);
+                Triangle(context, brush, half.Translate(new Vector(box.Width * 0.6, 0)), pointingLeft: false);
                 break;
             case TransportGlyph.Pause:
                 double bar = box.Width * 0.3;
