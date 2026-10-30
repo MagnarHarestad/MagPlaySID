@@ -57,6 +57,11 @@ internal sealed class PlayerWindow : Window
     private readonly TextBlock _favouriteText = new() { Text = "Add to playlist", VerticalAlignment = VerticalAlignment.Center };
     private readonly ScoreView _view = new();
     private readonly PianoView _piano = new();
+
+    // The keys' secret: with no tune playing they are a piano's, and each one struck throws up dust.
+    private readonly MagicDust _dust = new();
+    private readonly PianoSynth _pianoSynth = new();
+    private IAudioOutput? _pianoOutput;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly bool[] _muted = new bool[9];
     private readonly Settings _settings = Settings.Load();
@@ -65,6 +70,7 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _bigFont = new();
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
+    private readonly MenuItem _exportNotes = new();
     private readonly TextBlock _songLabel = new() { Text = "SONG", VerticalAlignment = VerticalAlignment.Center };
     private readonly StackPanel _songPills = new() { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
     private readonly ScrollViewer _songScroller = new();
@@ -95,6 +101,8 @@ internal sealed class PlayerWindow : Window
     private bool _lengthUnknown;
 
     private Transcription? _transcription;
+    /// <summary>The whole tune is transcribed, not only its opening: there is a score to export.</summary>
+    private bool _wholeTranscribed;
     private CancellationTokenSource? _transcribing;
 
     public PlayerWindow(string? path = null)
@@ -111,8 +119,10 @@ internal sealed class PlayerWindow : Window
 
         _strip = new PlaylistStrip(this);
         _strip.Play += PlayFromList;
+        _piano.KeyStruck += StrikeKey;
         _strip.ShowRequested += () => ShowPlaylists(true);
-        Content = BuildLayout();
+        // The dust over everything, taking no clicks.
+        Content = new Panel { Children = { BuildLayout(), _dust } };
         ShowFontSize();
         ShowPlaylists(_settings.ShowPlaylists ?? _strip.HasPlaylists, remember: false);
 
@@ -175,6 +185,7 @@ internal sealed class PlayerWindow : Window
             _timer.Stop();
             _transcribing?.Cancel();
             StopPlayback();
+            StopPiano();
         };
 
         ShowEmpty();
@@ -399,6 +410,16 @@ internal sealed class PlayerWindow : Window
             _settings.Save();
         };
 
+        // The song playing's notes, as the rows read them - once the whole of it is transcribed.
+        _exportNotes.Header = "Export notes";
+        var asText = new MenuItem { Header = "As text..." };
+        asText.Click += (_, _) => _ = ExportNotesAsync(pdf: false);
+        var asSheet = new MenuItem { Header = "As sheet music (PDF)..." };
+        asSheet.Click += (_, _) => _ = ExportNotesAsync(pdf: true);
+        _exportNotes.Items.Add(asText);
+        _exportNotes.Items.Add(asSheet);
+        _exportNotes.IsEnabled = false;
+
         _smallFont.Header = "Small font";
         _bigFont.Header = "Big font";
         foreach (var (item, big) in new[] { (_smallFont, false), (_bigFont, true) })
@@ -424,7 +445,7 @@ internal sealed class PlayerWindow : Window
             Padding = new Thickness(9, 7),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _showPlaylists, _everySong, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _showPlaylists, _everySong, new Separator(), _exportNotes, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
@@ -538,6 +559,75 @@ internal sealed class PlayerWindow : Window
             _title.Text = UpdateCheck.Product;
             _details.Text = "Plays a .sid and shows it as tracker rows";
             _retroStatus.Text = "";
+        }
+    }
+
+    /// <summary>A key struck: while no tune plays - none opened, or paused - a piano's note, the key
+    /// glowing, and a puff of magic dust from it. While one plays the keys only show it.</summary>
+    private void StrikeKey(int key, Point top)
+    {
+        if (_engine is { Paused: false })
+            return;
+        try
+        {
+            _pianoOutput ??= AudioOutput.Start(_pianoSynth, latencyMs: 40);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or PortAudioSharp.PortAudioException)
+        {
+            // No sound card to play it on: the glow and the dust still show.
+        }
+        _pianoSynth.Strike(key);
+        _piano.Glow(key);
+        if (_piano.TranslatePoint(top, _dust) is { } at)
+            _dust.Burst(at);
+    }
+
+    private void StopPiano()
+    {
+        var output = _pianoOutput;
+        _pianoOutput = null;
+        output?.Stop();
+        output?.Dispose();
+    }
+
+    /// <summary>The song playing's transcription saved where the user says: its rows as text, or
+    /// engraved as sheet music in a PDF. Made off the UI thread - a long tune is many pages.</summary>
+    private async Task ExportNotesAsync(bool pdf)
+    {
+        if (_file is not { } file || _transcription is not { } transcription || !_wholeTranscribed)
+            return;
+        var sheet = NoteSheet.Of(file, _song, transcription.Score, transcription.Timeline);
+        var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = pdf ? "Export the notes as sheet music" : "Export the notes as text",
+            SuggestedFileName = sheet.FileName,
+            DefaultExtension = pdf ? "pdf" : "txt",
+            FileTypeChoices = [pdf ? new FilePickerFileType("PDF") { Patterns = ["*.pdf"] } : new FilePickerFileType("Text") { Patterns = ["*.txt"] }],
+            ShowOverwritePrompt = true,
+        });
+        if (target is null)
+            return;
+
+        try
+        {
+            await using var stream = await target.OpenWriteAsync();
+            if (stream.CanSeek)
+                stream.SetLength(0);
+            string product = UpdateCheck.Product;
+            await Task.Run(() =>
+            {
+                if (pdf)
+                    SheetMusic.WritePdf(sheet, stream, product);
+                else
+                {
+                    using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), leaveOpen: true);
+                    writer.Write(sheet.ToText(product));
+                }
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await MessageWindow.ShowAsync(this, "Cannot export the notes", ex.Message);
         }
     }
 
@@ -696,6 +786,7 @@ internal sealed class PlayerWindow : Window
     private void Start(int song)
     {
         StopPlayback();
+        StopPiano();
         if (_file is not { } file)
             return;
 
@@ -741,6 +832,8 @@ internal sealed class PlayerWindow : Window
         var cancel = new CancellationTokenSource();
         _transcribing = cancel;
         _transcription = null;
+        _wholeTranscribed = false;
+        _exportNotes.IsEnabled = false;
         _length = null;
         _lengthUnknown = false;
         _view.SetScore(null, null);
@@ -771,6 +864,8 @@ internal sealed class PlayerWindow : Window
                 Show(() =>
                 {
                     (_transcription, _length) = (whole, length);
+                    _wholeTranscribed = true;
+                    _exportNotes.IsEnabled = true;
                     _lengthUnknown = length is null;
                     _view.SetScore(whole.Score, whole.Timeline);
                     _retroStatus.Text = whole.Describe();

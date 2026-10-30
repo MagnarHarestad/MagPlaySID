@@ -300,7 +300,14 @@ internal sealed class PlaylistStrip : Border
         var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, author } };
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions($"{30 * _scale},*,Auto"),
+            // Built, not parsed from text: "37,5,*,Auto" - Big font's 37.5 where a comma is the
+            // decimal point - is four columns, and the names' was 5 pixels wide.
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(30 * _scale, GridUnitType.Pixel),
+                new ColumnDefinition(1, GridUnitType.Star),
+                new ColumnDefinition(GridLength.Auto),
+            },
             Children = { number, bars, names, songs },
         };
         Grid.SetColumn(names, 1);

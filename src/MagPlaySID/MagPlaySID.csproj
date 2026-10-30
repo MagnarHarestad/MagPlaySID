@@ -30,6 +30,8 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.20" />
+    <!-- The sheet music's PDF: Skia writes it - the version Avalonia draws the window with. -->
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
   </ItemGroup>
 
 </Project>

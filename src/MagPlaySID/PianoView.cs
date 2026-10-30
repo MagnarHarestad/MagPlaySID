@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Avalonia.Media.TextFormatting;
 using MagPlay.C64;
 using MagPlaySid.Player;
@@ -12,7 +15,8 @@ namespace MagPlaySid;
 /// key lights in the voice's colour - the scopes' - as bright as its envelope, so a note's release
 /// fades on the key. Read from the chip itself at the sample being heard, so it shows what sounds -
 /// an arpeggio, a slide, a drum - in any tune, whatever the transcription makes of it. A 2SID or
-/// 3SID tune's other chips light keys too, each voice in the colour of its place on its chip.
+/// 3SID tune's other chips light keys too, each voice in the colour of its place on its chip. The
+/// keys can be struck, too - and slid across - for the window to do with as it will.
 /// </summary>
 internal sealed class PianoView : Control
 {
@@ -31,6 +35,9 @@ internal sealed class PianoView : Control
     private static readonly Color Ebony = Color.FromRgb(0x16, 0x16, 0x22);
     private static readonly Color EbonyEdge = Color.FromRgb(0x30, 0x30, 0x46);
 
+    /// <summary>A struck key's glow: warm, as candlelight on ivory.</summary>
+    private static readonly Color Struck = Color.FromRgb(0xFF, 0xDC, 0x8C);
+
     /// <summary>The white keys' face, made once.</summary>
     private static readonly IBrush IvoryFace = new Avalonia.Media.Immutable.ImmutableLinearGradientBrush(
         [new Avalonia.Media.Immutable.ImmutableGradientStop(0, Ivory), new Avalonia.Media.Immutable.ImmutableGradientStop(1, IvoryLow)],
@@ -45,6 +52,16 @@ internal sealed class PianoView : Control
     /// their layout when drawn.</summary>
     private TextLayout[]? _labels;
     private double _textScale = 1;
+
+    /// <summary>How brightly each struck key glows, 0-1, fading; the timer runs only while one does.</summary>
+    private readonly double[] _glow = new double[Keys];
+    private readonly DispatcherTimer _glowTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    private readonly Stopwatch _glowClock = new();
+    private int _held = -1;
+
+    /// <summary>A key struck - or slid onto while the button is held: its number, C-0 as 0, and the
+    /// middle of its top edge.</summary>
+    public event Action<int, Point>? KeyStruck;
 
     /// <summary>1 for the small text, more for bigger: the octaves' names under the keys.</summary>
     public double TextScale
@@ -63,6 +80,96 @@ internal sealed class PianoView : Control
     public PianoView()
     {
         Height = 64;
+        _glowTimer.Tick += (_, _) => Fade();
+    }
+
+    /// <summary>A key lit as struck, fading over half a second.</summary>
+    public void Glow(int key)
+    {
+        if (key is < 0 or >= Keys)
+            return;
+        _glow[key] = 1;
+        if (!_glowTimer.IsEnabled)
+        {
+            _glowClock.Restart();
+            _glowTimer.Start();
+        }
+        InvalidateVisual();
+    }
+
+    private void Fade()
+    {
+        double dt = _glowClock.Elapsed.TotalSeconds;
+        _glowClock.Restart();
+        bool any = false;
+        for (int key = 0; key < Keys; key++)
+        {
+            _glow[key] = Math.Max(0, _glow[key] - dt / 0.55);
+            any |= _glow[key] > 0;
+        }
+        if (!any)
+            _glowTimer.Stop();
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || KeyAt(e.GetPosition(this)) is not { } key)
+            return;
+        _held = key;
+        KeyStruck?.Invoke(key, TopOf(key));
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (_held < 0 || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            return;
+        if (KeyAt(e.GetPosition(this)) is { } key && key != _held)
+        {
+            _held = key;
+            KeyStruck?.Invoke(key, TopOf(key));
+        }
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        _held = -1;
+    }
+
+    // ------------------------------------------------------------------ where the keys are
+
+    private Rect KeysArea => new Rect(Bounds.Size).Deflate(new Thickness(4, 4, 4, 5));
+
+    private Rect KeyRect(int key)
+    {
+        var keys = KeysArea;
+        double white = keys.Width / WhiteKeys;
+        if (!Black[key % 12])
+            return new Rect(keys.X + (key / 12 * 7 + WhiteOf[key % 12]) * white, keys.Y, white, keys.Height);
+        double blackWidth = white * 0.6;
+        double x = keys.X + (key / 12 * 7 + WhiteOf[key % 12] + 1) * white - blackWidth / 2;
+        return new Rect(x, keys.Y, blackWidth, keys.Height * 0.62);
+    }
+
+    /// <summary>The key under a point: a black one first, as it lies over the white.</summary>
+    private int? KeyAt(Point point)
+    {
+        for (int key = 0; key < Keys; key++)
+            if (Black[key % 12] && KeyRect(key).Contains(point))
+                return key;
+        for (int key = 0; key < Keys; key++)
+            if (!Black[key % 12] && KeyRect(key).Contains(point))
+                return key;
+        return null;
+    }
+
+    private Point TopOf(int key)
+    {
+        var rect = KeyRect(key);
+        return new Point(rect.Center.X, rect.Y + 2);
     }
 
     /// <summary>The keys the voices are on at sample <paramref name="at"/>; a muted voice lights none.</summary>
@@ -112,7 +219,7 @@ internal sealed class PianoView : Control
         context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground), bounds);
         context.DrawRectangle(SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder), bounds);
 
-        var keys = bounds.Deflate(new Thickness(4, 4, 4, 5));
+        var keys = KeysArea;
         double white = keys.Width / WhiteKeys;
         var ivory = IvoryFace;
         var seam = SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder);
@@ -121,18 +228,16 @@ internal sealed class PianoView : Control
         {
             if (Black[key % 12])
                 continue;
-            var rect = new Rect(keys.X + (key / 12 * 7 + WhiteOf[key % 12]) * white, keys.Y, white, keys.Height);
+            var rect = KeyRect(key);
             context.DrawRectangle(ivory, seam, new RoundedRect(rect.Deflate(new Thickness(0.5, 0)), 0, 0, 3, 3));
             Light(context, key, new RoundedRect(rect.Deflate(new Thickness(1, 0, 1, 1)), 0, 0, 3, 3));
         }
 
-        double blackWidth = white * 0.6, blackHeight = keys.Height * 0.62;
         for (int key = 0; key < Keys; key++)
         {
             if (!Black[key % 12])
                 continue;
-            double x = keys.X + (key / 12 * 7 + WhiteOf[key % 12] + 1) * white - blackWidth / 2;
-            var rect = new Rect(x, keys.Y, blackWidth, blackHeight);
+            var rect = KeyRect(key);
             context.DrawRectangle(SidPlayerPalette.Brush(Ebony), SidPlayerPalette.Pen(EbonyEdge), new RoundedRect(rect, 0, 0, 2, 2));
             Light(context, key, new RoundedRect(rect.Deflate(1), 0, 0, 2, 2));
         }
@@ -159,5 +264,7 @@ internal sealed class PianoView : Control
             var colour = SidPlayerPalette.VoiceColour(voice);
             context.DrawRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(colour, (int)(70 + 185 * level))), null, shape);
         }
+        if (_glow[key] > 0)
+            context.DrawRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(Struck, (int)(230 * _glow[key]) / 8 * 8)), null, shape);
     }
 }
