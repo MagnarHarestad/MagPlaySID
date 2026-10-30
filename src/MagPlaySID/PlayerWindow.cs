@@ -728,7 +728,9 @@ internal sealed class PlayerWindow : Window
 
     /// <summary>Transcribes the tune off the UI thread while it already plays: its first half
     /// minute first, shown at once, then the whole of it to its loop with its length - measured on
-    /// the C64 it plays on, so the length is in the time it plays in, and an RSID has one.</summary>
+    /// the C64 it plays on, so the length is in the time it plays in, and an RSID has one. On a
+    /// thread of its own below the others' priority: it is the background's work, and the sound and
+    /// the window come first - on the thread pool it held the sound thread back by up to 40 ms.</summary>
     private void Transcribe(int song)
     {
         _transcribing?.Cancel();
@@ -747,7 +749,7 @@ internal sealed class PlayerWindow : Window
                 shown();
         });
 
-        Task.Run(() =>
+        var thread = new Thread(() =>
         {
             try
             {
@@ -780,7 +782,13 @@ internal sealed class PlayerWindow : Window
                     ? $"No rows to show: {ex.Message}"
                     : $"Only the first {OpeningSeconds} seconds: {ex.Message}");
             }
-        }, cancel.Token);
+        })
+        {
+            IsBackground = true,
+            Priority = ThreadPriority.BelowNormal,
+            Name = "Transcription",
+        };
+        thread.Start();
     }
 
     private void TogglePause()

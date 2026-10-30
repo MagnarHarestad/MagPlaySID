@@ -45,6 +45,7 @@ public sealed class PortAudioOutput : IAudioOutput
     private double _playedAtCallback;
     private long _callbackTicks;
     private long _lastReported;
+    private bool _prioritised;
 
     private PortAudioOutput(IWaveProvider source, int latencyMs)
     {
@@ -138,6 +139,22 @@ public sealed class PortAudioOutput : IAudioOutput
     private StreamCallbackResult Render(IntPtr input, IntPtr output, uint frameCount,
         ref StreamCallbackTimeInfo timeInfo, StreamCallbackFlags statusFlags, IntPtr userData)
     {
+        // The sound first: the device's thread raised above the window's and the background's on its
+        // first call, so neither keeps it waiting till the device runs dry - only raised, as PortAudio
+        // may have set it higher already. Where the system will not, it stays as it is.
+        if (!_prioritised)
+        {
+            _prioritised = true;
+            try
+            {
+                if (Thread.CurrentThread.Priority < ThreadPriority.Highest)
+                    Thread.CurrentThread.Priority = ThreadPriority.Highest;
+            }
+            catch (Exception ex) when (ex is ThreadStateException or PlatformNotSupportedException or System.Security.SecurityException)
+            {
+            }
+        }
+
         int bytes = (int)frameCount * _blockAlign;
         if (_buffer.Length < bytes)
             _buffer = new byte[bytes];
