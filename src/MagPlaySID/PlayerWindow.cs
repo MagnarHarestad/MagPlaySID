@@ -164,15 +164,16 @@ internal sealed class PlayerWindow : Window
         _favourite.Margin = new Thickness(8, 10, 0, 0);
         _favourite.Padding = new Thickness(12, 5);
         InPlayerColours(_favourite);
-        var addTo = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
-        addTo.Opening += (_, _) =>
+        // The menu made new on each click, its items before it opens - one filled as it opens shows empty.
+        _favourite.Click += (_, _) =>
         {
-            addTo.Items.Clear();
-            if (_path is not null)
-                foreach (var item in _strip.AddToItems(_path))
-                    addTo.Items.Add(item);
+            if (_path is null)
+                return;
+            var addTo = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+            foreach (var item in _strip.AddToItems(_path))
+                addTo.Items.Add(item);
+            addTo.ShowAt(_favourite);
         };
-        _favourite.Flyout = addTo;
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { _open, _favourite } };
         var details = new StackPanel { Children = { _title, _details, buttons } };
@@ -262,9 +263,6 @@ internal sealed class PlayerWindow : Window
     /// <summary>The menu behind the three lines at the top right.</summary>
     private Button BuildMenu()
     {
-        var openFolder = new MenuItem { Header = "Open folder..." };
-        openFolder.Click += (_, _) => _ = PickFolderAsync();
-
         _checkForUpdates.Header = "Check for updates at start";
         _checkForUpdates.ToggleType = MenuItemToggleType.CheckBox;
         _checkForUpdates.IsChecked = _settings.CheckForUpdates == true;
@@ -303,7 +301,7 @@ internal sealed class PlayerWindow : Window
             Padding = new Thickness(9, 7),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _showPlaylists, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
@@ -429,19 +427,7 @@ internal sealed class PlayerWindow : Window
             PlayFile(path);
     }
 
-    private async Task PickFolderAsync()
-    {
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Play a folder of .sid tunes",
-            AllowMultiple = false,
-        });
-
-        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path)
-            await OpenFolderAsync([path]);
-    }
-
-    /// <summary>The tunes in folders - and any tunes - dropped or chosen, as the folder playlist,
+    /// <summary>The tunes in folders - and any tunes - dropped on the window, as the folder playlist,
     /// played from the first.</summary>
     private async Task OpenFolderAsync(IReadOnlyList<string> paths)
     {

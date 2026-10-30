@@ -210,22 +210,18 @@ internal sealed class PlaylistStrip : Border
         grid.Children.Add(count);
         var row = new Border { Padding = new Thickness(10, 7), Background = Brushes.Transparent, Child = grid };
 
-        var menu = new ContextMenu();
-        row.ContextMenu = menu;
         row.DataContextChanged += (_, _) =>
         {
             bool folder = row.DataContext is Playlist { IsFolder: true };
             icon.Data = folder ? FolderIcon : HeartIcon;
             icon.Foreground = SidPlayerPalette.Brush(folder ? SidPlayerPalette.Control : Heart);
-            row.ContextMenu = folder ? null : menu;
         };
-        menu.Opening += (_, _) =>
+        row.ContextRequested += (_, e) =>
         {
-            menu.Items.Clear();
-            if (row.DataContext is not Playlist playlist || playlist.IsFolder)
-                return;
-            menu.Items.Add(Item("Rename...", () => _ = RenameAsync(playlist)));
-            menu.Items.Add(Item("Delete playlist...", () => _ = DeleteAsync(playlist)));
+            e.Handled = true;
+            if (row.DataContext is Playlist { IsFolder: false } playlist)
+                OpenMenu(row, [Item("Rename...", () => _ = RenameAsync(playlist)),
+                               Item("Delete playlist...", () => _ = DeleteAsync(playlist))]);
         };
         return row;
     }
@@ -280,21 +276,30 @@ internal sealed class PlaylistStrip : Border
             if (row.DataContext is PlaylistTune tune && Shown is { } playlist)
                 Play?.Invoke(playlist, tune);
         };
-        var menu = new ContextMenu();
-        row.ContextMenu = menu;
-        menu.Opening += (_, _) =>
+        row.ContextRequested += (_, e) =>
         {
-            menu.Items.Clear();
+            e.Handled = true;
             if (row.DataContext is not PlaylistTune tune)
                 return;
             var add = new MenuItem { Header = "Add to playlist" };
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
-            menu.Items.Add(add);
+            var items = new List<Control> { add };
             if (Shown is { IsFolder: false } playlist)
-                menu.Items.Add(Item("Remove from playlist", () => Remove(playlist, tune)));
+                items.Add(Item("Remove from playlist", () => Remove(playlist, tune)));
+            OpenMenu(row, items);
         };
         return row;
+    }
+
+    /// <summary>A right-click menu, its items made before it opens: one filled as it opens shows
+    /// empty - Avalonia has built it by then.</summary>
+    private static void OpenMenu(Control target, IReadOnlyList<Control> items)
+    {
+        var menu = new ContextMenu();
+        foreach (var item in items)
+            menu.Items.Add(item);
+        menu.Open(target);
     }
 
     /// <summary>The playlist whose tunes are shown.</summary>
