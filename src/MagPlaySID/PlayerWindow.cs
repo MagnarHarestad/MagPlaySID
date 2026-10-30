@@ -69,8 +69,12 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly TextBlock _songLabel = new() { Text = "SONG", VerticalAlignment = VerticalAlignment.Center };
-    private readonly StackPanel _songPills = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
-    private readonly Grid _songRow = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 12, 0, 0) };
+    private readonly StackPanel _songPills = new() { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ScrollViewer _songScroller = new();
+    private readonly Button _songBack = new();
+    private readonly Button _songOn = new();
+    /// <summary>The songs control beside Add to playlist: shown for a tune of several songs.</summary>
+    private readonly Border _songRow = new();
     private readonly PlaylistStrip _strip;
 
     private SidFile? _file;
@@ -214,23 +218,8 @@ internal sealed class PlayerWindow : Window
             addTo.ShowAt(_favourite);
         };
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { _open, _favourite } };
-        // The tune's songs - sub-tunes - as pills, the one playing lit; shown for a tune of several.
-        _songLabel.FontWeight = FontWeight.Bold;
-        _songLabel.LetterSpacing = 1.5;
-        _songLabel.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
-        _songLabel.Margin = new Thickness(0, 0, 12, 0);
-        var pills = new ScrollViewer
-        {
-            Content = _songPills,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        };
-        Grid.SetColumn(pills, 1);
-        _songRow.Children.Add(_songLabel);
-        _songRow.Children.Add(pills);
-
-        var details = new StackPanel { Children = { _title, _details, buttons, _songRow } };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { _open, _favourite, BuildSongControl() } };
+        var details = new StackPanel { Children = { _title, _details, buttons } };
         var header = new Grid { Margin = new Thickness(18, 12, 18, 6), Children = { details, BuildMenu() } };
 
         BuildScopes(3);
@@ -297,6 +286,69 @@ internal sealed class PlayerWindow : Window
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
         });
         return root;
+    }
+
+    /// <summary>The tune's songs - sub-tunes - in one rounded control beside Add to playlist: SONG,
+    /// back a song, a pill for each - the one playing lit, a ring round it filling as it plays -
+    /// and on a song. About nine pills show at a time; more scroll, by the wheel too.</summary>
+    private Border BuildSongControl()
+    {
+        _songLabel.FontWeight = FontWeight.Bold;
+        _songLabel.LetterSpacing = 1.5;
+        _songLabel.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
+        _songLabel.Margin = new Thickness(8, 0, 2, 0);
+
+        _songScroller.Content = _songPills;
+        _songScroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden;
+        _songScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        _songScroller.AddHandler(PointerWheelChangedEvent, (_, e) =>
+        {
+            _songScroller.Offset = _songScroller.Offset.WithX(
+                Math.Max(0, _songScroller.Offset.X - (e.Delta.Y + e.Delta.X) * 30 * TextScale));
+            e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+
+        foreach (var (button, back) in new[] { (_songBack, true), (_songOn, false) })
+        {
+            button.Content = new PathIcon
+            {
+                Data = Geometry.Parse(back ? "M6,0 L7.4,1.4 L2.8,6 L7.4,10.6 L6,12 L0,6 Z" : "M1.4,0 L0,1.4 L4.6,6 L0,10.6 L1.4,12 L7.4,6 Z"),
+                Width = 7,
+                Height = 11,
+            };
+            button.Padding = new Thickness(8, 7);
+            button.CornerRadius = new CornerRadius(14);
+            button.Focusable = false;
+            button.VerticalAlignment = VerticalAlignment.Center;
+            foreach (var (key, colour) in new (string, Color)[]
+            {
+                ("ButtonBackground", Colors.Transparent), ("ButtonBackgroundPointerOver", SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 20)),
+                ("ButtonBackgroundPressed", SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 30)), ("ButtonBackgroundDisabled", Colors.Transparent),
+                ("ButtonForeground", SidPlayerPalette.Control), ("ButtonForegroundPointerOver", SidPlayerPalette.ControlHover),
+                ("ButtonForegroundPressed", SidPlayerPalette.ControlHover), ("ButtonForegroundDisabled", SidPlayerPalette.ControlDisabled),
+                ("ButtonBorderBrush", Colors.Transparent), ("ButtonBorderBrushPointerOver", Colors.Transparent),
+                ("ButtonBorderBrushPressed", Colors.Transparent), ("ButtonBorderBrushDisabled", Colors.Transparent),
+            })
+                button.Resources[key] = SidPlayerPalette.Brush(colour);
+        }
+        _songBack.Click += (_, _) => PlaySong(_song - 1);
+        _songOn.Click += (_, _) => PlaySong(_song + 1);
+        ToolTip.SetTip(_songBack, "Song before (-)");
+        ToolTip.SetTip(_songOn, "Next song (+)");
+
+        _songRow.Margin = new Thickness(12, 10, 0, 0);
+        _songRow.Padding = new Thickness(2);
+        _songRow.CornerRadius = new CornerRadius(18);
+        _songRow.BorderThickness = new Thickness(1);
+        _songRow.BorderBrush = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder);
+        _songRow.Background = SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground);
+        _songRow.VerticalAlignment = VerticalAlignment.Center;
+        _songRow.Child = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children = { _songLabel, _songBack, _songScroller, _songOn },
+        };
+        return _songRow;
     }
 
     /// <summary>A button in the player's own colours rather than the theme's.</summary>
@@ -402,7 +454,6 @@ internal sealed class PlayerWindow : Window
         _details.FontSize = 11.5 * scale;
         _open.FontSize = 12 * scale;
         _favouriteText.FontSize = 12 * scale;
-        _songLabel.FontSize = 11 * scale;
         BuildSongPills();
         _strip.TextScale = scale;
         _elapsed.FontSize = 16 * scale;
@@ -800,57 +851,32 @@ internal sealed class PlayerWindow : Window
         if (_file is not { Songs: > 1 } file)
             return;
         double scale = TextScale;
+        _songLabel.FontSize = 10 * scale;
+        // About nine pills, then the rest scroll.
+        _songScroller.MaxWidth = 9 * (26 + 4) * scale;
         for (int song = 1; song <= file.Songs; song++)
         {
-            int chosen = song;
-            var pill = new Button
-            {
-                Content = song.ToString(),
-                MinWidth = 30 * scale,
-                Height = 28 * scale,
-                Padding = new Thickness(10 * scale, 0),
-                CornerRadius = new CornerRadius(14 * scale),
-                BorderThickness = new Thickness(1),
-                FontFamily = Mono,
-                FontSize = 13 * scale,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                // Never the keyboard's: Space stays pause, not a click on the last pill clicked.
-                Focusable = false,
-            };
-            pill.Click += (_, _) => PlaySong(chosen);
-            ToolTip.SetTip(pill, $"Song {song} of {file.Songs}");
+            var pill = new SongPill(song, scale);
+            pill.Click += PlaySong;
+            ToolTip.SetTip(pill, song <= 9 ? $"Song {song} of {file.Songs} (key {song})" : $"Song {song} of {file.Songs}");
             _songPills.Children.Add(pill);
         }
         LightSongPills();
     }
 
-    /// <summary>The song playing's pill filled in the accent, the others in the panel's colours -
-    /// and scrolled to, when there are more than fit.</summary>
+    /// <summary>The song playing's pill lit - and scrolled to, when there are more than fit - and
+    /// back and on a song only where there is one.</summary>
     private void LightSongPills()
     {
-        var accent = SidPlayerPalette.VoiceColour(1);
-        for (int i = 0; i < _songPills.Children.Count; i++)
+        foreach (SongPill pill in _songPills.Children)
         {
-            var pill = (Button)_songPills.Children[i];
-            bool on = i + 1 == _song;
-            foreach (var (key, colour) in new (string, Color)[]
-            {
-                ("ButtonBackground", on ? accent : SidPlayerPalette.PanelBackground),
-                ("ButtonBackgroundPointerOver", on ? accent : SidPlayerPalette.WithAlpha(accent, 40)),
-                ("ButtonBackgroundPressed", on ? accent : SidPlayerPalette.PanelBackground),
-                ("ButtonBorderBrush", on ? accent : SidPlayerPalette.PanelBorder),
-                ("ButtonBorderBrushPointerOver", accent),
-                ("ButtonBorderBrushPressed", accent),
-                ("ButtonForeground", on ? SidPlayerPalette.Background : SidPlayerPalette.Control),
-                ("ButtonForegroundPointerOver", on ? SidPlayerPalette.Background : SidPlayerPalette.ControlHover),
-                ("ButtonForegroundPressed", on ? SidPlayerPalette.Background : SidPlayerPalette.ControlHover),
-            })
-                pill.Resources[key] = SidPlayerPalette.Brush(colour);
-            pill.FontWeight = on ? FontWeight.Bold : FontWeight.Normal;
-            if (on)
+            pill.Lit = pill.Song == _song;
+            pill.Progress = 0;
+            if (pill.Lit)
                 pill.BringIntoView();
         }
+        _songBack.IsEnabled = _song > 1;
+        _songOn.IsEnabled = _file is { } file && _song < file.Songs;
     }
 
     private void Refresh()
@@ -875,6 +901,8 @@ internal sealed class PlayerWindow : Window
 
         var position = PositionWithinSong(at);
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
+        if (_songPills.Children.ElementAtOrDefault(_song - 1) is SongPill playing)
+            playing.Progress = _length is { Total.TotalSeconds: > 0 } measured ? position / measured.Total : 0;
         if (_transcription is not null)
             _view.SetCycle(engine.CycleAt(position.TotalSeconds * C64PlaybackEngine.SampleRate));
         if (engine.Failure is { } failure && !_details.Text!.StartsWith("The tune stopped", StringComparison.Ordinal))
