@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>MagPlaySID</AssemblyName>
     <RootNamespace>MagPlaySid</RootNamespace>
-    <Version>1.1</Version>
+    <Version>1.2</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>

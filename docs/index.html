@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MagPlaySID - plays any C64 .sid and shows how it is built</title>
-<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, and keep your favourites.">
+<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text or sheet music.">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css?v=1">
 </head>
@@ -15,7 +15,7 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.1</span></h1>
+    <h1>MagPlaySID <span id="version">v1.2</span></h1>
     <p class="released">Release date: <time id="released" datetime="2026-10-30">2026-10-30</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
@@ -25,9 +25,9 @@
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also">Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.1/MagPlaySID-1.1-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.1/MagPlaySID-1.1-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.1/MagPlaySID-1.1-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.2/MagPlaySID-1.2-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.2/MagPlaySID-1.2-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.2/MagPlaySID-1.2-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -43,11 +43,11 @@
   <div class="grid">
     <div class="card"><div class="i">💾</div><h3>Any .sid</h3><p>PSID and RSID, PAL and NTSC, played on the raster or a CIA timer, once a frame or many times. The tune's own 6502 code runs on an emulated C64 - its timers, interrupts and memory banking - and every write reaches the SID on the cycle it was made.</p></div>
     <div class="card"><div class="i">🔊</div><h3>Digis</h3><p>Samples streamed from an NMI play as they are written, thousands of times a second - the drums and voices of ThcMOD and LMan's tunes, which a player that calls a tune once a frame never hears.</p></div>
-    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, the whole tune soon after.</p></div>
+    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, the whole tune soon after - with its length, measured on the C64 by watching for the tune's memory to come round again, so the clock says how long it plays before it repeats.</p></div>
     <div class="card"><div class="i">📜</div><h3>Rows that scroll</h3><p>Each voice's rows - note, instrument, effects - go past as they sound. Click a voice to see its instrument: envelope, hard restart, and the wave, pulse and filter programs, the step sounding lit.</p></div>
     <div class="card"><div class="i">🎹</div><h3>A piano</h3><p>Eight octaves along the bottom, each voice's key lit in its colour as loud as its envelope - an arpeggio, a slide or a drum shows as it plays.</p></div>
     <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice.</p></div>
-    <div class="card"><div class="i">⏱️</div><h3>Its length</h3><p>Measured on the C64 by watching for the tune's memory to come round again - an RSID's too - so the clock says how long it plays before it repeats.</p></div>
+    <div class="card"><div class="i">📝</div><h3>Sheet music and text</h3><p><b>Export notes</b> in the menu saves the song playing as the rows read it. <b>As sheet music</b>: a PDF with a staff for each voice, its clef chosen line by line, the notes, rests, ties, sharps and naturals in bars of 4/4, and the tempo. <b>As text</b>: each voice's notes, instruments and effects with their bar, beat and time.</p></div>
     <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code> from the desktop onto the window, open one, or name it on the command line. Space pauses, and the rows stop with the music; in a playlist, the arrow keys go to the tune before or after.</p></div>
     <div class="card"><div class="i">🎶</div><h3>Playlists</h3><p>Drop a folder of <code>.sid</code> files - or several tunes - on the window and it becomes a playlist down the left, played one tune after another, each moving on once it has played its length. Make playlists of your favourites from any tune with <b>♥ Add to playlist</b> or a right-click; drag a tune up or down to change the order. <b>Show playlists</b> in the menu opens and hides the strip.</p></div>
     <div class="card"><div class="i">🔢</div><h3>Every song</h3><p>A tune of several songs shows them as round buttons beside Add to playlist, the one playing ringed as it goes: click one, or press 1-9, + and -. Previous and Next move between tunes, and <b>Play every song of a tune</b> in the menu plays all of a tune's songs before the next.</p></div>
@@ -66,7 +66,7 @@
     <li><b>Windows:</b> unzip it anywhere and run <code>MagPlaySID.exe</code>. <b>Linux:</b> unpack it and run <code>./MagPlaySID</code>. <b>Mac:</b> unzip it and move MagPlaySID to Applications.</li>
     <li>Drop a <code>.sid</code> on the window, or choose <b>Open .sid...</b> - or drop a whole folder to play it as a playlist. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
     <li>Click a scope to mute its voice; click a voice's rows to see its instrument.</li>
-    <li>Keep the tunes you like: <b>♥ Add to playlist</b> while one plays. Keys: Space pauses, ← and → change tune in a playlist, 1-9 pick a song, and F held fast-forwards.</li>
+    <li>Keep the tunes you like: <b>♥ Add to playlist</b> while one plays - and their notes: <b>Export notes</b> in the menu, as sheet music or text. Keys: Space pauses, ← and → change tune in a playlist, 1-9 pick a song, and F held fast-forwards.</li>
   </ol>
   <div class="note">The Windows exe is not code-signed, so Windows SmartScreen may say it comes from an unknown publisher. Choose <b>More info → Run anyway</b>.</div>
   <div class="note mac" id="mac">
@@ -102,7 +102,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.1 stands until
+// The version, the release date and the downloads follow the latest release; v1.2 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
