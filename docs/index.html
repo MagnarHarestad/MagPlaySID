@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MagPlaySID - plays any C64 .sid and shows how it is built</title>
-<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music.">
+<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, and keep your favourites.">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css?v=1">
 </head>
@@ -15,26 +15,27 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.0</span></h1>
-    <p class="released">Release date: <time id="released" datetime="2026-10-29">2026-10-29</time></p>
+    <h1>MagPlaySID <span id="version">v1.1</span></h1>
+    <p class="released">Release date: <time id="released" datetime="2026-10-30">2026-10-30</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
-      in rows that scroll with the music.</p>
+      in rows that scroll with the music. Drop a whole folder and it becomes a playlist; keep the tunes
+      you love in playlists of your own.</p>
     <div class="download">
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also"><span class="tag">Preview</span> Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.0/MagPlaySID-1.0-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.0/MagPlaySID-1.0-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.0/MagPlaySID-1.0-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.1/MagPlaySID-1.1-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.1/MagPlaySID-1.1-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.1/MagPlaySID-1.1-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
   </section>
 
   <figure class="shot">
-    <img src="screenshots/player.png" width="1180" height="900" alt="MagPlaySID playing Outlaws: a spectrum, a scope per voice, the tune's rows with the selected voice's instrument beside them, and a piano along the bottom">
-    <figcaption>Playing <i>Outlaws</i> - the spectrum, a scope per voice, the tune's rows scrolling, the instrument sounding and its programs, and the keys each voice is on.</figcaption>
+    <img src="screenshots/player.png" width="1180" height="900" alt="MagPlaySID playing MSI-Lost Souls from a favourites playlist: the playlist down the left, the tune's eight songs beside Add to playlist with the third playing, a spectrum, a scope per voice, the tune's rows with the selected voice's instrument beside them, and a piano along the bottom">
+    <figcaption>Playing <i>MSI-Lost Souls</i> from a favourites playlist - its third of eight songs, ringed as it plays - with the spectrum, a scope per voice, the rows scrolling, the instrument sounding and its programs, and the keys each voice is on.</figcaption>
   </figure>
 
   <h2 id="features">What it does</h2>
@@ -47,21 +48,25 @@
     <div class="card"><div class="i">🎹</div><h3>A piano</h3><p>Eight octaves along the bottom, each voice's key lit in its colour as loud as its envelope - an arpeggio, a slide or a drum shows as it plays.</p></div>
     <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice.</p></div>
     <div class="card"><div class="i">⏱️</div><h3>Its length</h3><p>Measured on the C64 by watching for the tune's memory to come round again - an RSID's too - so the clock says how long it plays before it repeats.</p></div>
-    <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code> from the desktop onto the window, open one, or name it on the command line. Space pauses, and the rows stop with the music.</p></div>
-    <div class="card"><div class="i">🔔</div><h3>Up to date</h3><p>Asked once, the first time it starts: say yes and MagPlaySID looks for a newer version each time it opens, and offers this page when there is one. <b>Check for updates at start</b> in the menu at the top right turns it on or off.</p></div>
+    <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code> from the desktop onto the window, open one, or name it on the command line. Space pauses, and the rows stop with the music; in a playlist, the arrow keys go to the tune before or after.</p></div>
+    <div class="card"><div class="i">🎶</div><h3>Playlists</h3><p>Drop a folder of <code>.sid</code> files - or several tunes - on the window and it becomes a playlist down the left, played one tune after another, each moving on once it has played its length. Make playlists of your favourites from any tune with <b>♥ Add to playlist</b> or a right-click; drag a tune up or down to change the order. <b>Show playlists</b> in the menu opens and hides the strip.</p></div>
+    <div class="card"><div class="i">🔢</div><h3>Every song</h3><p>A tune of several songs shows them as round buttons beside Add to playlist, the one playing ringed as it goes: click one, or press 1-9, + and -. Previous and Next move between tunes, and <b>Play every song of a tune</b> in the menu plays all of a tune's songs before the next.</p></div>
+    <div class="card"><div class="i">⏩</div><h3>Hold to fast-forward</h3><p>Hold the fast-forward button beside play - or the F key - and the tune runs four times as fast, quietly, with the clock, scopes, rows and piano keeping up. Let go and it plays on as before.</p></div>
+    <div class="card"><div class="i">⚙️</div><h3>Yours to set</h3><p>The menu at the top right: <b>Big font</b> makes the rows, the tune's details and the labels a quarter larger. <b>Check for updates at start</b> - asked once, the first time - looks for a newer version each time MagPlaySID opens, and offers this page when there is one.</p></div>
   </div>
 
   <figure class="shot">
-    <img src="screenshots/satellite.png" width="1180" height="900" alt="MagPlaySID playing Satellite, an instrument's wave and pulse programs beside the rows">
-    <figcaption>Playing <i>Satellite</i> - an instrument with a control byte of its own on a note's first call, its wave program from the next, its pulse sweeping.</figcaption>
+    <img src="screenshots/playlist.png" width="1180" height="900" alt="MagPlaySID playing Golf Dash Extended from a folder dropped on the window: the folder as a playlist above the favourites, its seven tunes listed with how many songs each has, and the tune's three songs beside Add to playlist">
+    <figcaption>A folder dropped on the window, playing as a playlist above the favourites - <i>Golf Dash -EXTENDED-</i>, the first of its three songs, and the tunes after it waiting their turn.</figcaption>
   </figure>
 
   <h2 id="start">Get started</h2>
   <ol class="steps">
     <li>Download the package for your system from the <a href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">latest release</a>. .NET is inside - there is nothing else to install.</li>
     <li><b>Windows:</b> unzip it anywhere and run <code>MagPlaySID.exe</code>. <b>Linux:</b> unpack it and run <code>./MagPlaySID</code>. <b>Mac:</b> unzip it and move MagPlaySID to Applications.</li>
-    <li>Drop a <code>.sid</code> on the window, or choose <b>Open .sid...</b>. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
+    <li>Drop a <code>.sid</code> on the window, or choose <b>Open .sid...</b> - or drop a whole folder to play it as a playlist. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
     <li>Click a scope to mute its voice; click a voice's rows to see its instrument.</li>
+    <li>Keep the tunes you like: <b>♥ Add to playlist</b> while one plays. Keys: Space pauses, ← and → change tune in a playlist, 1-9 pick a song, and F held fast-forwards.</li>
   </ol>
   <div class="note">The Windows exe is not code-signed, so Windows SmartScreen may say it comes from an unknown publisher. Choose <b>More info → Run anyway</b>.</div>
   <div class="note mac" id="mac">
@@ -97,7 +102,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.0 stands until
+// The version, the release date and the downloads follow the latest release; v1.1 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
