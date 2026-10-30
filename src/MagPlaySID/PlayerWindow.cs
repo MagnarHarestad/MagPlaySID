@@ -364,6 +364,9 @@ internal sealed class PlayerWindow : Window
             ("ButtonForeground", SidPlayerPalette.Brush(SidPlayerPalette.Control)),
             ("ButtonForegroundPointerOver", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
             ("ButtonForegroundPressed", SidPlayerPalette.Brush(SidPlayerPalette.ControlHover)),
+            // Off, still the player's: dark and dimmed, never the theme's grey.
+            ("ButtonBackgroundDisabled", panel), ("ButtonBorderBrushDisabled", border),
+            ("ButtonForegroundDisabled", SidPlayerPalette.Brush(SidPlayerPalette.ControlDisabled)),
         })
             button.Resources[key] = value;
     }
@@ -522,7 +525,9 @@ internal sealed class PlayerWindow : Window
     {
         bool loaded = _file is not null;
         _empty.IsVisible = !loaded;
-        _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = _favourite.IsEnabled = loaded;
+        _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = loaded;
+        // Only with a tune to add: an empty window offers Open alone, not a button that cannot be used.
+        _favourite.IsVisible = loaded;
         ShowNextTune();
         _songRow.IsVisible = loaded && _file!.Songs > 1;
         if (!loaded)
