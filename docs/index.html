@@ -15,8 +15,8 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.2</span></h1>
-    <p class="released">Release date: <time id="released" datetime="2026-10-30">2026-10-30</time></p>
+    <h1>MagPlaySID <span id="version">v1.21</span></h1>
+    <p class="released">Release date: <time id="released" datetime="2026-10-31">2026-10-31</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
       in rows that scroll with the music. Drop a whole folder and it becomes a playlist; keep the tunes
@@ -25,9 +25,9 @@
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also">Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.2/MagPlaySID-1.2-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.2/MagPlaySID-1.2-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.2/MagPlaySID-1.2-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.21/MagPlaySID-1.21-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.21/MagPlaySID-1.21-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.21/MagPlaySID-1.21-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -52,7 +52,7 @@
     <div class="card"><div class="i">🎶</div><h3>Playlists</h3><p>Drop a folder of <code>.sid</code> files - or several tunes - on the window and it becomes a playlist down the left, played one tune after another, each moving on once it has played its length. Make playlists of your favourites from any tune with <b>♥ Add to playlist</b> or a right-click; drag a tune up or down to change the order. <b>Show playlists</b> in the menu opens and hides the strip.</p></div>
     <div class="card"><div class="i">🔢</div><h3>Every song</h3><p>A tune of several songs shows them as round buttons beside Add to playlist, the one playing ringed as it goes: click one, or press 1-9, + and -. Previous and Next move between tunes, and <b>Play every song of a tune</b> in the menu plays all of a tune's songs before the next.</p></div>
     <div class="card"><div class="i">⏩</div><h3>Hold to fast-forward</h3><p>Hold the fast-forward button beside play - or the F key - and the tune runs four times as fast, quietly, with the clock, scopes, rows and piano keeping up. Let go and it plays on as before.</p></div>
-    <div class="card"><div class="i">⚙️</div><h3>Yours to set</h3><p>The menu at the top right: <b>Big font</b> makes the rows, the tune's details and the labels a quarter larger. <b>Check for updates at start</b> - asked once, the first time - looks for a newer version each time MagPlaySID opens, and offers this page when there is one.</p></div>
+    <div class="card"><div class="i">⚙️</div><h3>Yours to set</h3><p>The knob at the top right sets the volume: drag or scroll it, click to mute. In the menu beside it, <b>Big font</b> makes the rows, the tune's details and the labels a quarter larger. <b>Check for updates at start</b> - asked once, the first time - looks for a newer version each time MagPlaySID opens, and offers this page when there is one.</p></div>
   </div>
 
   <figure class="shot">
@@ -112,7 +112,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.2 stands until
+// The version, the release date and the downloads follow the latest release; v1.21 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
