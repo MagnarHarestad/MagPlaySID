@@ -125,6 +125,20 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
     private volatile int _speed = 1;
 
+    /// <summary>What the sound is multiplied by, 0-1: the listener's volume. Only what is heard - the
+    /// scopes and the spectrum show the tune as it is, whatever the volume.</summary>
+    public float Volume
+    {
+        get => _volume;
+        set => _volume = Math.Clamp(value, 0f, 1f);
+    }
+
+    private volatile float _volume = 1f;
+
+    /// <summary>The volume the last buffer ended on, each buffer gliding from it to the one asked
+    /// for, so a turn of the knob does not click. Below zero until the first.</summary>
+    private float _applied = -1f;
+
     public WaveFormat WaveFormat { get; } = new(SampleRate, 16, 1);
 
     /// <summary>The tune's own sample the device is playing at its sample <paramref name="device"/>:
@@ -202,6 +216,18 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
                     sum += _pending[i * rate + j];
                 output[i] = (short)(sum * FastForwardVolume / rate);
             }
+        float volume = _volume;
+        float gain = _applied < 0 ? volume : _applied;
+        if (gain != 1f || volume != 1f)
+        {
+            float step = (volume - gain) / Math.Max(1, ready);
+            for (int i = 0; i < ready; i++)
+            {
+                gain += step;
+                output[i] = (short)(output[i] * gain);
+            }
+        }
+        _applied = volume;
         output[ready..].Clear();
 
         int used = ready * rate;

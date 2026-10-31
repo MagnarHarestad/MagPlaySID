@@ -23,6 +23,16 @@ internal sealed class PianoSynth : IWaveProvider
     /// <summary>The mix, kept: the sound card asks a hundred times a second, and no garbage on its thread.</summary>
     private float[] _mix = [];
 
+    /// <summary>What the sound is multiplied by, 0-1: the listener's volume.</summary>
+    public float Volume
+    {
+        get => _volume;
+        set => _volume = Math.Clamp(value, 0f, 1f);
+    }
+
+    private volatile float _volume = 1f;
+    private float _applied = -1f;
+
     public WaveFormat WaveFormat { get; } = new(SampleRate, 16, 1);
 
     /// <summary>A key struck: its number on the window's keyboard, C-0 as 0.</summary>
@@ -60,11 +70,16 @@ internal sealed class PianoSynth : IWaveProvider
                 strike.Add(mix, samples);
             _struck.RemoveAll(s => s.Done);
         }
+        float volume = _volume;
+        float gain = _applied < 0 ? volume : _applied;
+        float step = (volume - gain) / Math.Max(1, samples);
+        _applied = volume;
         for (int i = 0; i < samples; i++)
         {
             // A soft limit, so a fistful of keys swells rather than clips.
             float v = MathF.Tanh(mix[i] * 0.9f);
-            short s = (short)(v * 30000);
+            gain += step;
+            short s = (short)(v * 30000 * gain);
             buffer[offset + 2 * i] = (byte)s;
             buffer[offset + 2 * i + 1] = (byte)(s >> 8);
         }

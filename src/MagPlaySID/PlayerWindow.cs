@@ -57,6 +57,7 @@ internal sealed class PlayerWindow : Window
     private readonly TextBlock _favouriteText = new() { Text = "Add to playlist", VerticalAlignment = VerticalAlignment.Center };
     private readonly ScoreView _view = new();
     private readonly PianoView _piano = new();
+    private readonly VolumeKnob _volumeKnob = new();
 
     // The keys' secret: with no tune playing they are a piano's, and each one struck throws up dust.
     private readonly MagicDust _dust = new();
@@ -120,6 +121,19 @@ internal sealed class PlayerWindow : Window
         _strip = new PlaylistStrip(this);
         _strip.Play += PlayFromList;
         _piano.KeyStruck += StrikeKey;
+        _volumeKnob.Value = _settings.Volume;
+        _pianoSynth.Volume = _volumeKnob.Gain;
+        _volumeKnob.Changed += () =>
+        {
+            if (_engine is { } engine)
+                engine.Volume = _volumeKnob.Gain;
+            _pianoSynth.Volume = _volumeKnob.Gain;
+        };
+        _volumeKnob.Committed += () =>
+        {
+            _settings.Volume = _volumeKnob.Value;
+            _settings.Save();
+        };
         _strip.ShowRequested += () => ShowPlaylists(true);
         // The dust over everything, taking no clicks.
         Content = new Panel { Children = { BuildLayout(), _dust } };
@@ -231,7 +245,16 @@ internal sealed class PlayerWindow : Window
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { _open, _favourite, BuildSongControl() } };
         var details = new StackPanel { Children = { _title, _details, buttons } };
-        var header = new Grid { Margin = new Thickness(18, 12, 18, 6), Children = { details, BuildMenu() } };
+        // The volume and the menu together at the top right, the knob on the menu's left.
+        var corner = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Children = { _volumeKnob, BuildMenu() },
+        };
+        var header = new Grid { Margin = new Thickness(18, 12, 18, 6), Children = { details, corner } };
 
         BuildScopes(3);
 
@@ -443,8 +466,7 @@ internal sealed class PlayerWindow : Window
                 Height = 14,
             },
             Padding = new Thickness(9, 7),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
+            VerticalAlignment = VerticalAlignment.Center,
             Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _showPlaylists, _everySong, new Separator(), _exportNotes, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
@@ -792,7 +814,7 @@ internal sealed class PlayerWindow : Window
 
         try
         {
-            _engine = new C64PlaybackEngine(file, song);
+            _engine = new C64PlaybackEngine(file, song) { Volume = _volumeKnob.Gain };
             BuildScopes(3 * _engine.Chips);
             for (int voice = 0; voice < _scopes.Length; voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);

@@ -34,6 +34,9 @@ internal sealed class Settings
     /// before the next tune, or only the song it starts on.</summary>
     public bool PlayEverySong { get; set; }
 
+    /// <summary>Where the volume knob stands, 0-1; as loud as the tune is until it is turned.</summary>
+    public double Volume { get; set; } = 1;
+
     public static Settings Load()
     {
         try
