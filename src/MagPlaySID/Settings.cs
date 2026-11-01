@@ -37,6 +37,9 @@ internal sealed class Settings
     /// <summary>Where the volume knob stands, 0-1; as loud as the tune is until it is turned.</summary>
     public double Volume { get; set; } = 1;
 
+    /// <summary>Which meter shows the sound's spectrum - Meter in the menu, or a click on it.</summary>
+    public MeterKind Meter { get; set; }
+
     public static Settings Load()
     {
         try

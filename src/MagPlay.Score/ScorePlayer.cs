@@ -243,6 +243,8 @@ public sealed class ScorePlayer
 
         public int CallsSinceNote;
         public int? GlideTarget;
+        public int GlideSpeed;
+        public bool GlideWaits;
         public int VibratoCall;
 
         public int NoteAtCall = -1;
@@ -276,6 +278,7 @@ public sealed class ScorePlayer
             voice.PendingFrequency = null;
         }
 
+        Glide(voice);
         if (call > 0 || voice.NoteAtCall > 0)
             PitchEffects(voice, call);
 
@@ -311,7 +314,6 @@ public sealed class ScorePlayer
         voice.CutAtCall = row.Effects.OfType<NoteCut>().Select(c => c.Calls).DefaultIfEmpty(-1).First();
         int delay = row.Effects.OfType<NoteDelay>().Select(d => d.Calls).DefaultIfEmpty(0).First();
         voice.NoteAtCall = Math.Clamp(delay, 0, Math.Max(0, voice.RowCalls - 1));
-        voice.GlideTarget = null;
         voice.VibratoCall = 0;
         return true;
     }
@@ -433,8 +435,13 @@ public sealed class ScorePlayer
             case RowNoteKind.Note when glide is not null:
                 voice.Note = Math.Clamp(row.Note.Note + voice.Transpose, 0, _score.NoteTable.Length - 1);
                 voice.GlideTarget = NoteFrequency(voice, voice.Note);
+                voice.GlideSpeed = Math.Max(1, glide.Speed);
+                voice.GlideWaits = true;
                 if (glide.Speed == 0)
+                {
                     voice.Frequency = voice.GlideTarget.Value;
+                    voice.GlideTarget = null;
+                }
                 break;
 
             case RowNoteKind.Note:
@@ -458,6 +465,7 @@ public sealed class ScorePlayer
     private void Trigger(VoiceState voice, int note)
     {
         voice.Retrigger = voice.Gate;
+        voice.GlideTarget = null;
         voice.FirstCall = false;
         voice.PendingFrequency = null;
         voice.Note = note;
@@ -522,24 +530,36 @@ public sealed class ScorePlayer
         }
     }
 
-    /// <summary>Portamento, tone portamento, vibrato and arpeggio, a call at a time; without any,
+    /// <summary>A glide to its note, a call at a time from the call after its row's note, over as
+    /// many rows as it takes - a new note started cuts it short.</summary>
+    private static void Glide(VoiceState voice)
+    {
+        if (voice.GlideTarget is not { } target)
+            return;
+        if (voice.GlideWaits)
+        {
+            voice.GlideWaits = false;
+            return;
+        }
+
+        voice.Frequency = voice.Frequency < target
+            ? Math.Min(target, voice.Frequency + voice.GlideSpeed)
+            : Math.Max(target, voice.Frequency - voice.GlideSpeed);
+        if (voice.Frequency == target)
+            voice.GlideTarget = null;
+    }
+
+    /// <summary>Portamento, vibrato and arpeggio, a call at a time; without any and without a glide,
     /// the instrument's own vibrato once its delay is past.</summary>
     private void PitchEffects(VoiceState voice, int call)
     {
-        bool pitched = false;
+        bool pitched = voice.GlideTarget is not null;
         foreach (var effect in voice.Row.Effects)
         {
             switch (effect)
             {
                 case Portamento e:
                     voice.Frequency = (voice.Frequency + e.Speed) & 0xFFFF;
-                    pitched = true;
-                    break;
-
-                case TonePortamento e when voice.GlideTarget is { } target:
-                    voice.Frequency = voice.Frequency < target
-                        ? Math.Min(target, voice.Frequency + Math.Max(1, e.Speed))
-                        : Math.Max(target, voice.Frequency - Math.Max(1, e.Speed));
                     pitched = true;
                     break;
 

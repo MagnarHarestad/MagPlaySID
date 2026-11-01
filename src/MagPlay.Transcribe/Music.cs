@@ -5,7 +5,8 @@ namespace MagPlay.Transcribe;
 
 /// <summary>
 /// The music a recording is heard as, as a score: each voice's notes - a gate going on starts
-/// one, and it lasts until the next - on the tune's own note table, each played by an instrument
+/// one, and it lasts until the next, or until the pitch glides or ties on to another with the gate
+/// still on - on the tune's own note table, each played by an instrument
 /// that says what the voice does call by call while the note sounds: its envelope, its wave
 /// program - control byte and pitch, the pitch in semitones from the note wherever it is a note -
 /// and its pulse program, with the tune's hard restart before the next note taken out as the
@@ -28,8 +29,9 @@ public static class Music
     private const int LongestHardRestart = 4;
 
     /// <summary>The score's music for <paramref name="recording"/>, without timing or raw layer -
-    /// the transcriber adds those; null when the tune has too few calls to hear notes in.</summary>
-    public static MagPlay.Score.Score? Of(Recording recording)
+    /// the transcriber adds those; null when the tune has too few calls to hear notes in. Its rows
+    /// are on <paramref name="rows"/> when given, so that two recordings of a tune scroll alike.</summary>
+    public static MagPlay.Score.Score? Of(Recording recording, Grid? rows = null)
     {
         if (recording.Calls.Count < 2)
             return null;
@@ -38,7 +40,7 @@ public static class Music
         var table = NoteTable(frames);
         var score = new MagPlay.Score.Score { Machine = recording.Machine, NoteTable = table, Chips = recording.Chips };
         var sounds = new List<Sound>();
-        var grid = Grid.Of(rises);
+        var grid = rows ?? Grid.Of(rises);
         score.Tempo = grid.A;
         score.FunkTempo = grid.Funk ? grid.B : null;
         var voices = new List<(int GridRow, Row Row)>?[frames.Length];
@@ -52,6 +54,22 @@ public static class Music
             Filter(score, chip, Globals(recording, chip));
         return score;
     }
+
+    /// <summary>The rows <paramref name="recording"/> falls on; null when it starts too few notes to
+    /// tell, or no row longer than a call fits them.</summary>
+    public static Grid? RowsOf(Recording recording)
+    {
+        if (recording.Calls.Count < 2)
+            return null;
+        Frames(recording, out var rises);
+        if (rises.Sum(r => r.Count) < NotesToTellRows)
+            return null;
+        var grid = Grid.Of(rises);
+        return grid is { A: 1, B: 1 } ? null : grid;
+    }
+
+    /// <summary>Note starts it takes to go by a recording's rows.</summary>
+    private const int NotesToTellRows = 8;
 
     /// <summary>A voice's registers after a call.</summary>
     internal readonly record struct Frame(int Frequency, int Pulse, int Control, int AttackDecay, int SustainRelease)
@@ -224,7 +242,7 @@ public static class Music
     /// </summary>
     /// <param name="Shifts">Calls where a straight grid starts again - the music moved by a call or
     /// a few, a bar of another length, and went on in rows of the same length from there.</param>
-    internal sealed record Grid(int A, int B, int Origin, IReadOnlyList<int>? Shifts = null)
+    public sealed record Grid(int A, int B, int Origin, IReadOnlyList<int>? Shifts = null)
     {
         /// <summary>Gaps between note starts that have to be whole rows for a row length to be the
         /// tune's, when no one phase puts nine notes in ten on a row.</summary>
@@ -298,12 +316,16 @@ public static class Music
         {
             long total = 0;
             foreach (int start in starts)
-            {
-                int from = Origin + (int)Math.Floor((start - Origin) / (double)Period) * Period;
-                int into = start - from;
-                total += Funk && into >= A ? into - A : into;
-            }
+                total += Into(start);
             return total;
+        }
+
+        /// <summary>The calls <paramref name="call"/> is into its row.</summary>
+        internal int Into(int call)
+        {
+            int from = Origin + (int)Math.Floor((call - Origin) / (double)Period) * Period;
+            int into = call - from;
+            return Funk && into >= A ? into - A : into;
         }
 
         /// <summary>A voice's notes - each its call and its row - laid on the grid up to
@@ -430,7 +452,8 @@ public static class Music
     /// <summary>A note of a voice: the calls it starts and ends on, the calls of its hard restart,
     /// whether its first call keeps the voice as it was, the calls its pulse program runs for
     /// (-1 when it leaves the one before it running), and the width its row sets, if any.</summary>
-    private readonly record struct NoteSpan(int Start, int End, int Tail, bool KeepsFirstCall, int PulseCalls, int? Width = null)
+    /// <param name="GlideAt">The call a glide off it starts on; its wave program ends there.</param>
+    private readonly record struct NoteSpan(int Start, int End, int Tail, bool KeepsFirstCall, int PulseCalls, int? Width = null, int? GlideAt = null)
     {
         /// <summary>Where its wave and pulse programs start.</summary>
         public int Program => Start + (KeepsFirstCall ? 1 : 0);
@@ -445,13 +468,16 @@ public static class Music
 
 
         var spans = new NoteSpan[rises.Count];
+        var glides = new List<(int Start, Row Row)>();
         for (int i = 0; i < rises.Count; i++)
         {
             int start = rises[i], end = i + 1 < rises.Count ? rises[i + 1] : frames.Length;
             int tail = i + 1 < rises.Count ? Tail(frames, start, end) : 0;
             bool keeps = start > 0 && end - tail - start >= 2
                          && frames[start].Frequency == frames[start - 1].Frequency && frames[start].Pulse == frames[start - 1].Pulse;
-            spans[i] = new NoteSpan(start, end, tail, keeps, 0);
+            int first = glides.Count;
+            Glides(score.NoteTable, frames, start, end - tail, grid, glides);
+            spans[i] = new NoteSpan(start, end, tail, keeps, 0, null, glides.Count > first ? glides[first].Start : null);
         }
 
         // A note restarts the pulse unless its program's first calls carry on the sweep before
@@ -512,7 +538,68 @@ public static class Music
             rows[i] = Row.Of(note, number + 1, [.. effects]);
         }
 
-        return grid.Lay([.. spans.Select((span, i) => (span.Start, rows[i]))], frames.Length);
+        return grid.Lay([.. spans.Select((span, i) => (span.Start, rows[i])).Concat(glides).OrderBy(n => n.Item1)], frames.Length);
+    }
+
+    /// <summary>Calls a pitch has to stay on a note of the table to have got there.</summary>
+    private const int SettledCalls = 2;
+
+    /// <summary>Calls into its row a tie may start: a player's notes can run a call late.</summary>
+    private const int TieOffRow = 1;
+
+    /// <summary>
+    /// The notes a note goes on to with its gate still on, from <paramref name="from"/> up to
+    /// <paramref name="to"/>, as rows: a glide, the pitch moving one way from a note it stayed on for
+    /// half a row or more until it stays on another - GoatTracker's 3xx - or a tie, the pitch changing
+    /// at once, as a row starts, to a note it stays on for a whole row - where an instrument's own
+    /// steps fall anywhere and an arpeggio soon moves on. The row of a glide starts on the last call
+    /// of the note before; the first move is the call after it.
+    /// </summary>
+    private static void Glides(int[] table, Frame[] frames, int from, int to, Grid grid, List<(int Start, Row Row)> glides)
+    {
+        int rowCalls = Math.Min(grid.A, grid.B);
+        int tie = Math.Max(3, rowCalls), stayed = Math.Max(SettledCalls, rowCalls / 2);
+        int note = -1, last = -1;
+        for (int c = from; c < to;)
+        {
+            var frame = frames[c];
+            int run = 1;
+            while (c + run < to && frames[c + run].Frequency == frame.Frequency)
+                run++;
+
+            if (run >= SettledCalls && frame.Tonal && frame.Gate && Array.BinarySearch(table, frame.Frequency) is >= 0 and var heard)
+            {
+                if (note < 0 && run < stayed)
+                    return;
+                if (note >= 0 && heard != note)
+                {
+                    int between = c - last - 1;
+                    if (between == 0 ? run < tie || grid.Into(c) > TieOffRow : !Slides(frames, last, c))
+                        return;
+                    int speed = between == 0 ? 0 : Math.Max(1, (int)Math.Round(Math.Abs(frame.Frequency - frames[last].Frequency) / (double)(between + 1)));
+                    glides.Add((between == 0 ? c : last, Row.Of(heard, 0, new TonePortamento(speed))));
+                }
+                (note, last) = (heard, c + run - 1);
+            }
+            else if (note < 0 && frame.Tonal)
+            {
+                return;
+            }
+            c += run;
+        }
+    }
+
+    /// <summary>The pitch moves one way, with the gate on and a waveform that has a pitch, on every
+    /// call after <paramref name="from"/> up to <paramref name="to"/>.</summary>
+    private static bool Slides(Frame[] frames, int from, int to)
+    {
+        int way = Math.Sign(frames[to].Frequency - frames[from].Frequency);
+        for (int c = from + 1; c <= to; c++)
+        {
+            if (Math.Sign(frames[c].Frequency - frames[c - 1].Frequency) != way || !frames[c].Gate || !frames[c].Tonal)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>Calls a sweep has to go on through for a note to be taken to leave it running.</summary>
@@ -586,10 +673,11 @@ public static class Music
         public static Sound Hear(int[] table, Frame[] frames, NoteSpan span)
         {
             int sounding = span.End - span.Tail;
-            int note = BaseNote(table, frames, span.Program, sounding);
+            int plays = Math.Max(span.Program + 1, Math.Min(sounding, span.GlideAt ?? sounding));
+            int note = BaseNote(table, frames, span.Program, plays);
             var wave = new List<WaveCall>();
             var was = frames[span.Start];
-            for (int c = span.Program; c < sounding; c++)
+            for (int c = span.Program; c < plays; c++)
             {
                 var f = frames[c];
                 wave.Add(new WaveCall(f.Control, f.AttackDecay != was.AttackDecay ? f.AttackDecay : null,

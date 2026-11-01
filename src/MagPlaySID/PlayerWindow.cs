@@ -41,6 +41,8 @@ internal sealed class PlayerWindow : Window
     private static readonly TimeSpan UnmeasuredLength = TimeSpan.FromMinutes(3);
 
     private readonly SpectrumView _spectrum = new();
+    private readonly LandscapeView _landscape = new();
+    private readonly NeonSpectrumView _neon = new();
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
     private readonly TransportButton _previous = new(TransportGlyph.Previous);
@@ -69,6 +71,9 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _checkForUpdates = new();
     private readonly MenuItem _smallFont = new();
     private readonly MenuItem _bigFont = new();
+    private readonly MenuItem _spectrumMeter = new() { Header = "Spectrum" };
+    private readonly MenuItem _landscapeMeter = new() { Header = "Landscape" };
+    private readonly MenuItem _neonMeter = new() { Header = "Neon" };
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly MenuItem _exportNotes = new();
@@ -93,6 +98,14 @@ internal sealed class PlayerWindow : Window
     private PlaylistTune? _queueTune;
     /// <summary>The playlist's last tune has played: nothing follows it.</summary>
     private bool _finished;
+
+    /// <summary>What the tune playing is known by in <see cref="TuneHistory"/>, and whether this
+    /// playing of it has been counted.</summary>
+    private string? _tuneKey;
+    private bool _playCounted;
+
+    /// <summary>Seconds of a tune that count as playing it: skipping past one is not.</summary>
+    private const int PlayCountsAfter = 10;
     /// <summary>Fast-forward held - its button or F: on into the next song or tune, until let go.</summary>
     private bool _fastForwarding;
     /// <summary>The tune's sample the meters last showed: they are worked out and painted again only
@@ -286,9 +299,24 @@ internal sealed class PlayerWindow : Window
         _empty.HorizontalAlignment = HorizontalAlignment.Center;
         _empty.VerticalAlignment = VerticalAlignment.Center;
 
-        var spectrumHost = new Grid { Height = 150, Margin = new Thickness(18, 4) };
+        // The sound's spectrum, in the one of its meters that is chosen; a click goes on to the next.
+        var spectrumHost = new Grid
+        {
+            Height = 150,
+            Margin = new Thickness(18, 4),
+            Background = Brushes.Transparent,
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
         spectrumHost.Children.Add(_spectrum);
+        spectrumHost.Children.Add(_landscape);
+        spectrumHost.Children.Add(_neon);
         spectrumHost.Children.Add(_empty);
+        spectrumHost.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(spectrumHost).Properties.IsLeftButtonPressed)
+                ChooseMeter((MeterKind)(((int)_settings.Meter + 1) % Enum.GetValues<MeterKind>().Length));
+        };
+        ShowMeter();
 
         // The Retro view: read-only - it follows the music; a click picks the voice whose
         // instrument it shows.
@@ -457,6 +485,18 @@ internal sealed class PlayerWindow : Window
             };
         }
 
+        var openFolder = new MenuItem { Header = "Open folder as playlist..." };
+        openFolder.Click += (_, _) => _ = PickFolderAsync();
+
+        var meter = new MenuItem { Header = "Meter" };
+        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon) })
+        {
+            item.ToggleType = MenuItemToggleType.Radio;
+            item.GroupName = "Meter";
+            item.Click += (_, _) => ChooseMeter(kind);
+            meter.Items.Add(item);
+        }
+
         var menu = new Button
         {
             Content = new PathIcon
@@ -467,7 +507,7 @@ internal sealed class PlayerWindow : Window
             },
             Padding = new Thickness(9, 7),
             VerticalAlignment = VerticalAlignment.Center,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { _showPlaylists, _everySong, new Separator(), _exportNotes, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, _everySong, new Separator(), _exportNotes, new Separator(), meter, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
@@ -493,6 +533,22 @@ internal sealed class PlayerWindow : Window
 
     /// <summary>Every text in the window at the size chosen in the menu - the small one is the size
     /// it always was - and the menu's choice ticked.</summary>
+    private void ChooseMeter(MeterKind kind)
+    {
+        _settings.Meter = kind;
+        _settings.Save();
+        ShowMeter();
+    }
+
+    /// <summary>The chosen meter, the others hidden: they go on following the sound, unpainted, so
+    /// one chosen while the tune plays or stands still shows it as it is.</summary>
+    private void ShowMeter()
+    {
+        _landscape.IsVisible = _landscapeMeter.IsChecked = _settings.Meter == MeterKind.Landscape;
+        _neon.IsVisible = _neonMeter.IsChecked = _settings.Meter == MeterKind.Neon;
+        _spectrum.IsVisible = _spectrumMeter.IsChecked = !_landscape.IsVisible && !_neon.IsVisible;
+    }
+
     private void ShowFontSize()
     {
         double scale = TextScale;
@@ -666,7 +722,19 @@ internal sealed class PlayerWindow : Window
             PlayFile(path);
     }
 
-    /// <summary>The tunes in folders - and any tunes - dropped on the window, as the folder playlist,
+    private async Task PickFolderAsync()
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Open a folder of .sid tunes as a playlist",
+            AllowMultiple = false,
+        });
+
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path)
+            await OpenFolderAsync([path]);
+    }
+
+    /// <summary>The tunes in folders - and any tunes - dropped or chosen, as the folder playlist,
     /// played from the first.</summary>
     private async Task OpenFolderAsync(IReadOnlyList<string> paths)
     {
@@ -748,9 +816,11 @@ internal sealed class PlayerWindow : Window
     private bool Load(string path, bool quiet = false, int? firstSong = null)
     {
         SidFile file;
+        byte[] bytes;
         try
         {
-            file = SidFile.Parse(File.ReadAllBytes(path));
+            bytes = File.ReadAllBytes(path);
+            file = SidFile.Parse(bytes);
             if (SidTune.Unsupported(file) is { } reason)
                 throw new SidPlaybackException(reason);
         }
@@ -763,6 +833,8 @@ internal sealed class PlayerWindow : Window
 
         _file = file;
         _path = path;
+        _tuneKey = TuneHistory.KeyOf(bytes);
+        _playCounted = false;
         _song = Math.Clamp(firstSong ?? file.StartSong, 1, Math.Max(1, file.Songs));
         Title = $"{(string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : file.Name)} - {UpdateCheck.Product}";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
@@ -798,6 +870,8 @@ internal sealed class PlayerWindow : Window
     {
         _metersAt = -1;
         _spectrum.Clear();
+        _landscape.Clear();
+        _neon.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
         _piano.Clear();
@@ -882,13 +956,18 @@ internal sealed class PlayerWindow : Window
                     _retroStatus.Text = $"The first {OpeningSeconds} seconds - the whole tune is on its way";
                 });
 
-                var (whole, length) = Transcription.Whole(file, song, cancel.Token);
+                var (whole, length) = Transcription.Whole(file, song, opening.Rows, cancel.Token);
                 Show(() =>
                 {
                     (_transcription, _length) = (whole, length);
                     _wholeTranscribed = true;
                     _exportNotes.IsEnabled = true;
                     _lengthUnknown = length is null;
+                    if (length is not null && _tuneKey is { } key)
+                    {
+                        TuneHistory.Measured(key, song, length.Total);
+                        _strip.Measured(key);
+                    }
                     _view.SetScore(whole.Score, whole.Timeline);
                     _retroStatus.Text = whole.Describe();
                 });
@@ -1032,12 +1111,19 @@ internal sealed class PlayerWindow : Window
         {
             _metersAt = at;
             _spectrum.Update(engine, at);
+            _landscape.Update(_spectrum.Levels, at);
+            _neon.Update(_spectrum.Levels);
             foreach (var scope in _scopes)
                 scope.Update(engine, at);
             _piano.Update(engine, at, _muted);
         }
 
         var position = PositionWithinSong(at);
+        if (!_playCounted && position.TotalSeconds >= PlayCountsAfter && _tuneKey is { } tuneKey)
+        {
+            _playCounted = true;
+            TuneHistory.Played(tuneKey);
+        }
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
         if (_songPills.Children.ElementAtOrDefault(_song - 1) is SongPill playing)
             playing.Progress = _length is { Total.TotalSeconds: > 0 } measured ? position / measured.Total : 0;

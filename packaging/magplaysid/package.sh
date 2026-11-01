@@ -12,9 +12,14 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$root/out/$rid"
 dir="$out/MagPlaySID-$version"
 
+# On Windows the code comes compiled ahead of time: a window in a third of the time, on a first
+# start on a new PC most of all, for a quarter more to download.
+ahead=false
+case "$rid" in win-*) ahead=true ;; esac
+
 rm -rf "$out"
 dotnet publish "$root/src/MagPlaySID" -c Release -r "$rid" --self-contained true \
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=$ahead \
   -p:DebugType=none -p:Version="$version" -o "$dir"
 
 cp "$root/LICENSE" "$root/THIRD-PARTY-NOTICES.md" "$dir/"

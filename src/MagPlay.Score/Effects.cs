@@ -23,7 +23,7 @@ public sealed record Portamento(int Speed) : Effect
 }
 
 /// <summary>3xx: the pitch glides to the row's note by <paramref name="Speed"/> a call instead of
-/// starting it; 0 ties the note on at once - legato.</summary>
+/// starting it, on through the rows after until it is there; 0 ties the note on at once - legato.</summary>
 public sealed record TonePortamento(int Speed) : Effect
 {
     public override string Label => $"3{Portamento.Hex(Speed)}";

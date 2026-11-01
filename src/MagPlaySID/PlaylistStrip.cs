@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
@@ -20,7 +21,8 @@ namespace MagPlaySid;
 /// The strip down the left of the window: the playlists - a folder dropped on the window, and the
 /// favourites the user made from tunes they played - and below them the tunes of the one chosen.
 /// A click on a tune plays it, and the playlist from there; a tune held and dragged moves up or
-/// down the playlist. Shown or hidden from the window's menu.
+/// down the playlist, in the user's own order. Sort above the tunes puts them in another, to go
+/// back from. Shown or hidden from the window's menu.
 /// </summary>
 internal sealed class PlaylistStrip : Border
 {
@@ -32,6 +34,24 @@ internal sealed class PlaylistStrip : Border
     private static readonly Geometry PlusIcon = Geometry.Parse("M7,1 H9 V7 H15 V9 H9 V15 H7 V9 H1 V7 H7 Z");
     private static readonly Geometry PlayIcon = Geometry.Parse("M0,0 L10,6 L0,12 Z");
     private static readonly Geometry BarsIcon = Geometry.Parse("M0,6 H3 V14 H0 Z M5,0 H8 V14 H5 Z M10,4 H13 V14 H10 Z");
+    private static readonly Geometry SortIcon = Geometry.Parse("M0,0 H14 V2 H0 Z M0,5 H10 V7 H0 Z M0,10 H6 V12 H0 Z");
+
+    /// <summary>The sorts as the menu offers them, the groups apart; the note says what a sort can
+    /// only know of tunes that have been played.</summary>
+    private static readonly (TuneSort Sort, string Name, string? Note)[][] Sorts =
+    [
+        [(TuneSort.Own, "Your order", null)],
+        [(TuneSort.YearNewest, "Release year: newest first", null), (TuneSort.YearOldest, "Release year: oldest first", null),
+         (TuneSort.TitleAToZ, "Title: A to Z", null), (TuneSort.TitleZToA, "Title: Z to A", null),
+         (TuneSort.ComposerAToZ, "Composer: A to Z", null), (TuneSort.GroupAToZ, "Group: A to Z", null)],
+        [(TuneSort.FileNewest, "File date: newest first", null), (TuneSort.FileOldest, "File date: oldest first", null),
+         (TuneSort.SongsMost, "Songs: most first", null), (TuneSort.SongsFewest, "Songs: fewest first", null)],
+        [(TuneSort.LengthLongest, "Length: longest first", PlayedNote), (TuneSort.LengthShortest, "Length: shortest first", PlayedNote),
+         (TuneSort.RecentlyPlayed, "Recently played", PlayedNote), (TuneSort.MostPlayed, "Most played", PlayedNote)],
+        [(TuneSort.Shuffle, "Shuffle", null)],
+    ];
+
+    private const string PlayedNote = "Known once a tune has been played. Tunes not played yet come last.";
 
     /// <summary>The colour of what plays: the second voice's, as the player's buttons light.</summary>
     private static readonly Color Accent = SidPlayerPalette.VoiceColour(1);
@@ -48,6 +68,9 @@ internal sealed class PlaylistStrip : Border
     private readonly TextBlock _empty = new();
     private readonly Button _new = new();
     private readonly Button _playAll = new();
+    private readonly Button _sort = new();
+    private readonly TextBlock _sortName = new();
+    private readonly Dictionary<TuneSort, MenuItem> _sortItems = [];
     private Playlist? _folder;
     private PlaylistTune? _playing;
     private double _scale = 1;
@@ -175,7 +198,37 @@ internal sealed class PlaylistStrip : Border
             _playAll.Resources[key] = SidPlayerPalette.Brush(colour);
 
         var titles = new StackPanel { Margin = new Thickness(0, 0, 50, 0), Children = { _heading, _count } };
-        var heading = new Grid { Margin = new Thickness(18, 0, 14, 8), Children = { titles, _playAll } };
+        var heading = new Grid { Margin = new Thickness(18, 0, 14, 4), Children = { titles, _playAll } };
+
+        var sorts = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+        foreach (var group in Sorts)
+        {
+            if (sorts.Items.Count > 0)
+                sorts.Items.Add(new Separator());
+            foreach (var (sort, name, note) in group)
+            {
+                var item = Item(name, () => ChooseSort(sort));
+                item.ToggleType = MenuItemToggleType.Radio;
+                item.GroupName = "Sort";
+                if (note is not null)
+                    ToolTip.SetTip(item, note);
+                _sortItems[sort] = item;
+                sorts.Items.Add(item);
+            }
+        }
+        _sort.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 7,
+            Children = { Icon(SortIcon, 11, 10), _sortName },
+        };
+        _sort.Flyout = sorts;
+        _sort.Margin = new Thickness(11, 0, 0, 6);
+        _sort.Padding = new Thickness(7, 4);
+        _sort.HorizontalAlignment = HorizontalAlignment.Left;
+        ToolTip.SetTip(_sort, "Sort the tunes");
+        AutomationProperties.SetName(_sort, "Sort the tunes");
+        Quiet(_sort);
 
         _empty.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _empty.TextWrapping = TextWrapping.Wrap;
@@ -190,7 +243,7 @@ internal sealed class PlaylistStrip : Border
         _tuneBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Direct);
 
         var panel = new DockPanel();
-        foreach (var docked in new Control[] { top, _listBox, divider, heading, _empty })
+        foreach (var docked in new Control[] { top, _listBox, divider, heading, _sort, _empty })
         {
             DockPanel.SetDock(docked, Dock.Top);
             panel.Children.Add(docked);
@@ -297,6 +350,21 @@ internal sealed class PlaylistStrip : Border
             Converter = new FuncValueConverter<int, bool>(count => count > 1),
         });
 
+        // Its length, once it has been played.
+        var length = new TextBlock
+        {
+            FontSize = 11 * _scale,
+            Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        length.Bind(TextBlock.TextProperty, new Binding(nameof(PlaylistTune.Length))
+        {
+            Converter = new FuncValueConverter<TimeSpan?, string>(t => t is { } known ? $"{(int)known.TotalMinutes}:{known.Seconds:00}" : ""),
+        });
+        length.Bind(IsVisibleProperty, new Binding(nameof(PlaylistTune.Length)) { Converter = ObjectConverters.IsNotNull });
+        var ending = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Children = { length, songs } };
+
         var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, author } };
         var grid = new Grid
         {
@@ -308,10 +376,10 @@ internal sealed class PlaylistStrip : Border
                 new ColumnDefinition(1, GridUnitType.Star),
                 new ColumnDefinition(GridLength.Auto),
             },
-            Children = { number, bars, names, songs },
+            Children = { number, bars, names, ending },
         };
         Grid.SetColumn(names, 1);
-        Grid.SetColumn(songs, 2);
+        Grid.SetColumn(ending, 2);
         var row = new Border { Padding = new Thickness(6, 6, 10, 6), Background = Brushes.Transparent, Child = grid };
 
         row.Tapped += (_, _) =>
@@ -372,6 +440,13 @@ internal sealed class PlaylistStrip : Border
             _dragging = _dragged = true;
             e.Pointer.Capture(_tuneBox);
             _tuneBox.Cursor = new Cursor(StandardCursorType.SizeNorthSouth);
+            // Only the user's own order can be moved in: back to it, the tune still held.
+            if (playlist.Sort != TuneSort.Own)
+            {
+                playlist.SortBy(TuneSort.Own);
+                ShowSort();
+                _tuneBox.ScrollIntoView(tune);
+            }
             _tuneBox.SelectedItem = tune;
         }
 
@@ -453,9 +528,50 @@ internal sealed class PlaylistStrip : Border
             ? "No playlists yet. Drop a folder of .sid tunes on the window to play them all, or start a playlist of favourites with +."
             : "No tunes yet. Play one, then add it here with Add to playlist - or right-click a tune in another playlist.";
         _empty.IsVisible = playlist is null || playlist is { IsFolder: false, Tunes.Count: 0 };
+        _sort.IsVisible = playlist is { Tunes.Count: > 0 };
+        ShowSort();
         Count();
         if (_playing is not null && playlist?.Tunes.Contains(_playing) == true)
             _tuneBox.SelectedItem = _playing;
+    }
+
+    /// <summary>The shown playlist in this order, and the tune playing still lit and in view. A
+    /// favourite keeps its sort.</summary>
+    private void ChooseSort(TuneSort sort)
+    {
+        if (Shown is not { } playlist)
+            return;
+        playlist.SortBy(sort);
+        if (!playlist.IsFolder)
+            Favourites.Save(_favourites);
+        ShowSort();
+        LightPlaying(playlist);
+    }
+
+    private void ShowSort()
+    {
+        var sort = Shown?.Sort ?? TuneSort.Own;
+        foreach (var (each, item) in _sortItems)
+            item.IsChecked = each == sort;
+        _sortName.Text = _sortItems.TryGetValue(sort, out var chosen) ? (string?)chosen.Header : "";
+    }
+
+    /// <summary>Sorting empties the list's selection: the tune playing chosen again, and in view.</summary>
+    private void LightPlaying(Playlist playlist)
+    {
+        if (Shown == playlist && _playing is not null && playlist.Tunes.Contains(_playing))
+        {
+            _tuneBox.SelectedItem = _playing;
+            _tuneBox.ScrollIntoView(_playing);
+        }
+    }
+
+    /// <summary>A tune's length measured: shown wherever the tune is listed.</summary>
+    public void Measured(string key)
+    {
+        var length = TuneHistory.Of(key)?.Length;
+        foreach (var tune in _lists.SelectMany(p => p.Tunes).Where(t => t.Key == key))
+            tune.Length = length;
     }
 
     private void Count()
@@ -520,7 +636,7 @@ internal sealed class PlaylistStrip : Border
         if (favourite.Contains(path))
             return;
         var tune = new PlaylistTune(path);
-        favourite.Tunes.Add(tune);
+        favourite.Add(tune);
         ReadHeaders([tune]);
         Favourites.Save(_favourites);
         if (Shown == favourite)
@@ -529,7 +645,7 @@ internal sealed class PlaylistStrip : Border
 
     private void Remove(Playlist favourite, PlaylistTune tune)
     {
-        favourite.Tunes.Remove(tune);
+        favourite.Remove(tune);
         Favourites.Save(_favourites);
         ShowTunes();
     }
@@ -578,8 +694,9 @@ internal sealed class PlaylistStrip : Border
         ShowTunes();
     }
 
-    /// <summary>Names and authors from the tunes' headers, read off the UI thread and shown as they come.</summary>
-    private static void ReadHeaders(IEnumerable<PlaylistTune> tunes)
+    /// <summary>Names and authors from the tunes' headers, read off the UI thread and shown as they
+    /// come; a sorted playlist sorted again when they are all in, as it sorts by them.</summary>
+    private void ReadHeaders(IEnumerable<PlaylistTune> tunes)
     {
         var list = tunes.ToList();
         Task.Run(() =>
@@ -587,8 +704,18 @@ internal sealed class PlaylistStrip : Border
             foreach (var tune in list)
             {
                 if (tune.ReadHeader() is { } header)
-                    Dispatcher.UIThread.Post(() => (tune.Title, tune.Author, tune.Songs) = header, DispatcherPriority.Background);
+                    Dispatcher.UIThread.Post(() => tune.Take(header), DispatcherPriority.Background);
             }
+            Dispatcher.UIThread.Post(() =>
+            {
+                foreach (var playlist in _lists.Where(p => p.Sort != TuneSort.Own && p.Tunes.Any(list.Contains)))
+                {
+                    if (_dragging && Shown == playlist)
+                        continue;
+                    playlist.Resort();
+                    LightPlaying(playlist);
+                }
+            }, DispatcherPriority.Background);
         });
     }
 
@@ -598,6 +725,7 @@ internal sealed class PlaylistStrip : Border
         _heading.FontSize = 18 * _scale;
         _count.FontSize = 12 * _scale;
         _empty.FontSize = 12 * _scale;
+        _sortName.FontSize = 12 * _scale;
         Width = StripWidth * (1 + (_scale - 1) / 2);
         // The rows are made at the size: made again.
         var selected = _listBox.SelectedItem;

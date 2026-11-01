@@ -18,30 +18,37 @@ internal sealed class Transcription
 
     public required Transcriber.Report Report { get; init; }
 
+    /// <summary>The rows its notes fall on, for the whole tune to keep; null when it had too few
+    /// notes to tell.</summary>
+    public Music.Grid? Rows { get; private init; }
+
     /// <summary>The first <paramref name="seconds"/> of the tune - quick to make, to show while the
     /// whole of it is.</summary>
     public static Transcription Opening(SidFile file, int song, double seconds, CancellationToken cancel) =>
-        Of(Recording.Record(file, song, seconds), cancel);
+        Of(Recording.Record(file, song, seconds), null, cancel);
 
     /// <summary>The whole tune, to its loop, and its length - measured and recorded in one run of
-    /// the C64, keeping only what the tune's player writes.</summary>
-    public static (Transcription Transcription, SidSongLength.Result? Length) Whole(SidFile file, int song, CancellationToken cancel)
+    /// the C64, keeping only what the tune's player writes. On <paramref name="rows"/> when given, so
+    /// that the rows go on at the speed the opening showed them at.</summary>
+    public static (Transcription Transcription, SidSongLength.Result? Length) Whole(SidFile file, int song, Music.Grid? rows, CancellationToken cancel)
     {
         var (recording, length) = Recording.RecordWhole(file, song);
         cancel.ThrowIfCancellationRequested();
-        return (Of(recording, cancel), length);
+        return (Of(recording, rows, cancel), length);
     }
 
-    private static Transcription Of(Recording recording, CancellationToken cancel)
+    private static Transcription Of(Recording recording, Music.Grid? rows, CancellationToken cancel)
     {
         cancel.ThrowIfCancellationRequested();
-        var (score, report) = Transcriber.Transcribe(recording, Music.Of(recording));
+        var grid = rows ?? Music.RowsOf(recording);
+        var (score, report) = Transcriber.Transcribe(recording, Music.Of(recording, grid));
         cancel.ThrowIfCancellationRequested();
         return new Transcription
         {
             Score = score,
             Timeline = ScoreTimeline.Of(score, Math.Max(1, recording.Calls.Count)),
             Report = report,
+            Rows = grid,
         };
     }
 

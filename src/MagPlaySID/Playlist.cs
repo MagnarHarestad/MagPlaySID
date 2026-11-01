@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using MagSid.Playback;
 
 namespace MagPlaySid;
@@ -20,14 +22,43 @@ internal abstract class Observable : INotifyPropertyChanged
     }
 }
 
+/// <summary>The order a playlist shows and plays its tunes in. Kept by number in playlists.json, so
+/// new ones go last.</summary>
+internal enum TuneSort
+{
+    Own,
+    YearNewest,
+    YearOldest,
+    TitleAToZ,
+    TitleZToA,
+    ComposerAToZ,
+    GroupAToZ,
+    FileNewest,
+    FileOldest,
+    SongsMost,
+    SongsFewest,
+    LengthLongest,
+    LengthShortest,
+    RecentlyPlayed,
+    MostPlayed,
+    Shuffle,
+}
+
+/// <summary>What a tune's file says of it.</summary>
+internal sealed record TuneHeader(string Title, string Author, int Songs, string Released, string Key, DateTime Written);
+
 /// <summary>A tune in a playlist: its file, named by the file until its header has been read.</summary>
 internal sealed class PlaylistTune : Observable
 {
+    /// <summary>A year in a header's released text, or a decade: "199?" is as near as some are known.</summary>
+    private static readonly Regex YearIn = new(@"\b((?:19|20)\d\d)\b|\b((?:19|20)\d)\?", RegexOptions.Compiled);
+
     private string _title;
     private string _author = "";
     private int _songs = 1;
     private int _number;
     private bool _playing;
+    private TimeSpan? _length;
 
     public PlaylistTune(string path)
     {
@@ -49,30 +80,74 @@ internal sealed class PlaylistTune : Observable
 
     public bool IsPlaying { get => _playing; set => Set(ref _playing, value); }
 
-    /// <summary>The tune's name, author and number of songs from its header - null when the file
-    /// cannot be read. Off the UI thread: a folder can hold thousands.</summary>
-    public (string Title, string Author, int Songs)? ReadHeader()
+    /// <summary>Its length, once it has been played: measuring it is playing it.</summary>
+    public TimeSpan? Length { get => _length; set => Set(ref _length, value); }
+
+    /// <summary>The year it came out, the most its header can say; null when it does not.</summary>
+    public int? Year { get; private set; }
+
+    /// <summary>Who released it, from its header: the released text without the year.</summary>
+    public string Group { get; private set; } = "";
+
+    public DateTime? Written { get; private set; }
+
+    /// <summary>What it is known by in <see cref="TuneHistory"/>; null until its header has been read.</summary>
+    public string? Key { get; private set; }
+
+    /// <summary>The tune's name, author and the rest from its file - null when the file cannot be
+    /// read. Off the UI thread: a folder can hold thousands.</summary>
+    public TuneHeader? ReadHeader()
     {
         try
         {
-            var file = SidFile.Parse(File.ReadAllBytes(Path));
+            byte[] bytes = File.ReadAllBytes(Path);
+            var file = SidFile.Parse(bytes);
             string title = string.IsNullOrWhiteSpace(file.Name) ? System.IO.Path.GetFileNameWithoutExtension(Path) : file.Name.Trim();
-            return (title, file.Author?.Trim() ?? "", Math.Max(1, file.Songs));
+            return new TuneHeader(title, file.Author?.Trim() ?? "", Math.Max(1, file.Songs), file.Released?.Trim() ?? "",
+                                  TuneHistory.KeyOf(bytes), File.GetLastWriteTimeUtc(Path));
         }
         catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
     }
+
+    /// <summary>The header read, on the UI thread.</summary>
+    public void Take(TuneHeader header)
+    {
+        (Title, Author, Songs) = (header.Title, header.Author, header.Songs);
+        (Key, Written) = (header.Key, header.Written);
+        var year = YearIn.Match(header.Released);
+        Year = !year.Success ? null : year.Groups[1].Success ? int.Parse(year.Groups[1].Value) : int.Parse(year.Groups[2].Value) * 10;
+        Group = (year.Success ? header.Released.Remove(year.Index, year.Length) : header.Released).Trim(' ', '?', '-', ',', '.');
+        Length = TuneHistory.Of(Key)?.Length;
+    }
+}
+
+/// <summary>The tunes in the order shown, put in another order in one go: moved one by one, a folder
+/// of thousands would renumber itself thousands of times.</summary>
+internal sealed class TuneList : ObservableCollection<PlaylistTune>
+{
+    public void Arrange(IEnumerable<PlaylistTune> order)
+    {
+        var tunes = order.ToList();
+        Items.Clear();
+        foreach (var tune in tunes)
+            Items.Add(tune);
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
 }
 
 /// <summary>
 /// Tunes to play one after another: a folder dropped on the window, or a favourite playlist the
 /// user made from tunes they played. The folder's is for this run only; the favourites are kept.
+/// Sorted, it shows and plays its tunes in that order, with the user's own kept to go back to.
 /// </summary>
 internal sealed class Playlist : Observable
 {
     private string _name;
+    private List<PlaylistTune> _own = [];
 
     public Playlist(string name, bool isFolder, IEnumerable<string> paths)
     {
@@ -89,7 +164,96 @@ internal sealed class Playlist : Observable
     /// <summary>A dropped folder's - not one of the favourites, and not kept.</summary>
     public bool IsFolder { get; }
 
-    public ObservableCollection<PlaylistTune> Tunes { get; } = [];
+    /// <summary>In the order shown and played.</summary>
+    public TuneList Tunes { get; } = new();
+
+    public TuneSort Sort { get; private set; }
+
+    /// <summary>In the order the user put them, whatever they are sorted by.</summary>
+    public IReadOnlyList<PlaylistTune> OwnOrder => Sort == TuneSort.Own ? Tunes : _own;
+
+    /// <summary>Sorted anew, even by what it is sorted by already: a sort stays as it was made while
+    /// tunes are played, or the tune after this one would keep changing.</summary>
+    public void SortBy(TuneSort sort)
+    {
+        if (Sort == TuneSort.Own)
+        {
+            if (sort == TuneSort.Own)
+                return;
+            _own = [.. Tunes];
+        }
+        Sort = sort;
+        Tunes.Arrange(sort == TuneSort.Own ? _own : Sorted(_own));
+    }
+
+    /// <summary>Sorted again now the tunes' headers are in; a shuffle stays as it fell.</summary>
+    public void Resort()
+    {
+        if (Sort is not (TuneSort.Own or TuneSort.Shuffle))
+            Tunes.Arrange(Sorted(_own));
+    }
+
+    public void Add(PlaylistTune tune)
+    {
+        Tunes.Add(tune);
+        if (Sort != TuneSort.Own)
+        {
+            _own.Add(tune);
+            Resort();
+        }
+    }
+
+    public void Remove(PlaylistTune tune)
+    {
+        Tunes.Remove(tune);
+        _own.Remove(tune);
+    }
+
+    /// <summary>Tunes in the playlist's sort, ties as they came. Those the sort knows nothing of -
+    /// no year, never played - last, whichever way it runs.</summary>
+    private IEnumerable<PlaylistTune> Sorted(IEnumerable<PlaylistTune> tunes)
+    {
+        double? Plays(PlaylistTune tune) => TuneHistory.Of(tune.Key)?.Plays is > 0 and var plays ? plays : null;
+        double? Played(PlaylistTune tune) => TuneHistory.Of(tune.Key)?.LastPlayed?.Ticks;
+        double? Seconds(PlaylistTune tune) => tune.Length?.TotalSeconds;
+        double? Written(PlaylistTune tune) => tune.Written?.Ticks;
+        switch (Sort)
+        {
+            case TuneSort.YearNewest: return Numbers(tunes, t => t.Year, descending: true);
+            case TuneSort.YearOldest: return Numbers(tunes, t => t.Year, descending: false);
+            case TuneSort.TitleAToZ: return Words(tunes, t => t.Title, descending: false);
+            case TuneSort.TitleZToA: return Words(tunes, t => t.Title, descending: true);
+            case TuneSort.ComposerAToZ: return Words(tunes, t => t.Author, descending: false).ThenBy(t => t.Year ?? int.MaxValue).ThenBy(t => t.Title, StringComparer.OrdinalIgnoreCase);
+            case TuneSort.GroupAToZ: return Words(tunes, t => t.Group, descending: false);
+            case TuneSort.FileNewest: return Numbers(tunes, Written, descending: true);
+            case TuneSort.FileOldest: return Numbers(tunes, Written, descending: false);
+            case TuneSort.SongsMost: return Numbers(tunes, t => t.Songs, descending: true);
+            case TuneSort.SongsFewest: return Numbers(tunes, t => t.Songs, descending: false);
+            case TuneSort.LengthLongest: return Numbers(tunes, Seconds, descending: true);
+            case TuneSort.LengthShortest: return Numbers(tunes, Seconds, descending: false);
+            case TuneSort.RecentlyPlayed: return Numbers(tunes, Played, descending: true);
+            case TuneSort.MostPlayed: return Numbers(tunes, Plays, descending: true);
+            case TuneSort.Shuffle:
+                var shuffled = tunes.ToArray();
+                Random.Shared.Shuffle(shuffled);
+                return shuffled;
+            default: return tunes;
+        }
+    }
+
+    private static IOrderedEnumerable<PlaylistTune> Numbers(IEnumerable<PlaylistTune> tunes, Func<PlaylistTune, double?> key, bool descending)
+    {
+        var known = tunes.OrderBy(t => key(t) is null);
+        return descending ? known.ThenByDescending(key) : known.ThenBy(key);
+    }
+
+    /// <summary>Text no one has filled in, or the collections' "&lt;?&gt;" for not known, counts as none.</summary>
+    private static IOrderedEnumerable<PlaylistTune> Words(IEnumerable<PlaylistTune> tunes, Func<PlaylistTune, string> key, bool descending)
+    {
+        string Filled(PlaylistTune tune) => key(tune).Trim() is "<?>" or "" ? "" : key(tune);
+        var known = tunes.OrderBy(t => Filled(t).Length == 0);
+        return descending ? known.ThenByDescending(Filled, StringComparer.OrdinalIgnoreCase) : known.ThenBy(Filled, StringComparer.OrdinalIgnoreCase);
+    }
 
     public bool Contains(string path) => Tunes.Any(t => SamePath(t.Path, path));
 
@@ -142,24 +306,29 @@ internal sealed class Playlist : Observable
                       OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }
 
-/// <summary>The favourite playlists, in playlists.json beside the settings: each a name and its
-/// tunes' paths. A file that cannot be read is no favourites; one that cannot be written is let go.</summary>
+/// <summary>The favourite playlists, in playlists.json beside the settings: each a name, its
+/// tunes' paths in the user's own order, and what it is sorted by. A file that cannot be read is no favourites; one that cannot be written is let go.</summary>
 internal static class Favourites
 {
     private static readonly string FilePath = Path.Combine(Settings.Folder, "playlists.json");
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
-    private sealed record Stored(string Name, List<string> Tunes);
+    private sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own);
 
     public static List<Playlist> Load()
     {
         try
         {
             var stored = JsonSerializer.Deserialize<List<Stored>>(File.ReadAllText(FilePath), Json) ?? [];
-            return stored.Where(s => !string.IsNullOrWhiteSpace(s.Name))
-                         .Select(s => new Playlist(s.Name, isFolder: false, s.Tunes ?? []))
-                         .ToList();
+            var playlists = new List<Playlist>();
+            foreach (var s in stored.Where(s => !string.IsNullOrWhiteSpace(s.Name)))
+            {
+                var playlist = new Playlist(s.Name, isFolder: false, s.Tunes ?? []);
+                playlist.SortBy(s.Sort);
+                playlists.Add(playlist);
+            }
+            return playlists;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -172,7 +341,7 @@ internal static class Favourites
         try
         {
             Directory.CreateDirectory(Settings.Folder);
-            var stored = playlists.Select(p => new Stored(p.Name, p.Tunes.Select(t => t.Path).ToList())).ToList();
+            var stored = playlists.Select(p => new Stored(p.Name, p.OwnOrder.Select(t => t.Path).ToList(), p.Sort)).ToList();
             File.WriteAllText(FilePath, JsonSerializer.Serialize(stored, Json));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

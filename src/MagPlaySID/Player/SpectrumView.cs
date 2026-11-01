@@ -56,6 +56,9 @@ internal sealed class SpectrumView : Control
         }
     }
 
+    /// <summary>Each band's level now, 0-1, from low to high.</summary>
+    public IReadOnlyList<float> Levels => _levels;
+
     /// <summary>Advances the display by one frame from the mix the listener is hearing.</summary>
     public void Update(IScopeSource engine, long atSample)
     {
