@@ -1111,8 +1111,8 @@ internal sealed class PlayerWindow : Window
         {
             _metersAt = at;
             _spectrum.Update(engine, at);
-            _landscape.Update(_spectrum.Levels, at);
-            _neon.Update(_spectrum.Levels);
+            _landscape.Update(_spectrum.Relative, at);
+            _neon.Update(_spectrum.Relative, at);
             foreach (var scope in _scopes)
                 scope.Update(engine, at);
             _piano.Update(engine, at, _muted);

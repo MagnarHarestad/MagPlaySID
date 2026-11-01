@@ -20,8 +20,16 @@ internal sealed class SpectrumView : Control
     private const float PeakFallPerFrame = 0.006f;
     private const float ReflectionShare = 0.26f;
 
+    /// <summary>Below this a band counts as silent, however quiet it has lately been.</summary>
+    private const float QuietestLoud = 0.15f;
+
+    /// <summary>How fast a band forgets how loud it has been, per frame: about half a minute from full to silent.</summary>
+    private const float ForgetPerFrame = 0.0005f;
+
     private readonly float[] _levels = new float[Bands];
     private readonly float[] _peaks = new float[Bands];
+    private readonly float[] _loudest = new float[Bands];
+    private readonly float[] _relative = new float[Bands];
     private readonly float[] _window = new float[SidFilePlaybackEngine.ScopeSamples];
     private readonly float[] _samples = new float[SidFilePlaybackEngine.ScopeSamples];
     private readonly Complex[] _fft = new Complex[SidFilePlaybackEngine.ScopeSamples];
@@ -59,6 +67,10 @@ internal sealed class SpectrumView : Control
     /// <summary>Each band's level now, 0-1, from low to high.</summary>
     public IReadOnlyList<float> Levels => _levels;
 
+    /// <summary>Each band's level now as a share of its own recent loudest, from low to high: the
+    /// quiet treble moves as much as the bass.</summary>
+    public IReadOnlyList<float> Relative => _relative;
+
     /// <summary>Advances the display by one frame from the mix the listener is hearing.</summary>
     public void Update(IScopeSource engine, long atSample)
     {
@@ -85,6 +97,8 @@ internal sealed class SpectrumView : Control
 
             _levels[band] = level > _levels[band] ? level : Math.Max(level, _levels[band] - FallPerFrame);
             _peaks[band] = _levels[band] > _peaks[band] ? _levels[band] : Math.Max(_levels[band], _peaks[band] - PeakFallPerFrame);
+            _loudest[band] = Math.Max(Math.Max(_levels[band], QuietestLoud), _loudest[band] - ForgetPerFrame);
+            _relative[band] = _levels[band] / _loudest[band];
         }
 
         InvalidateVisual();
@@ -94,6 +108,8 @@ internal sealed class SpectrumView : Control
     {
         Array.Clear(_levels);
         Array.Clear(_peaks);
+        Array.Clear(_loudest);
+        Array.Clear(_relative);
         InvalidateVisual();
     }
 

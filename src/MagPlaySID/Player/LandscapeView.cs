@@ -6,20 +6,20 @@ namespace MagPlaySid.Player;
 
 /// <summary>
 /// The music as a landscape to fly into, in lines: each moment of the spectrum is a ridge that rises
-/// on the horizon and comes towards the viewer, the bass in tall peaks down the middle, the treble
-/// lower and further out, and the land sinking to a flat grid as it nears. It moves by the tune's own
-/// time, so it stands still when the tune is paused and rushes when it fast-forwards. Nearer ridges
-/// hide what lies behind them, and the lines fade with distance. Worked out and painted only when
-/// the tune has moved.
+/// on the horizon and comes towards the viewer, the bass in the tallest peaks down the middle, the
+/// treble in lower ones out to the edges, and the land sinking to a flat grid close to the viewer.
+/// It moves by the tune's own time, so it stands still when the tune is paused and rushes when it
+/// fast-forwards. Nearer ridges hide what lies behind them, and the lines fade with distance. Worked
+/// out and painted only when the tune has moved.
 /// </summary>
 internal sealed class LandscapeView : Control
 {
     private const int Rows = 30;
     private const int Columns = 121;
 
-    /// <summary>The columns either side of the middle that the bands rise in; beyond them lies the
-    /// floor, only rippling.</summary>
-    private const int PeakColumns = 40;
+    /// <summary>The columns either side of the middle that are always drawn in full; beyond them
+    /// the far land is thinned.</summary>
+    private const int DenseColumns = 40;
 
     /// <summary>The tune's samples between two ridges: twenty a second.</summary>
     private const int RowSamples = 2205;
@@ -41,14 +41,22 @@ internal sealed class LandscapeView : Control
     /// <summary>Of the far floor, one ridge in this many is drawn right across, and one column in half as many.</summary>
     private const int ThinRidges = 4;
 
-    /// <summary>The tallest peak, as a share of the view's height, on the horizon.</summary>
-    private const double PeakHeight = 1.5;
+    /// <summary>The tallest peak, as a share of the view's height, one unit of depth away.</summary>
+    private const double PeakHeight = 1.2;
 
     /// <summary>How finely the fading with distance is drawn: as many pens as this.</summary>
     private const int Shades = 16;
 
-    /// <summary>Below this a band's level leaves the ground flat: quiet is plain, loud is mountains.</summary>
-    private const float GroundLevel = 0.32f;
+    /// <summary>Below this share of its recent loudest a band leaves the ground flat: quiet is plain,
+    /// loud is mountains.</summary>
+    private const float GroundLevel = 0.6f;
+
+    /// <summary>The height left to the peaks at the view's edges, as a share of those in the middle.</summary>
+    private const double EdgeHeight = 0.5;
+
+    /// <summary>How far off, as a share of the way to the horizon, the land starts to rise, and how
+    /// far on it has risen in full: the peaks stay up until close to the viewer.</summary>
+    private const double RiseFrom = 0.10, RiseOver = 0.28;
 
     private static readonly IBrush Ground = SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground);
     private static readonly IPen Border = SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder);
@@ -69,7 +77,8 @@ internal sealed class LandscapeView : Control
     public LandscapeView() => ClipToBounds = true;
 
     /// <summary>On to the tune's sample <paramref name="at"/>: a new ridge from
-    /// <paramref name="levels"/>, the spectrum's bands from low to high, for each one due.</summary>
+    /// <paramref name="levels"/>, the spectrum's bands from low to high, each as a share of its recent
+    /// loudest, for each one due.</summary>
     public void Update(IReadOnlyList<float> levels, long at)
     {
         long row = at / RowSamples;
@@ -104,12 +113,12 @@ internal sealed class LandscapeView : Control
         int middle = Columns / 2;
         for (int column = 0; column < Columns; column++)
         {
-            double out_ = Math.Min(1, Math.Abs(column - middle) / (double)PeakColumns);
-            int band = (int)(Math.Pow(out_, 0.75) * (levels.Count - 2)) + (column > middle ? 1 : 0);
+            double out_ = Math.Abs(column - middle) / (double)middle;
+            int band = (int)(out_ * (levels.Count - 2)) + (column > middle ? 1 : 0);
             double level = Math.Max(0, (levels[band] - GroundLevel) / (1 - GroundLevel));
 
             double falling = 1 - out_;
-            heights[column] = (float)(Math.Pow(level, 1.15) * (0.05 + 0.95 * Math.Pow(falling, 4)));
+            heights[column] = (float)(Math.Pow(level, 1.5) * (EdgeHeight + (1 - EdgeHeight) * falling * falling));
         }
     }
 
@@ -148,19 +157,19 @@ internal sealed class LandscapeView : Control
             double distance = (depth - Near) / ((Rows - 1) * RowDepth);
             bool thin = distance > ThinFrom;
             bool across = !thin || (_row - age) % ThinRidges == 0;
-            int peaksFrom = Math.Max(from, Columns / 2 - PeakColumns), peaksTo = Math.Min(to, Columns / 2 + PeakColumns);
+            int denseFrom = Math.Max(from, Columns / 2 - DenseColumns), denseTo = Math.Min(to, Columns / 2 + DenseColumns);
 
             var lines = new StreamGeometry();
             using (var path = lines.Open())
             {
-                int lineFrom = across ? from : peaksFrom, lineTo = across ? to : peaksTo;
+                int lineFrom = across ? from : denseFrom, lineTo = across ? to : denseTo;
                 path.BeginFigure(_nearRidge[lineFrom], false);
                 for (int column = lineFrom + 1; column <= lineTo; column++)
                     path.LineTo(_nearRidge[column]);
                 path.EndFigure(false);
                 for (int column = from; column <= to; column++)
                 {
-                    if (thin && (column < peaksFrom || column > peaksTo) && (column - Columns / 2) % (ThinRidges / 2) != 0)
+                    if (thin && (column < denseFrom || column > denseTo) && (column - Columns / 2) % (ThinRidges / 2) != 0)
                         continue;
                     path.BeginFigure(_nearRidge[column], false);
                     path.LineTo(_farRidge[column]);
@@ -201,12 +210,12 @@ internal sealed class LandscapeView : Control
         double horizon = bounds.Height * HorizonAt;
         double scale = bounds.Height / depth;
 
-        // The land flattens as it nears, and its far peaks keep more of their height than distance
-        // alone would leave them: a floor to fly along, and towers ahead.
+        // The land flattens only close to the viewer, and its far peaks keep more of their height than
+        // distance alone would leave them: towers ahead, and a short floor to fly along.
         double far = Math.Clamp((depth - Near) / ((Rows - 1) * RowDepth), 0, 1);
-        double rising = Math.Clamp((far - 0.18) / 0.34, 0, 1);
+        double rising = Math.Clamp((far - RiseFrom) / RiseOver, 0, 1);
         rising *= rising * (3 - 2 * rising);
-        double rise = bounds.Height * PeakHeight * rising * Math.Pow(1 / depth, 0.22);
+        double rise = bounds.Height * PeakHeight * rising * Math.Pow(1 / depth, 0.5);
         for (int column = 0; column < Columns; column++)
         {
             points[column] = new Point(
