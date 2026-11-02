@@ -9,7 +9,7 @@ namespace MagPlay.C64;
 ///
 /// Laid out at the real addresses, since tunes jump to them by number:
 /// $FF48 saves A, X, Y and goes through $0314 (IRQ) or $0316 (BRK); $EA31 is the IRQ's default
-/// end and $EA7E/$EA81 acknowledge CIA 1 and restore the registers; $FE43 is the NMI entry, through
+/// end, joined anywhere up to $EA7E/$EA81, which acknowledge CIA 1 and restore the registers; $FE43 is the NMI entry, through
 /// $0318, and $FE47/$FEBC its default and its end.
 /// </summary>
 internal static class Kernal
@@ -31,16 +31,25 @@ internal static class Kernal
                 rom[address - 0xE000 + i] = (byte)code[i];
         }
 
-        // Every jump-table entry, and the routines RSID inits call most, returns at once.
+        // Every jump-table entry, and the routines RSID inits call most, returns at once - the
+        // keyboard scan at $EA87 among them, called from a tune's handler.
         for (int entry = 0xFF81; entry <= 0xFFF3; entry += 3)
             Put(entry, 0x60);
-        foreach (int routine in new[] { 0xE544, 0xE5A0, 0xFD15, 0xFDA3, 0xFF5B, 0xE3BF, 0xE453 })
+        foreach (int routine in new[] { 0xE544, 0xE5A0, 0xFD15, 0xFDA3, 0xFF5B, 0xE3BF, 0xE453, 0xEA87 })
             Put(routine, 0x60);
+
+        // The millisecond's wait at $EEB3 takes its time, as a tune may time itself by it:
+        // txa / ldx #$B8 / dex / bne / tax / rts
+        Put(0xEEB3, 0x8A, 0xA2, 0xB8, 0xCA, 0xD0, 0xFD, 0xAA, 0x60);
 
         // IRQ: pha / txa / pha / tya / pha / tsx / lda $0104,x / and #$10 / beq irq / jmp ($0316) / irq: jmp ($0314)
         Put(Irq, 0x48, 0x8A, 0x48, 0x98, 0x48, 0xBA, 0xBD, 0x04, 0x01, 0x29, 0x10, 0xF0, 0x03, 0x6C, 0x16, 0x03, 0x6C, 0x14, 0x03);
 
-        // The default IRQ's end: acknowledge CIA 1, restore the registers, return.
+        // The default IRQ's end: acknowledge CIA 1, restore the registers, return. A tune's handler
+        // may join it anywhere the real one blinks the cursor or scans the keyboard - $EA34 and $EA7B
+        // are the usual - and goes on to the end through NOPs.
+        for (int at = IrqDefault + 3; at < 0xEA7E; at++)
+            Put(at, 0xEA);
         Put(IrqDefault, 0x4C, 0x7E, 0xEA);
         Put(0xEA7E, 0xAD, 0x0D, 0xDC);
         Put(IrqEnd, 0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40);

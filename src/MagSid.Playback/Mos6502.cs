@@ -254,7 +254,7 @@ public sealed class Mos6502
             case 0x8A: A = X; SetZn(A); break;
             case 0x98: A = Y; SetZn(A); break;
             case 0xBA: X = SP; SetZn(X); break;
-            case 0x9A: SP = A; break;
+            case 0x9A: SP = X; break;
 
             // --- stack ---
             case 0x48: Push(A); break;
