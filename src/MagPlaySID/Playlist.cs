@@ -147,6 +147,7 @@ internal sealed class TuneList : ObservableCollection<PlaylistTune>
 internal sealed class Playlist : Observable
 {
     private string _name;
+    private string? _heart;
     private List<PlaylistTune> _own = [];
 
     public Playlist(string name, bool isFolder, IEnumerable<string> paths)
@@ -160,6 +161,9 @@ internal sealed class Playlist : Observable
     }
 
     public string Name { get => _name; set => Set(ref _name, value); }
+
+    /// <summary>The colour the user gave a favourite's heart, as #RRGGBB; null for the usual one.</summary>
+    public string? Heart { get => _heart; set => Set(ref _heart, value); }
 
     /// <summary>A dropped folder's - not one of the favourites, and not kept.</summary>
     public bool IsFolder { get; }
@@ -307,7 +311,7 @@ internal sealed class Playlist : Observable
 }
 
 /// <summary>The favourite playlists, in playlists.json beside the settings: each a name, its
-/// tunes' paths in the user's own order, and what it is sorted by; and beside them the song the user
+/// tunes' paths in the user's own order, what it is sorted by and its heart's colour; and beside them the song the user
 /// chose to play first of a tune, wherever that tune is played from. A file that cannot be read is no favourites; one that cannot be written is let go.</summary>
 internal static class Favourites
 {
@@ -320,7 +324,7 @@ internal static class Favourites
 
     private static Dictionary<string, int> _firstSongs = new(SamePaths);
 
-    private sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own);
+    private sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own, string? Heart = null);
 
     private sealed record Kept(List<Stored>? Playlists, Dictionary<string, int>? FirstSongs);
 
@@ -350,7 +354,7 @@ internal static class Favourites
             var playlists = new List<Playlist>();
             foreach (var s in (kept?.Playlists ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Name)))
             {
-                var playlist = new Playlist(s.Name, isFolder: false, s.Tunes ?? []);
+                var playlist = new Playlist(s.Name, isFolder: false, s.Tunes ?? []) { Heart = s.Heart };
                 playlist.SortBy(s.Sort);
                 playlists.Add(playlist);
             }
@@ -367,7 +371,7 @@ internal static class Favourites
         try
         {
             Directory.CreateDirectory(Settings.Folder);
-            var stored = playlists.Select(p => new Stored(p.Name, p.OwnOrder.Select(t => t.Path).ToList(), p.Sort)).ToList();
+            var stored = playlists.Select(p => new Stored(p.Name, p.OwnOrder.Select(t => t.Path).ToList(), p.Sort, p.Heart)).ToList();
             File.WriteAllText(FilePath, JsonSerializer.Serialize(new Kept(stored, _firstSongs), Json));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

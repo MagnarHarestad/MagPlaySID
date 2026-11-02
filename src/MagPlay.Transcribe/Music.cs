@@ -71,6 +71,63 @@ public static class Music
     /// <summary>Note starts it takes to go by a recording's rows.</summary>
     private const int NotesToTellRows = 8;
 
+    /// <summary>The shortest a tune's notes repeating counts as its length: less is one bar held.</summary>
+    private const double ShortestRepeat = 5;
+
+    /// <summary>
+    /// How long a tune is by its notes: every voice's notes, with their pitch, sound and timing,
+    /// repeating to the end of <paramref name="recording"/>. A player can keep something that never
+    /// comes back the same - The Look's memory takes eight passes of its 2:30 to repeat, past where
+    /// it is looked for - while what is heard already has. With <paramref name="memory"/>, the
+    /// memory's own repeat, the notes must repeat through all of its loop, a whole number of times,
+    /// so they go on so for ever. Without it the recording only ran out: most of it must repeat, and
+    /// three times over. Null when the notes say nothing shorter.
+    /// </summary>
+    internal static MagSid.Playback.SidSongLength.Result? LengthByNotes(Recording recording, MagSid.Playback.SidSongLength.Result? memory)
+    {
+        if (recording.Calls.Count < 2)
+            return null;
+
+        var frames = Frames(recording, out var rises);
+        var starts = new List<(int Call, int Voice)>();
+        for (int v = 0; v < frames.Length; v++)
+            starts.AddRange(rises[v].Select(call => (call, v)));
+        starts.Sort();
+        if (starts.Count < 3)
+            return null;
+
+        var notes = new (int Voice, int Frequency, int Control, int AttackDecay, int SustainRelease, int Gap)[starts.Count - 1];
+        for (int n = 0; n < notes.Length; n++)
+        {
+            var (call, voice) = starts[n];
+            var frame = frames[voice][call];
+            notes[n] = (voice, frame.Frequency, frame.Control, frame.AttackDecay, frame.SustainRelease, starts[n + 1].Call - call);
+        }
+
+        double seconds = (recording.Calls[^1] - recording.Calls[0]) / Machines.ClockHz(recording.Machine);
+        double perSecond = memory?.CallsPerSecond ?? (seconds > 0 ? recording.Calls.Count / seconds : 50);
+        int looped = memory is null ? -1 : starts.FindIndex(s => s.Call >= memory.LoopStartFrame);
+        if (memory is not null && looped < 0)
+            return null;
+
+        for (int period = NotesToTellRows; period <= notes.Length / 2; period++)
+        {
+            int back = notes.Length - 1;
+            while (back >= period && notes[back] == notes[back - period])
+                back--;
+            int from = back - period + 1;
+            if (notes.Length - from < 2 * period || starts[from + period].Call - starts[from].Call < ShortestRepeat * perSecond)
+                continue;
+
+            bool holds = memory is null
+                ? from <= notes.Length / 3 && notes.Length - from >= 3 * period
+                : from <= looped && (notes.Length - looped) % period == 0;
+            if (holds)
+                return new MagSid.Playback.SidSongLength.Result(starts[from + period].Call, starts[from].Call, perSecond);
+        }
+        return null;
+    }
+
     /// <summary>A voice's registers after a call.</summary>
     internal readonly record struct Frame(int Frequency, int Pulse, int Control, int AttackDecay, int SustainRelease)
     {

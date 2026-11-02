@@ -33,6 +33,9 @@ public sealed class SidTune
     /// <summary>Where the driver was put.</summary>
     public int Driver { get; }
 
+    /// <summary>Where the KERNAL says whether the machine is PAL.</summary>
+    private const int PalFlag = 0x02A6;
+
     /// <summary>The KERNAL's CIA 1 timer: 60 interrupts a second on either machine.</summary>
     public static int KernalTimer(Machine machine) => machine == Machine.Ntsc ? 0x4295 : 0x4025;
 
@@ -56,6 +59,9 @@ public sealed class SidTune
             throw new SidPlaybackException(reason);
 
         var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids, sid, record);
+        // What the KERNAL leaves for a tune that asks which machine it is on, to set its pitches and
+        // tempo by - 1 for PAL. Before the tune's own bytes, should it load over it.
+        machine.Ram[PalFlag] = machine.Machine == Machine.Pal ? (byte)1 : (byte)0;
         file.Data.CopyTo(machine.Ram, file.LoadAddress);
 
         int driver = DriverAddress(file);

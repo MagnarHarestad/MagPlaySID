@@ -62,7 +62,8 @@ public sealed class Recording
     /// A whole tune: run until it loops - its length measured on the way - or for
     /// <paramref name="maxSeconds"/>, keeping its player's writes only, and the recording cut to
     /// the loop or <paramref name="seconds"/>. What a view of the tune needs, in one run and without
-    /// the digi it may stream beside its music. The player is found in its first ten seconds.
+    /// the digi it may stream beside its music. The player is found in its first ten seconds. A tune
+    /// whose notes repeat sooner than its memory does is as long as its notes say.
     /// </summary>
     public static (Recording Recording, SidSongLength.Result? Length) RecordWhole(SidFile file, int song,
         double seconds = 600, double maxSeconds = C64SongLength.MaxSeconds)
@@ -71,6 +72,7 @@ public sealed class Recording
         var tune = SidTune.Load(file, song);
         tune.Computer.Keep = context => context == player;
         var length = C64SongLength.Measure(tune, maxSeconds);
+        length = Music.LengthByNotes(Of(tune.Computer, player), length) ?? length;
 
         double clock = Machines.ClockHz(tune.Computer.Machine);
         double keep = length is null ? seconds : Math.Min(seconds, length.Total.TotalSeconds + 1);

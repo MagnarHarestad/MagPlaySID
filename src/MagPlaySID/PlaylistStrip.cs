@@ -57,6 +57,20 @@ internal sealed class PlaylistStrip : Border
     private static readonly Color Accent = SidPlayerPalette.VoiceColour(1);
     private static readonly Color Heart = SidPlayerPalette.VoiceColour(0);
 
+    /// <summary>The colours a favourite's heart can take; the first is the usual one, kept as none.</summary>
+    private static readonly (string Name, Color Colour)[] HeartColours =
+    [
+        ("Orange", Heart),
+        ("Red", Color.FromRgb(0xE5, 0x48, 0x4D)),
+        ("Pink", Color.FromRgb(0xF0, 0x6F, 0xB4)),
+        ("Violet", Color.FromRgb(0xA9, 0x7B, 0xF0)),
+        ("Blue", Color.FromRgb(0x5B, 0x9B, 0xF5)),
+        ("Cyan", Color.FromRgb(0x45, 0xC8, 0xD8)),
+        ("Green", Color.FromRgb(0x62, 0xC9, 0x6F)),
+        ("Yellow", Color.FromRgb(0xF2, 0xD3, 0x4F)),
+        ("White", Color.FromRgb(0xE8, 0xE8, 0xF0)),
+    ];
+
     private readonly Window _owner;
     private readonly List<Playlist> _favourites;
     private readonly ObservableCollection<Playlist> _lists = [];
@@ -281,21 +295,48 @@ internal sealed class PlaylistStrip : Border
         grid.Children.Add(count);
         var row = new Border { Padding = new Thickness(10, 7), Background = Brushes.Transparent, Child = grid };
 
-        row.DataContextChanged += (_, _) =>
+        icon.Bind(PathIcon.ForegroundProperty, new MultiBinding
         {
-            bool folder = row.DataContext is Playlist { IsFolder: true };
-            icon.Data = folder ? FolderIcon : HeartIcon;
-            icon.Foreground = SidPlayerPalette.Brush(folder ? SidPlayerPalette.Control : Heart);
-        };
+            Bindings = { new Binding(nameof(Playlist.IsFolder)), new Binding(nameof(Playlist.Heart)) },
+            Converter = new FuncMultiValueConverter<object?, IBrush>(values =>
+            {
+                var both = values.ToList();
+                return SidPlayerPalette.Brush(both[0] is true ? SidPlayerPalette.Control : HeartColour(both[1] as string));
+            }),
+        });
+        row.DataContextChanged += (_, _) => icon.Data = row.DataContext is Playlist { IsFolder: true } ? FolderIcon : HeartIcon;
         row.ContextRequested += (_, e) =>
         {
             e.Handled = true;
             if (row.DataContext is Playlist { IsFolder: false } playlist)
                 OpenMenu(row, [Item("Rename...", () => _ = RenameAsync(playlist)),
+                               HeartColourItem(playlist),
                                Item("Delete playlist...", () => _ = DeleteAsync(playlist))]);
         };
         return row;
     }
+
+    /// <summary>The menu's choice of colours for a favourite's heart, each shown as a heart of
+    /// its colour, and the one it has ticked.</summary>
+    private MenuItem HeartColourItem(Playlist playlist)
+    {
+        var colours = new MenuItem { Header = "Heart colour" };
+        var current = HeartColour(playlist.Heart);
+        foreach (var (name, colour) in HeartColours)
+        {
+            var item = Item(colour == current ? $"{name}  \u2713" : name, () =>
+            {
+                playlist.Heart = colour == Heart ? null : colour.ToString();
+                Favourites.Save(_favourites);
+            });
+            item.Icon = new PathIcon { Data = HeartIcon, Width = 13, Height = 12, Foreground = SidPlayerPalette.Brush(colour) };
+            colours.Items.Add(item);
+        }
+        return colours;
+    }
+
+    /// <summary>The colour kept for a heart; the usual one for none, or for one that cannot be read.</summary>
+    private static Color HeartColour(string? kept) => Color.TryParse(kept, out var colour) ? colour : Heart;
 
     /// <summary>A tune in the list: its number - bars while it plays - its name and author.</summary>
     private Control TuneRow()

@@ -90,9 +90,7 @@ internal sealed class ScoreView : Control
         Forget();
         _rowTexts.Clear();
         _placed = score is not null && timeline is not null ? Placed(score, timeline) : [0];
-        // The whole tune's rows in place of the opening's stay where the tune has got to.
-        if (score is null)
-            _call = 0;
+        _call = 0;
         _selected = Math.Min(_selected, Voices - 1);
         Width = ContentWidth;
         InvalidateVisual();
