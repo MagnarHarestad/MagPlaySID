@@ -137,7 +137,7 @@ internal sealed class ScoreView : Control
         double reach = (Bounds.Height - LineAt(Bounds.Height) + RowHeight) / RowHeight;
         while (below < last && _placed[below] - now < reach)
             below++;
-        int seam = timeline.CallAt(wasTimeline.CycleOf(below));
+        int seam = Math.Max(0, timeline.CallAt(wasTimeline.CycleOf(below)));
         if (timeline.Rows.FirstOrDefault(r => r.Count > 0) is { } grid)
         {
             int row = 0;
@@ -168,7 +168,7 @@ internal sealed class ScoreView : Control
             placed[call] = placed[upTo] + own[call] - own[upTo];
 
         double into = _call - Math.Floor(_call);
-        int nowCall = timeline.CallAt(wasTimeline.CycleOf((int)Math.Floor(_call)));
+        int nowCall = Same((int)Math.Floor(_call));
         (_beforeTexts, _rowTexts) = (_rowTexts, []);
         (_before, _beforeTimeline, _seam) = (was, wasTimeline, seam);
         (_score, _timeline, _rows, _firstOwn, _placed) = (score, timeline, rows, firstOwn, placed);
