@@ -927,11 +927,9 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>Transcribes the tune off the UI thread while it already plays: its first half
-    /// minute for the rows' speed, then the whole of it to its loop with its length - measured on
-    /// the C64 it plays on, so the length is in the time it plays in, and an RSID has one. The rows
-    /// are shown when the whole tune is heard: its first half minute alone can read the same notes
-    /// otherwise, and they would change under the listener. Should the whole tune fail, the first
-    /// half minute's are shown. On a
+    /// minute first, shown at once, then the whole of it to its loop with its length - measured on
+    /// the C64 it plays on, so the length is in the time it plays in, and an RSID has one. The whole
+    /// tune can read the same notes otherwise: its rows come in below what is on screen. On a
     /// thread of its own below the others' priority: it is the background's work, and the sound and
     /// the window come first - on the thread pool it held the sound thread back by up to 40 ms.</summary>
     private void Transcribe(int song)
@@ -956,10 +954,20 @@ internal sealed class PlayerWindow : Window
 
         var thread = new Thread(() =>
         {
-            Transcription? opening = null;
             try
             {
-                opening = Transcription.Opening(file, song, OpeningSeconds, cancel.Token);
+                var opening = Transcription.Opening(file, song, OpeningSeconds, cancel.Token);
+                Show(() =>
+                {
+                    if (_transcription is not null)
+                        return;
+                    _transcription = opening;
+                    _view.SetScore(opening.Score, opening.Timeline);
+                    _retroStatus.Text = $"The first {OpeningSeconds} seconds - the whole tune is on its way";
+                    // At once where the tune has got to, not a frame at its start first.
+                    Refresh();
+                });
+
                 var (whole, length) = Transcription.Whole(file, song, opening.Rows, cancel.Token);
                 Show(() =>
                 {
@@ -972,10 +980,8 @@ internal sealed class PlayerWindow : Window
                         TuneHistory.Measured(key, song, length.Total);
                         _strip.Measured(key);
                     }
-                    _view.SetScore(whole.Score, whole.Timeline);
+                    _view.ContinueWith(whole.Score, whole.Timeline);
                     _retroStatus.Text = whole.Describe();
-                    // At once where the tune has got to, not a frame at its start first.
-                    Refresh();
                 });
             }
             catch (OperationCanceledException)
@@ -984,18 +990,9 @@ internal sealed class PlayerWindow : Window
             catch (Exception ex)
             {
                 Show(() => _lengthUnknown = true);
-                Show(() =>
-                {
-                    if (opening is null)
-                    {
-                        _retroStatus.Text = $"No rows to show: {ex.Message}";
-                        return;
-                    }
-                    _transcription = opening;
-                    _view.SetScore(opening.Score, opening.Timeline);
-                    _retroStatus.Text = $"Only the first {OpeningSeconds} seconds: {ex.Message}";
-                    Refresh();
-                });
+                Show(() => _retroStatus.Text = _transcription is null
+                    ? $"No rows to show: {ex.Message}"
+                    : $"Only the first {OpeningSeconds} seconds: {ex.Message}");
             }
         })
         {

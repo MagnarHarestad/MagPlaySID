@@ -15,8 +15,9 @@ namespace MagPlaySid;
 /// instrument with its wave and pulse programs, and the filter program, the step sounding lit.
 /// Rows are placed by when they play, so a row a note splits off its grid row is as tall as it is
 /// long; where notes come so fast that rows after rows would run together, the view scrolls faster
-/// through them, all voices alike, so each is written in full. Clicking a voice's rows selects it. A
-/// 2SID or 3SID tune shows every chip's voices, in narrower columns.
+/// through them, all voices alike, so each is written in full. A better reading of the tune while it
+/// plays takes over below what is on screen, so nothing the listener can see changes. Clicking a
+/// voice's rows selects it. A 2SID or 3SID tune shows every chip's voices, in narrower columns.
 /// </summary>
 internal sealed class ScoreView : Control
 {
@@ -46,7 +47,20 @@ internal sealed class ScoreView : Control
     private readonly Dictionary<(string Text, Color Ink, bool Bold), TextLayout> _laidOut = [];
 
     /// <summary>A played row's text, by its pattern, row and transpose: made once, not every frame.</summary>
-    private readonly Dictionary<(int Pattern, int Row, int Transpose), string> _rowTexts = [];
+    private Dictionary<(int Pattern, int Row, int Transpose), string> _rowTexts = [];
+
+    /// <summary>The score whose rows are still on screen above <see cref="_seam"/>, with its
+    /// timeline and row texts, until they have scrolled away; null when there is none.</summary>
+    private MagPlay.Score.Score? _before;
+    private ScoreTimeline? _beforeTimeline;
+    private Dictionary<(int Pattern, int Row, int Transpose), string> _beforeTexts = [];
+
+    /// <summary>The call from which the rows are the score's own; before it, <see cref="_before"/>'s.</summary>
+    private int _seam;
+
+    /// <summary>Each voice's rows as drawn: <see cref="_firstOwn"/> of the score before, then its own.</summary>
+    private IReadOnlyList<PlayedRow>[] _rows = [];
+    private int[] _firstOwn = [];
 
     private MagPlay.Score.Score? _score;
     private ScoreTimeline? _timeline;
@@ -89,12 +103,100 @@ internal sealed class ScoreView : Control
         _timeline = timeline;
         Forget();
         _rowTexts.Clear();
+        _before = null;
+        _beforeTimeline = null;
+        _beforeTexts.Clear();
+        _rows = timeline?.Rows ?? [];
+        _firstOwn = new int[_rows.Length];
         _placed = score is not null && timeline is not null ? Placed(score, timeline) : [0];
         _call = 0;
         _selected = Math.Min(_selected, Voices - 1);
         Width = ContentWidth;
         InvalidateVisual();
     }
+
+    /// <summary>
+    /// A better reading of the same tune, taking over where it cannot be seen: what is on screen
+    /// stays as it is and scrolls away, and the rows coming up from below are <paramref name="score"/>'s,
+    /// from the first of its rows past the view's bottom.
+    /// </summary>
+    public void ContinueWith(MagPlay.Score.Score score, ScoreTimeline timeline)
+    {
+        if (_score is not { } was || _timeline is not { } wasTimeline || was.Voices.Length != score.Voices.Length)
+        {
+            double at = _call;
+            SetScore(score, timeline);
+            _call = at;
+            return;
+        }
+
+        // The first call past the bottom of the view, and the new score's first row from there.
+        double now = PlacedAt(_call);
+        double last = _placed.Length - 1;
+        int below = Math.Max(0, (int)Math.Floor(_call));
+        double reach = (Bounds.Height - LineAt(Bounds.Height) + RowHeight) / RowHeight;
+        while (below < last && _placed[below] - now < reach)
+            below++;
+        int seam = timeline.CallAt(wasTimeline.CycleOf(below));
+        if (timeline.Rows.FirstOrDefault(r => r.Count > 0) is { } grid)
+        {
+            int row = 0;
+            while (row < grid.Count && grid[row].Call < seam)
+                row++;
+            seam = row < grid.Count ? grid[row].Call : timeline.Calls;
+        }
+
+        // Calls by the new timeline, should its calls fall otherwise: the old rows at their own times.
+        int Same(int call) => Math.Max(0, timeline.CallAt(wasTimeline.CycleOf(call)));
+        var rows = new IReadOnlyList<PlayedRow>[timeline.Rows.Length];
+        var firstOwn = new int[rows.Length];
+        for (int v = 0; v < rows.Length; v++)
+        {
+            var kept = _rows[v].Select(r => r with { Call = Same(r.Call) }).Where(r => r.Call < seam).ToList();
+            firstOwn[v] = kept.Count;
+            kept.AddRange(timeline.Rows[v].Where(r => r.Call >= seam));
+            rows[v] = kept;
+        }
+
+        // Where the calls lie: as they did up to the seam, then as the new score has them.
+        var own = Placed(score, timeline);
+        var placed = new double[own.Length];
+        int upTo = Math.Min(seam, own.Length - 1);
+        for (int call = 0; call <= upTo; call++)
+            placed[call] = _placed[Math.Clamp(wasTimeline.CallAt(timeline.CycleOf(call)), 0, _placed.Length - 1)];
+        for (int call = upTo + 1; call < own.Length; call++)
+            placed[call] = placed[upTo] + own[call] - own[upTo];
+
+        double into = _call - Math.Floor(_call);
+        int nowCall = timeline.CallAt(wasTimeline.CycleOf((int)Math.Floor(_call)));
+        (_beforeTexts, _rowTexts) = (_rowTexts, []);
+        (_before, _beforeTimeline, _seam) = (was, wasTimeline, seam);
+        (_score, _timeline, _rows, _firstOwn, _placed) = (score, timeline, rows, firstOwn, placed);
+        _call = nowCall + into;
+        Width = ContentWidth;
+        InvalidateVisual();
+    }
+
+    /// <summary>The score before let go, once its rows have left the view or the tune has gone back to them.</summary>
+    private void LetGoOfBefore(double goingTo)
+    {
+        if (_before is null || _score is not { } score || _timeline is not { } timeline)
+            return;
+        bool back = goingTo < _call;
+        double seamAt = (PlacedAt(_seam) - PlacedAt(goingTo)) * RowHeight + LineAt(Bounds.Height);
+        if (!back && seamAt > HeaderHeight - RowHeight)
+            return;
+
+        _before = null;
+        _beforeTimeline = null;
+        _beforeTexts.Clear();
+        _rows = timeline.Rows;
+        _firstOwn = new int[_rows.Length];
+        _placed = Placed(score, timeline);
+    }
+
+    /// <summary>The line where rows sound, in a view <paramref name="height"/> high.</summary>
+    private double LineAt(double height) => HeaderHeight + Math.Round((height - HeaderHeight) / 3);
 
     /// <summary>The view at <paramref name="cycle"/> of the tune: between two calls, as far from
     /// the one as the cycle is, so the rows scroll smoothly.</summary>
@@ -114,6 +216,7 @@ internal sealed class ScoreView : Control
         double now = call + into;
         if (now == _call)
             return;
+        LetGoOfBefore(now);
         _call = now;
         InvalidateVisual();
     }
@@ -178,7 +281,7 @@ internal sealed class ScoreView : Control
         if (_score is not { } score || _timeline is not { } timeline)
             return;
 
-        double line = HeaderHeight + Math.Round((bounds.Height - HeaderHeight) / 3);
+        double line = LineAt(bounds.Height);
 
         using (context.PushClip(new Rect(0, HeaderHeight, TrackerWidth, bounds.Height - HeaderHeight)))
         {
@@ -205,12 +308,12 @@ internal sealed class ScoreView : Control
     private void DrawVoice(DrawingContext context, MagPlay.Score.Score score, ScoreTimeline timeline, int v,
                            double left, double line, double height)
     {
-        var rows = timeline.Rows[v];
+        var rows = _rows[v];
         if (rows.Count == 0)
             return;
 
         var colour = SidPlayerPalette.VoiceColour(v % 3);
-        int now = Math.Max(0, timeline.RowAt(v, (int)Math.Floor(_call)));
+        int now = Math.Max(0, RowAt(rows, (int)Math.Floor(_call)));
         using var clip = context.PushClip(new Rect(left - 6, HeaderHeight, VoiceWidth + 6, height - HeaderHeight));
         double at = PlacedAt(_call);
         double Y(int i) => line + (PlacedAt(rows[i].Call) - at) * RowHeight;
@@ -238,14 +341,16 @@ internal sealed class ScoreView : Control
             }
             last = y;
 
-            var row = score.PatternNumber(played.Pattern)?.Rows.ElementAtOrDefault(played.Row) ?? Row.Hold;
+            bool before = i < _firstOwn[v];
+            var row = (before ? _before! : score).PatternNumber(played.Pattern)?.Rows.ElementAtOrDefault(played.Row) ?? Row.Hold;
+            var texts = before ? _beforeTexts : _rowTexts;
             bool sounding = i == now;
             bool empty = row.Note.Kind == RowNoteKind.Hold && row.Instrument == 0 && row.Effects.Count == 0;
             var ink = sounding ? SidPlayerPalette.Title
                 : empty ? SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 110)
                 : SidPlayerPalette.WithAlpha(colour, 220);
-            if (!_rowTexts.TryGetValue((played.Pattern, played.Row, played.Transpose), out var text))
-                _rowTexts[(played.Pattern, played.Row, played.Transpose)] = text = RowText(row, played);
+            if (!texts.TryGetValue((played.Pattern, played.Row, played.Transpose), out var text))
+                texts[(played.Pattern, played.Row, played.Transpose)] = text = RowText(row, played);
             Text(context, text, left + 4, y + 1, ink, bold: sounding);
             if (played.Row == 0)
             {
@@ -255,6 +360,26 @@ internal sealed class ScoreView : Control
                     Text(context, entry, left + VoiceWidth - entry.Length * _charWidth, y + 1, SidPlayerPalette.WithAlpha(colour, 150));
             }
         }
+    }
+
+    /// <summary>The row of <paramref name="rows"/> playing on <paramref name="call"/>; -1 before the first.</summary>
+    private static int RowAt(IReadOnlyList<PlayedRow> rows, int call)
+    {
+        int low = 0, high = rows.Count - 1, found = -1;
+        while (low <= high)
+        {
+            int middle = (low + high) / 2;
+            if (rows[middle].Call <= call)
+            {
+                found = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+        return found;
     }
 
     /// <summary>A row as a tracker writes it: its number in the pattern, the note, the instrument,
@@ -284,6 +409,9 @@ internal sealed class ScoreView : Control
     private void DrawPanel(DrawingContext context, MagPlay.Score.Score score, ScoreTimeline timeline, double left, double height)
     {
         int call = Math.Max(0, (int)Math.Floor(_call));
+        // The instruments the rows sounding name: the score before's until its rows have played.
+        if (_before is { } before && _beforeTimeline is { } beforeTimeline && call < _seam)
+            (score, timeline, call) = (before, beforeTimeline, Math.Max(0, beforeTimeline.CallAt(timeline.CycleOf(call))));
         var position = timeline.PositionOf(_selected, call);
         var colour = SidPlayerPalette.VoiceColour(_selected % 3);
         var dim = SidPlayerPalette.Subtitle;
