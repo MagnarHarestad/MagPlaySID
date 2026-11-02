@@ -9,9 +9,10 @@ namespace MagPlaySid.Player;
 /// <summary>
 /// The spectrum a third way, as water: bars of little neon blocks standing on a swaying line, reaching
 /// up or down as a slow swell passes along it, with thin lines of light rolling through them and
-/// sparks drifting above and below. The music decides how high the swell stands at each place, low
-/// notes on the left and high on the right; the swell itself moves by the tune's own time, so it
-/// stands still when the tune is paused and rushes when it fast-forwards.
+/// sparks riding along those lines. The music decides how high the swell stands at each place, low
+/// notes on the left and high on the right, and how brightly the lights glow: each line of light with
+/// its own share of the notes, flaring on a hit and dimming after. The swell itself moves by the
+/// tune's own time, so it stands still when the tune is paused and rushes when it fast-forwards.
 /// </summary>
 internal sealed class NeonSpectrumView : Control
 {
@@ -32,6 +33,19 @@ internal sealed class NeonSpectrumView : Control
     private const int Shades = 16;
 
     private const int Sparks = 48;
+
+    /// <summary>How finely a glow's strength is drawn: as many pens as this, made once.</summary>
+    private const int GlowLevels = 8;
+
+    /// <summary>How far a glow dims in a frame: about a second from full to none.</summary>
+    private const float GlowFading = 0.018f;
+
+    /// <summary>A glow's strength at rest, while there is music at all, and how much of it each bit
+    /// of a level above its own recent average adds: a hit flares in a loud tune as in a quiet one.</summary>
+    private const float GlowAtRest = 0.25f, GlowPerRise = 6f;
+
+    /// <summary>How much of the way to a new level the recent average goes in a frame.</summary>
+    private const float AverageFollowing = 0.02f;
     private const double Tau = 2 * Math.PI;
 
     /// <summary>A block's height as a share of the view's, the gap to the next as a share of a block.</summary>
@@ -50,11 +64,11 @@ internal sealed class NeonSpectrumView : Control
     /// the view, how fast it rolls, where it starts, and its colours' stops.</summary>
     private static readonly (double Lying, double Waves, double Speed, double Start, double Hue)[] Lights =
     [
-        (0.05, 1.3, 0.11, 0.00, 0.0),
-        (-0.04, 1.9, -0.08, 0.31, 0.5),
-        (0.12, 2.6, 0.15, 0.62, 0.25),
-        (0.00, 0.9, -0.05, 0.14, 0.75),
-        (-0.10, 3.3, 0.19, 0.85, 1.0),
+        (0.05, 1.3, 0.22, 0.00, 0.0),
+        (-0.04, 1.9, -0.16, 0.31, 0.5),
+        (0.12, 2.6, 0.30, 0.62, 0.25),
+        (0.00, 0.9, -0.10, 0.14, 0.75),
+        (-0.10, 3.3, 0.38, 0.85, 1.0),
     ];
 
     private static readonly IBrush Back = SidPlayerPalette.Brush(SidPlayerPalette.PanelBackground);
@@ -72,16 +86,24 @@ internal sealed class NeonSpectrumView : Control
     private static readonly IPen[] Halo = Enumerable.Range(0, Shades)
         .Select(shade => SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(At(shade / (double)(Shades - 1)), 60), 2))
         .ToArray();
-    private static readonly IPen[] Light = Lights.Select(light => (IPen)new ImmutablePen(Across(light.Hue, 190), 1.0)).ToArray();
-    private static readonly IPen[] LightHalo = Lights.Select(light => (IPen)new ImmutablePen(Across(light.Hue, 40), 3.5)).ToArray();
+    private static readonly IPen[] Light = Lights.Select(light => (IPen)new ImmutablePen(Across(light.Hue, 235), 1.2)).ToArray();
+    private static readonly IPen[][] LightHalo = Lights.Select(light => Levels(level => new ImmutablePen(Across(light.Hue, 30 + level * 12), 2.5 + level * 0.6))).ToArray();
+    private static readonly IPen[][] LightGlow = Lights.Select(light => Levels(level => new ImmutablePen(Across(light.Hue, 8 + level * 6), 6 + level * 2))).ToArray();
     private static readonly IPen Line = new ImmutablePen(Across(0, 255), 1.0);
     private static readonly IPen LineHalo = new ImmutablePen(Across(0, 70), 5);
-    private static readonly IBrush Spark = SidPlayerPalette.Brush(Color.FromArgb(210, 0xFF, 0xE8, 0xC8));
+    private static readonly IBrush Spark = SidPlayerPalette.Brush(Color.FromArgb(240, 0xFF, 0xF0, 0xDC));
+    private static readonly IPen[] SparkHalo = Levels(level => new ImmutablePen(new ImmutableSolidColorBrush(Color.FromArgb((byte)(35 + level * 14), 0xFF, 0xC8, 0x90)), 2.5 + level * 0.5, lineJoin: PenLineJoin.Round));
+    private static readonly IPen[] SparkMiddle = Levels(level => new ImmutablePen(new ImmutableSolidColorBrush(Color.FromArgb((byte)(14 + level * 5), 0xFF, 0xB0, 0xB0)), 4 + level, lineJoin: PenLineJoin.Round));
+    private static readonly IPen[] SparkGlow = Levels(level => new ImmutablePen(new ImmutableSolidColorBrush(Color.FromArgb((byte)(6 + level * 3), 0xFF, 0x9A, 0xC8)), 6 + level * 1.6, lineJoin: PenLineJoin.Round));
 
     private readonly float[] _raising = new float[Bars];
     private readonly float[] _levels = new float[Bars];
     private readonly float[] _peaks = new float[Bars];
     private readonly float[] _soft = new float[Bars];
+    private readonly float[] _lightGlow = new float[Lights.Length];
+    private readonly float[] _lightAverage = new float[Lights.Length];
+    private float _sparkGlow;
+    private float _sparkAverage;
     private readonly double[] _line = new double[Bars + 1];
     private readonly StreamGeometry[] _blocks = new StreamGeometry[Shades];
     private readonly StreamGeometryContext[] _paths = new StreamGeometryContext[Shades];
@@ -124,6 +146,16 @@ internal sealed class NeonSpectrumView : Control
                 even += _levels[near];
             _soft[bar] = even / (to - from + 1);
         }
+
+        for (int light = 0; light < Lights.Length; light++)
+        {
+            float share = 0;
+            int from = light * Bars / Lights.Length, to = (light + 1) * Bars / Lights.Length;
+            for (int bar = from; bar < to; bar++)
+                share += _levels[bar];
+            Flare(ref _lightGlow[light], ref _lightAverage[light], share / (to - from));
+        }
+        Flare(ref _sparkGlow, ref _sparkAverage, _energy);
         InvalidateVisual();
     }
 
@@ -133,6 +165,9 @@ internal sealed class NeonSpectrumView : Control
         Array.Clear(_levels);
         Array.Clear(_peaks);
         Array.Clear(_soft);
+        Array.Clear(_lightGlow);
+        Array.Clear(_lightAverage);
+        _sparkGlow = _sparkAverage = 0;
         _energy = 0;
         InvalidateVisual();
     }
@@ -152,7 +187,9 @@ internal sealed class NeonSpectrumView : Control
                 + 0.05 * Math.Sin(Tau * (2.7 * along + 0.17 * _time)));
         }
 
+        // The lights and their sparks behind the bars.
         DrawLights(context, bounds, middle, reach);
+        DrawSparks(context, bounds, middle, reach);
         DrawBars(context, bounds, reach);
 
         var line = new StreamGeometry();
@@ -166,7 +203,6 @@ internal sealed class NeonSpectrumView : Control
         context.DrawGeometry(null, LineHalo, line);
         context.DrawGeometry(null, Line, line);
 
-        DrawSparks(context, bounds, middle, reach);
         context.DrawRectangle(Border, bounds.Deflate(0.5));
     }
 
@@ -174,25 +210,32 @@ internal sealed class NeonSpectrumView : Control
     {
         for (int light = 0; light < Lights.Length; light++)
         {
-            var (lying, waves, speed, start, _) = Lights[light];
             var curve = new StreamGeometry();
             using (var path = curve.Open())
             {
                 for (int bar = 0; bar <= Bars; bar++)
                 {
-                    double along = bar / (double)Bars;
-                    double height = 0.1 + 0.62 * _soft[Math.Min(bar, Bars - 1)];
-                    double y = middle + reach * (lying + height * Math.Sin(Tau * (waves * along - speed * _time + start)));
+                    double y = LightAt(light, bar, middle, reach);
                     if (bar == 0)
                         path.BeginFigure(new Point(0, y), false);
                     else
-                        path.LineTo(new Point(bounds.Width * along, y));
+                        path.LineTo(new Point(bounds.Width * bar / Bars, y));
                 }
                 path.EndFigure(false);
             }
-            context.DrawGeometry(null, LightHalo[light], curve);
+            int glow = GlowLevel(_lightGlow[light]);
+            context.DrawGeometry(null, LightGlow[light][glow], curve);
+            context.DrawGeometry(null, LightHalo[light][glow], curve);
             context.DrawGeometry(null, Light[light], curve);
         }
+    }
+
+    /// <summary>How high a line of light lies over a bar's place.</summary>
+    private double LightAt(int light, int bar, double middle, double reach)
+    {
+        var (lying, waves, speed, start, _) = Lights[light];
+        double height = 0.1 + 0.62 * _soft[Math.Min(bar, Bars - 1)];
+        return middle + reach * (lying + height * Math.Sin(Tau * (waves * bar / Bars - speed * _time + start)));
     }
 
     /// <summary>Each bar up or down from the line by the swell at its place, lowest where the swell
@@ -269,11 +312,17 @@ internal sealed class NeonSpectrumView : Control
                 if (Math.Sin(Tau * (other + (0.3 + seed * 0.5) * _time)) < 0)
                     continue;
 
-                double along = (seed + (0.012 + other * 0.018) * _time) % 1;
-                double height = 0.2 + 0.5 * _soft[(int)(along * Bars)];
-                double y = middle + reach * ((other - 0.5) * 0.35 + height * Math.Sin(Tau * (2 * along - 0.1 * _time + other)));
-                double x = bounds.Width * along;
+                // Each on a line of light, sliding along it the way the line rolls.
+                int light = spark % Lights.Length;
+                double along = (seed + Math.Sign(Lights[light].Speed) * (0.06 + other * 0.06) * _time) % 1;
+                if (along < 0)
+                    along += 1;
+                double place = along * Bars;
+                int bar = (int)place;
+                double on = LightAt(light, bar, middle, reach);
                 const double Size = 2;
+                double y = on + (LightAt(light, bar + 1, middle, reach) - on) * (place - bar) - Size / 2;
+                double x = bounds.Width * along - Size / 2;
                 path.BeginFigure(new Point(x, y), true);
                 path.LineTo(new Point(x + Size, y));
                 path.LineTo(new Point(x + Size, y + Size));
@@ -281,8 +330,25 @@ internal sealed class NeonSpectrumView : Control
                 path.EndFigure(true);
             }
         }
+        int glow = GlowLevel(_sparkGlow);
+        context.DrawGeometry(null, SparkGlow[glow], sparks);
+        context.DrawGeometry(null, SparkMiddle[glow], sparks);
+        context.DrawGeometry(null, SparkHalo[glow], sparks);
         context.DrawGeometry(Spark, null, sparks);
     }
+
+    /// <summary>A glow on a frame: up at once as <paramref name="level"/> rises over its recent
+    /// average, down slowly.</summary>
+    private static void Flare(ref float glow, ref float average, float level)
+    {
+        float wanted = Math.Min(GlowAtRest, level * 2) + (level - average) * GlowPerRise;
+        glow = Math.Max(Math.Clamp(wanted, 0, 1), glow - GlowFading);
+        average += (level - average) * AverageFollowing;
+    }
+
+    private static int GlowLevel(float glow) => (int)(glow * (GlowLevels - 1));
+
+    private static IPen[] Levels(Func<int, IPen> made) => Enumerable.Range(0, GlowLevels).Select(made).ToArray();
 
     /// <summary>The colours along a line of light, starting at <paramref name="start"/> of their sweep.</summary>
     private static IImmutableBrush Across(double start, int alpha) => new ImmutableLinearGradientBrush(

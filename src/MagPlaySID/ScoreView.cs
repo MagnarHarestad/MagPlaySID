@@ -14,8 +14,9 @@ namespace MagPlaySid;
 /// scrolling with the music past a line where they sound, and beside them the selected voice's
 /// instrument with its wave and pulse programs, and the filter program, the step sounding lit.
 /// Rows are placed by when they play, so a row a note splits off its grid row is as tall as it is
-/// long. Clicking a voice's rows selects it. A 2SID or 3SID tune shows every chip's voices, in
-/// narrower columns.
+/// long; where notes come so fast that rows after rows would run together, the view scrolls faster
+/// through them, all voices alike, so each is written in full. Clicking a voice's rows selects it. A
+/// 2SID or 3SID tune shows every chip's voices, in narrower columns.
 /// </summary>
 internal sealed class ScoreView : Control
 {
@@ -29,6 +30,9 @@ internal sealed class ScoreView : Control
     /// <summary>Characters a voice's column has: fewer, the more voices there are.</summary>
     private int VoiceChars => Voices switch { <= 3 => 24, <= 6 => 17, _ => 11 };
     private double Gap => 14 * _scale;
+
+    /// <summary>Rows closer than this, in rows, cannot both be written.</summary>
+    private const double TooClose = 0.75;
 
     private static readonly Typeface Mono = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"));
     private static readonly Typeface Bold = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"), FontStyle.Normal, FontWeight.Bold);
@@ -48,6 +52,9 @@ internal sealed class ScoreView : Control
     private ScoreTimeline? _timeline;
     private double _call;
     private int _selected;
+
+    /// <summary>How far down the rows each call of the tune lies, counted in rows.</summary>
+    private double[] _placed = [0];
 
     /// <summary>The width the rows and the panel take.</summary>
     public double ContentWidth => TrackerWidth + Gap + PanelWidth;
@@ -82,7 +89,10 @@ internal sealed class ScoreView : Control
         _timeline = timeline;
         Forget();
         _rowTexts.Clear();
-        _call = 0;
+        _placed = score is not null && timeline is not null ? Placed(score, timeline) : [0];
+        // The whole tune's rows in place of the opening's stay where the tune has got to.
+        if (score is null)
+            _call = 0;
         _selected = Math.Min(_selected, Voices - 1);
         Width = ContentWidth;
         InvalidateVisual();
@@ -110,6 +120,44 @@ internal sealed class ScoreView : Control
         InvalidateVisual();
     }
 
+    /// <summary>Where each call lies, in rows: as far as its share of a row, and further where a
+    /// voice has rows too close to write, one after another. One row split off its grid row is left
+    /// as it is: stretched, it would jolt the scrolling for one note.</summary>
+    private static double[] Placed(MagPlay.Score.Score score, ScoreTimeline timeline)
+    {
+        double plain = 1.0 / (score.FunkTempo is { } funk ? (score.Tempo + funk) / 2.0 : Math.Max(1, score.Tempo));
+        var share = new double[timeline.Calls];
+        Array.Fill(share, plain);
+        foreach (var rows in timeline.Rows)
+        {
+            bool Close(int row) => row >= 0 && row + 1 < rows.Count && (rows[row + 1].Call - rows[row].Call) * plain < TooClose;
+            for (int row = 0; row + 1 < rows.Count; row++)
+            {
+                if (!Close(row) || !(Close(row - 1) || Close(row + 1)))
+                    continue;
+                int from = rows[row].Call, to = Math.Min(rows[row + 1].Call, share.Length);
+                for (int call = from; call < to; call++)
+                    share[call] = Math.Max(share[call], 1.0 / (to - from));
+            }
+        }
+
+        var placed = new double[share.Length + 1];
+        for (int call = 0; call < share.Length; call++)
+            placed[call + 1] = placed[call] + share[call];
+        return placed;
+    }
+
+    /// <summary>Where <paramref name="call"/> lies, in rows, between two calls too; before the
+    /// first and past the last at the rate next to them.</summary>
+    private double PlacedAt(double call)
+    {
+        int last = _placed.Length - 1;
+        if (last < 1)
+            return 0;
+        int whole = Math.Clamp((int)Math.Floor(call), 0, last - 1);
+        return _placed[whole] + (call - whole) * (_placed[whole + 1] - _placed[whole]);
+    }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         double x = e.GetPosition(this).X;
@@ -133,14 +181,13 @@ internal sealed class ScoreView : Control
             return;
 
         double line = HeaderHeight + Math.Round((bounds.Height - HeaderHeight) / 3);
-        double perCall = RowHeight / (score.FunkTempo is { } funk ? (score.Tempo + funk) / 2.0 : Math.Max(1, score.Tempo));
 
         using (context.PushClip(new Rect(0, HeaderHeight, TrackerWidth, bounds.Height - HeaderHeight)))
         {
             context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 18)),
                                   new Rect(0, line, TrackerWidth, RowHeight));
             for (int v = 0; v < Voices; v++)
-                DrawVoice(context, score, timeline, v, v * (VoiceWidth + Gap), line, perCall, bounds.Height);
+                DrawVoice(context, score, timeline, v, v * (VoiceWidth + Gap), line, bounds.Height);
         }
 
         for (int v = 0; v < Voices; v++)
@@ -158,7 +205,7 @@ internal sealed class ScoreView : Control
     // ------------------------------------------------------------------ the rows
 
     private void DrawVoice(DrawingContext context, MagPlay.Score.Score score, ScoreTimeline timeline, int v,
-                           double left, double line, double perCall, double height)
+                           double left, double line, double height)
     {
         var rows = timeline.Rows[v];
         if (rows.Count == 0)
@@ -167,7 +214,8 @@ internal sealed class ScoreView : Control
         var colour = SidPlayerPalette.VoiceColour(v % 3);
         int now = Math.Max(0, timeline.RowAt(v, (int)Math.Floor(_call)));
         using var clip = context.PushClip(new Rect(left - 6, HeaderHeight, VoiceWidth + 6, height - HeaderHeight));
-        double Y(int i) => line + (rows[i].Call - _call) * perCall;
+        double at = PlacedAt(_call);
+        double Y(int i) => line + (PlacedAt(rows[i].Call) - at) * RowHeight;
 
         // From the row sounding up and down, as far as the view reaches; a row too close to the one
         // drawn before it - split off its grid row - is marked, not written over it.
@@ -185,7 +233,7 @@ internal sealed class ScoreView : Control
                 context.DrawLine(pen, new Point(left, y - 1), new Point(left + VoiceWidth, y - 1));
             }
 
-            if (y - last < RowHeight * 0.75)
+            if (y - last < RowHeight * TooClose)
             {
                 context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(colour, 120)), new Rect(left - 5, y, 3, 2));
                 continue;
@@ -202,7 +250,12 @@ internal sealed class ScoreView : Control
                 _rowTexts[(played.Pattern, played.Row, played.Transpose)] = text = RowText(row, played);
             Text(context, text, left + 4, y + 1, ink, bold: sounding);
             if (played.Row == 0)
-                Text(context, EntryText(played), left + VoiceWidth - 7 * _charWidth, y + 1, SidPlayerPalette.WithAlpha(colour, 150));
+            {
+                // At the column's end, and only where the row's own text leaves it room.
+                string entry = EntryText(played);
+                if (text.Length + entry.Length < VoiceChars)
+                    Text(context, entry, left + VoiceWidth - entry.Length * _charWidth, y + 1, SidPlayerPalette.WithAlpha(colour, 150));
+            }
         }
     }
 

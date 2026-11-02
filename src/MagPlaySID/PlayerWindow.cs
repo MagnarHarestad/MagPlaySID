@@ -811,7 +811,8 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>Plays the tune at <paramref name="path"/> - from <paramref name="firstSong"/>, or the
-    /// song it starts on: false, and nothing changed, when it cannot be - said in a message unless
+    /// song the user chose to play first of it, or the song it starts on: false, and nothing changed,
+    /// when it cannot be - said in a message unless
     /// <paramref name="quiet"/>, as a playlist passes it over.</summary>
     private bool Load(string path, bool quiet = false, int? firstSong = null)
     {
@@ -835,7 +836,7 @@ internal sealed class PlayerWindow : Window
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
         _playCounted = false;
-        _song = Math.Clamp(firstSong ?? file.StartSong, 1, Math.Max(1, file.Songs));
+        _song = firstSong ?? ChosenFirstSong(file, path) ?? OwnFirstSong(file);
         Title = $"{(string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : file.Name)} - {UpdateCheck.Product}";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
         BuildSongPills();
@@ -843,6 +844,14 @@ internal sealed class PlayerWindow : Window
         Restart();
         return true;
     }
+
+    /// <summary>The song a tune starts on by itself.</summary>
+    private static int OwnFirstSong(SidFile file) => Math.Clamp(file.StartSong, 1, Math.Max(1, file.Songs));
+
+    /// <summary>The song the user chose to play first; null when they have not, or the file no
+    /// longer has it.</summary>
+    private static int? ChosenFirstSong(SidFile file, string path) =>
+        Favourites.FirstSong(path) is { } song && song >= 1 && song <= file.Songs ? song : null;
 
     private string DescribeFile()
     {
@@ -1068,10 +1077,56 @@ internal sealed class PlayerWindow : Window
         {
             var pill = new SongPill(song, scale);
             pill.Click += PlaySong;
-            ToolTip.SetTip(pill, song <= 9 ? $"Song {song} of {file.Songs} (key {song})" : $"Song {song} of {file.Songs}");
+            pill.ContextRequested += (_, e) =>
+            {
+                e.Handled = true;
+                OpenFirstSongMenu(pill);
+            };
             _songPills.Children.Add(pill);
         }
+        MarkFirstSong();
         LightSongPills();
+    }
+
+    /// <summary>The song's right-click menu: Play first, ticked on the song that does. Taken off
+    /// again, the tune starts where it does by itself - which has nothing to take off.</summary>
+    private void OpenFirstSongMenu(SongPill pill)
+    {
+        if (_file is not { } file || _path is not { } path)
+            return;
+        int own = OwnFirstSong(file);
+        int? chosen = ChosenFirstSong(file, path);
+        bool first = pill.Song == (chosen ?? own);
+        var item = new MenuItem
+        {
+            Header = "Play first",
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = first,
+            IsEnabled = !first || chosen is not null,
+        };
+        item.Click += (_, _) =>
+        {
+            _strip.ChooseFirstSong(path, first || pill.Song == own ? null : pill.Song);
+            MarkFirstSong();
+        };
+        ToolTip.SetTip(item, "Start this tune on this song whenever it is played");
+        var menu = new ContextMenu();
+        menu.Items.Add(item);
+        menu.Open(pill);
+    }
+
+    /// <summary>The song chosen to play first marked, and every pill's tip saying what it is.</summary>
+    private void MarkFirstSong()
+    {
+        if (_file is not { } file || _path is not { } path)
+            return;
+        int? chosen = ChosenFirstSong(file, path);
+        foreach (SongPill pill in _songPills.Children)
+        {
+            pill.PlaysFirst = pill.Song == chosen;
+            string tip = pill.Song <= 9 ? $"Song {pill.Song} of {file.Songs} (key {pill.Song})" : $"Song {pill.Song} of {file.Songs}";
+            ToolTip.SetTip(pill, pill.PlaysFirst ? tip + " - plays first" : tip);
+        }
     }
 
     /// <summary>The song playing's pill lit - and scrolled to, when there are more than fit - and

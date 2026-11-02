@@ -566,6 +566,13 @@ internal sealed class PlaylistStrip : Border
         }
     }
 
+    /// <summary>The song to play first of a tune, kept with the favourites; null, the tune's own.</summary>
+    public void ChooseFirstSong(string path, int? song)
+    {
+        Favourites.SetFirstSong(path, song);
+        Favourites.Save(_favourites);
+    }
+
     /// <summary>A tune's length measured: shown wherever the tune is listed.</summary>
     public void Measured(string key)
     {

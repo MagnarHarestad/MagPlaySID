@@ -307,22 +307,48 @@ internal sealed class Playlist : Observable
 }
 
 /// <summary>The favourite playlists, in playlists.json beside the settings: each a name, its
-/// tunes' paths in the user's own order, and what it is sorted by. A file that cannot be read is no favourites; one that cannot be written is let go.</summary>
+/// tunes' paths in the user's own order, and what it is sorted by; and beside them the song the user
+/// chose to play first of a tune, wherever that tune is played from. A file that cannot be read is no favourites; one that cannot be written is let go.</summary>
 internal static class Favourites
 {
     private static readonly string FilePath = Path.Combine(Settings.Folder, "playlists.json");
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
+    private static readonly StringComparer SamePaths =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private static Dictionary<string, int> _firstSongs = new(SamePaths);
+
     private sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own);
+
+    private sealed record Kept(List<Stored>? Playlists, Dictionary<string, int>? FirstSongs);
+
+    /// <summary>The song the user chose to play first of the tune at <paramref name="path"/>; null
+    /// when they have not chosen one.</summary>
+    public static int? FirstSong(string path) => _firstSongs.TryGetValue(Path.GetFullPath(path), out int song) ? song : null;
+
+    /// <summary>Plays <paramref name="song"/> of the tune first from now on; null, the tune's own again.</summary>
+    public static void SetFirstSong(string path, int? song)
+    {
+        if (song is { } first)
+            _firstSongs[Path.GetFullPath(path)] = first;
+        else
+            _firstSongs.Remove(Path.GetFullPath(path));
+    }
 
     public static List<Playlist> Load()
     {
         try
         {
-            var stored = JsonSerializer.Deserialize<List<Stored>>(File.ReadAllText(FilePath), Json) ?? [];
+            // A file from before first songs were kept is the playlists' list alone.
+            string text = File.ReadAllText(FilePath);
+            var kept = text.TrimStart().StartsWith('[')
+                ? new Kept(JsonSerializer.Deserialize<List<Stored>>(text, Json), null)
+                : JsonSerializer.Deserialize<Kept>(text, Json);
+            _firstSongs = new Dictionary<string, int>(kept?.FirstSongs ?? [], SamePaths);
             var playlists = new List<Playlist>();
-            foreach (var s in stored.Where(s => !string.IsNullOrWhiteSpace(s.Name)))
+            foreach (var s in (kept?.Playlists ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Name)))
             {
                 var playlist = new Playlist(s.Name, isFolder: false, s.Tunes ?? []);
                 playlist.SortBy(s.Sort);
@@ -342,7 +368,7 @@ internal static class Favourites
         {
             Directory.CreateDirectory(Settings.Folder);
             var stored = playlists.Select(p => new Stored(p.Name, p.OwnOrder.Select(t => t.Path).ToList(), p.Sort)).ToList();
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(stored, Json));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(new Kept(stored, _firstSongs), Json));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

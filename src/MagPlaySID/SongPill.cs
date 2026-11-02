@@ -11,7 +11,8 @@ namespace MagPlaySid;
 /// <summary>
 /// One of a tune's songs, as a round button with its number - drawn, as the transport is, so it is
 /// sharp at any size. The song playing is filled in the accent, a ring round it filling clockwise
-/// as the song goes on; the others light their edge under the pointer.
+/// as the song goes on; the others light their edge under the pointer. A small dot marks the song
+/// the user chose to play first.
 /// </summary>
 internal sealed class SongPill : Control
 {
@@ -20,6 +21,7 @@ internal sealed class SongPill : Control
 
     private readonly double _scale;
     private bool _lit;
+    private bool _playsFirst;
     private double _progress;
     private bool _hovered;
     private bool _pressed;
@@ -50,6 +52,19 @@ internal sealed class SongPill : Control
             if (_lit == value)
                 return;
             _lit = value;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The song the user chose to play first of the tune.</summary>
+    public bool PlaysFirst
+    {
+        get => _playsFirst;
+        set
+        {
+            if (_playsFirst == value)
+                return;
+            _playsFirst = value;
             InvalidateVisual();
         }
     }
@@ -150,5 +165,12 @@ internal sealed class SongPill : Control
                 (Song >= 100 ? 9.5 : Song >= 10 ? 11 : 12) * _scale, SidPlayerPalette.Brush(ink));
         }
         text.Draw(context, new Point(centre.X - text.Width / 2, centre.Y - text.Height / 2));
+
+        if (_playsFirst)
+        {
+            double dot = 3 * _scale;
+            context.DrawEllipse(SidPlayerPalette.Brush(SidPlayerPalette.VoiceColour(0)), null,
+                new Point(Bounds.Width - dot, dot), dot, dot);
+        }
     }
 }
