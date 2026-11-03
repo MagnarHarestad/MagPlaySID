@@ -227,7 +227,7 @@ internal sealed class Playlist : Observable
             case TuneSort.YearOldest: return Numbers(tunes, t => t.Year, descending: false);
             case TuneSort.TitleAToZ: return Words(tunes, t => t.Title, descending: false);
             case TuneSort.TitleZToA: return Words(tunes, t => t.Title, descending: true);
-            case TuneSort.ComposerAToZ: return Words(tunes, t => t.Author, descending: false).ThenBy(t => t.Year ?? int.MaxValue).ThenBy(t => t.Title, StringComparer.OrdinalIgnoreCase);
+            case TuneSort.ComposerAToZ: return Words(tunes, t => t.Author, descending: false).ThenBy(t => t.Year ?? int.MaxValue).ThenBy(t => t.Title, StringComparer.CurrentCultureIgnoreCase);
             case TuneSort.GroupAToZ: return Words(tunes, t => t.Group, descending: false);
             case TuneSort.FileNewest: return Numbers(tunes, Written, descending: true);
             case TuneSort.FileOldest: return Numbers(tunes, Written, descending: false);
@@ -251,12 +251,13 @@ internal sealed class Playlist : Observable
         return descending ? known.ThenByDescending(key) : known.ThenBy(key);
     }
 
-    /// <summary>Text no one has filled in, or the collections' "&lt;?&gt;" for not known, counts as none.</summary>
+    /// <summary>Text no one has filled in, or the collections' "&lt;?&gt;" for not known, counts as none.
+    /// In the order of the user's language, so that Ádám is not put after Z.</summary>
     private static IOrderedEnumerable<PlaylistTune> Words(IEnumerable<PlaylistTune> tunes, Func<PlaylistTune, string> key, bool descending)
     {
         string Filled(PlaylistTune tune) => key(tune).Trim() is "<?>" or "" ? "" : key(tune);
         var known = tunes.OrderBy(t => Filled(t).Length == 0);
-        return descending ? known.ThenByDescending(Filled, StringComparer.OrdinalIgnoreCase) : known.ThenBy(Filled, StringComparer.OrdinalIgnoreCase);
+        return descending ? known.ThenByDescending(Filled, StringComparer.CurrentCultureIgnoreCase) : known.ThenBy(Filled, StringComparer.CurrentCultureIgnoreCase);
     }
 
     public bool Contains(string path) => Tunes.Any(t => SamePath(t.Path, path));

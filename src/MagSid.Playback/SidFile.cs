@@ -112,9 +112,9 @@ public sealed class SidFile
         {
             IsRsid = magic == "RSID",
             Version = version,
-            Name = AsciiField(bytes, 0x16),
-            Author = AsciiField(bytes, 0x36),
-            Released = AsciiField(bytes, 0x56),
+            Name = TextField(bytes, 0x16),
+            Author = TextField(bytes, 0x36),
+            Released = TextField(bytes, 0x56),
             LoadAddress = loadAddress,
             InitAddress = initAddress == 0 ? loadAddress : initAddress,
             PlayAddress = playAddress,
@@ -171,12 +171,15 @@ public sealed class SidFile
 
     private static int Be16(byte[] bytes, int offset) => (bytes[offset] << 8) | bytes[offset + 1];
 
-    private static string AsciiField(byte[] bytes, int offset)
+    /// <summary>The header's text is Windows-1252, as the format says: Hülsbeck, Östensson and the like.</summary>
+    private static readonly Encoding HeaderText = CodePagesEncodingProvider.Instance.GetEncoding(1252)!;
+
+    private static string TextField(byte[] bytes, int offset)
     {
         int end = offset;
         while (end < offset + 32 && end < bytes.Length && bytes[end] != 0)
             end++;
 
-        return Encoding.ASCII.GetString(bytes, offset, end - offset).TrimEnd();
+        return HeaderText.GetString(bytes, offset, end - offset).TrimEnd();
     }
 }
