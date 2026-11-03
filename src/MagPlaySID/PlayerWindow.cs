@@ -40,6 +40,10 @@ internal sealed class PlayerWindow : Window
     /// <summary>How long a playlist's tune plays when its length cannot be measured.</summary>
     private static readonly TimeSpan UnmeasuredLength = TimeSpan.FromMinutes(3);
 
+    /// <summary>The least a playlist gives a song. One that comes to rest on a long note repeats in
+    /// half a second, by its memory, with the note still to be heard: it would seem passed over.</summary>
+    private const double ShortestSongSeconds = 5;
+
     private readonly SpectrumView _spectrum = new();
     private readonly LandscapeView _landscape = new();
     private readonly NeonSpectrumView _neon = new();
@@ -724,14 +728,25 @@ internal sealed class PlayerWindow : Window
 
     private async Task PickFolderAsync()
     {
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        try
         {
-            Title = "Open a folder of .sid tunes as a playlist",
-            AllowMultiple = false,
-        });
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Open a folder of .sid tunes as a playlist",
+                AllowMultiple = false,
+            });
 
-        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path)
-            await OpenFolderAsync([path]);
+            if (folders.Count == 0)
+                return;
+            if (folders[0].TryGetLocalPath() is { } path)
+                await OpenFolderAsync([path]);
+            else
+                await MessageWindow.ShowAsync(this, "Cannot open the folder", $"{folders[0].Name} is not a folder on this computer.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            await MessageWindow.ShowAsync(this, "Cannot open the folder", ex.Message);
+        }
     }
 
     /// <summary>The tunes in folders - and any tunes - dropped or chosen, as the folder playlist,
@@ -807,7 +822,7 @@ internal sealed class PlayerWindow : Window
         if (engine.Failure is not null)
             return true;
         TimeSpan? end = _length?.Total ?? (_lengthUnknown ? UnmeasuredLength : null);
-        return end is { } length && at / (double)C64PlaybackEngine.SampleRate >= Math.Max(1, length.TotalSeconds);
+        return end is { } length && at / (double)C64PlaybackEngine.SampleRate >= Math.Max(ShortestSongSeconds, length.TotalSeconds);
     }
 
     /// <summary>Plays the tune at <paramref name="path"/> - from <paramref name="firstSong"/>, or the
