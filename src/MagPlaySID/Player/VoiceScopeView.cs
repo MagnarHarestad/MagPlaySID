@@ -34,20 +34,25 @@ internal sealed class VoiceScopeView : Control
     private (bool Muted, double Scale) _labelFor;
 
     private bool _muted;
+    private readonly bool _mutable;
 
     /// <summary>1 for the small text, more for bigger: the voice's name in the corner.</summary>
     public double TextScale { get; set; } = 1;
     private float _level;
 
     /// <param name="name">What the scope is labelled; VOICE and the voice's number when left out.</param>
-    public VoiceScopeView(int voice, string? name = null)
+    /// <param name="colour">Its colour; the voice's place on its chip's when left out.</param>
+    /// <param name="mutable">Whether a click mutes it - not a digi's, which plays through the volume.</param>
+    public VoiceScopeView(int voice, string? name = null, Color? colour = null, bool mutable = true)
     {
         _voice = voice;
+        _mutable = mutable;
         _name = name ?? $"VOICE {voice + 1}";
-        _colour = SidPlayerPalette.VoiceColour(voice % 3);
+        _colour = colour ?? SidPlayerPalette.VoiceColour(voice % 3);
         _glow = SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(_colour, 40), 3.5);
         _trace = SidPlayerPalette.Pen(_colour, 1.4);
-        Cursor = new Cursor(StandardCursorType.Hand);
+        if (mutable)
+            Cursor = new Cursor(StandardCursorType.Hand);
     }
 
     public event Action<int, bool>? MuteToggled;
@@ -82,7 +87,7 @@ internal sealed class VoiceScopeView : Control
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (_mutable && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             _muted = !_muted;
             MuteToggled?.Invoke(_voice, _muted);

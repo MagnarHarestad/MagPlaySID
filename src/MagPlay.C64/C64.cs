@@ -28,6 +28,17 @@ public enum WriteContext : byte
 }
 
 /// <summary>
+/// Data read from one address after another - a digi's sample, read a byte or a nibble at a time -
+/// by an NMI or a tune's main loop: when it started, where, and how far it went.
+/// </summary>
+/// <param name="Cycle">When the first byte was read.</param>
+/// <param name="Start">Where.</param>
+/// <param name="Address">The last address read.</param>
+/// <param name="Reads">How many reads, a byte read twice for its two nibbles counted twice.</param>
+/// <param name="LastCycle">When the last was.</param>
+public readonly record struct DataRun(long Cycle, int Start, int Address, int Reads, long LastCycle, WriteContext Context);
+
+/// <summary>
 /// A Commodore 64 for playing SID tunes on: the 6510, 64 KiB of RAM with BASIC, the KERNAL - a
 /// stand-in, see <see cref="Kernal"/> - and the I/O area banked in and out through the processor
 /// port at $01, CIA 1 on the IRQ and CIA 2 on the NMI, the VIC's raster interrupt, and the SID.
@@ -57,6 +68,28 @@ public sealed class C64 : IMemoryBus
     private readonly ISidPort? _chip;
     private readonly bool[] _writtenPages = new bool[256];
     private readonly bool _record;
+
+    /// <summary>What each chip - the first, then the extra ones - is heard to be doing.</summary>
+    private readonly Quiet[] _quiet;
+
+    /// <summary>The data runs ended, and those an NMI or the main loop may still be reading on.</summary>
+    private readonly List<DataRun> _runs = [];
+    private readonly List<DataRun> _reading = [];
+
+    /// <summary>The instruction being run - its own bytes are not data - and what it is run from;
+    /// -1 while an interrupt is being taken.</summary>
+    private int _stepAt = -1;
+    private WriteContext _stepContext;
+
+    /// <summary>Cycles without the next address read that end a run: a few of a digi's samples.</summary>
+    private const int RunGap = 4000;
+
+    /// <summary>The fewest reads a run takes to be a digi's sample rather than a table looked up.</summary>
+    private const int ShortestRun = 64;
+
+    /// <summary>Runs followed at once: a digi's sample and the tables its player looks up beside it.</summary>
+    private const int RunsFollowed = 12;
+
     private long _synced;
     private long _nmiEdge = -1;
     private bool _maskedBefore = true;
@@ -79,6 +112,7 @@ public sealed class C64 : IMemoryBus
         _extraSids = [.. extraSids ?? []];
         _extraSidWrites = [.. _extraSids.Select(_ => new List<TimedWrite>())];
         _extraSidWriteContexts = [.. _extraSids.Select(_ => new List<WriteContext>())];
+        _quiet = [.. Enumerable.Range(0, 1 + _extraSids.Length).Select(_ => new Quiet())];
         Machine = machine;
         Vic = machine == Machine.Ntsc ? new Vic(65, 263) : new Vic(63, 312);
         Cpu = new Mos6502(this);
@@ -111,6 +145,30 @@ public sealed class C64 : IMemoryBus
 
     /// <summary>The cycle each call started on: an IRQ taken while no other IRQ was being run.</summary>
     public IReadOnlyList<long> Calls => _calls;
+
+    /// <summary>The cycle from which no chip has been heard, by its envelopes' own times; null
+    /// while any voice sounds.</summary>
+    public long? QuietSince()
+    {
+        long since = 0;
+        foreach (var chip in _quiet)
+        {
+            if (chip.Since(Cpu.Cycles, Machines.ClockHz(Machine)) is not { } quiet)
+                return null;
+            since = Math.Max(since, quiet);
+        }
+        return since;
+    }
+
+    /// <summary>The writes to the first chip's volume register made outside the calls - an NMI's or the
+    /// main loop's, a digi's - counted whether or not they are kept.</summary>
+    public int VolumeWritesOutsideCalls { get; private set; }
+
+    /// <summary>The data NMIs and the main loop read from one address after another, run by run:
+    /// a digi's samples, each where it starts - kept while the writes are recorded. Runs of fewer
+    /// than <see cref="ShortestRun"/> reads, a player's tables, are left out.</summary>
+    public IReadOnlyList<DataRun> DataRuns =>
+        [.. _runs.Concat(_reading.Where(r => r.Reads >= ShortestRun)).OrderBy(r => r.Cycle)];
 
     /// <summary>Which writes are recorded, by what they were written from; all when null. A tune
     /// transcribed for a view keeps its player's writes only - not a digi's many thousands. The
@@ -148,6 +206,7 @@ public sealed class C64 : IMemoryBus
             {
                 _nmiEdge = Cia2.InterruptSince;
                 Enter(nmi: true);
+                _stepAt = -1;
                 Cpu.Interrupt(nmi: true);
                 continue;
             }
@@ -156,12 +215,18 @@ public sealed class C64 : IMemoryBus
             if (!masked && ((Cia1.Interrupt && Cia1.InterruptSince <= seen) || (Vic.Interrupt && Vic.InterruptSince <= seen)))
             {
                 Enter(nmi: false);
+                _stepAt = -1;
                 Cpu.Interrupt(nmi: false);
                 _maskedBefore = true;
                 continue;
             }
 
             _maskedBefore = Cpu.InterruptDisable;
+            if (_record)
+            {
+                _stepAt = Cpu.PC;
+                _stepContext = Context();
+            }
             Cpu.Step();
             if (Cpu.Opcode == 0x40)
                 Unwind();
@@ -214,6 +279,10 @@ public sealed class C64 : IMemoryBus
 
     public byte Read(int address)
     {
+        if (_stepAt >= 0 && _stepContext != WriteContext.Call && address >= 0x0200
+            && (address < _stepAt || address > _stepAt + 2))
+            Follow(address);
+
         switch (address)
         {
             case 0x0000: return (byte)_direction;
@@ -227,6 +296,44 @@ public sealed class C64 : IMemoryBus
             default:
                 return _ram[address];
         }
+    }
+
+    /// <summary>A byte of data read: the next of a run being read - the same address again, for a
+    /// byte's other nibble, or the one after - or the first of a new one.</summary>
+    private void Follow(int address)
+    {
+        if (address is >= 0xD000 and < 0xE000 && IoVisible)
+            return;
+        long now = Cpu.Cycles;
+        for (int i = 0; i < _reading.Count; i++)
+        {
+            var run = _reading[i];
+            if ((address == run.Address || address == run.Address + 1) && run.Context == _stepContext)
+            {
+                _reading[i] = run with { Address = address, Reads = run.Reads + 1, LastCycle = now };
+                return;
+            }
+        }
+
+        // A run not read on for a while is over; with too many followed, the least read goes.
+        for (int i = _reading.Count - 1; i >= 0; i--)
+        {
+            if (now - _reading[i].LastCycle > RunGap)
+            {
+                if (_reading[i].Reads >= ShortestRun)
+                    _runs.Add(_reading[i]);
+                _reading.RemoveAt(i);
+            }
+        }
+        if (_reading.Count >= RunsFollowed)
+        {
+            int least = 0;
+            for (int i = 1; i < _reading.Count; i++)
+                if (_reading[i].Reads < _reading[least].Reads)
+                    least = i;
+            _reading.RemoveAt(least);
+        }
+        _reading.Add(new DataRun(now, address, address, 1, now, _stepContext));
     }
 
     public void Write(int address, int value)
@@ -272,6 +379,7 @@ public sealed class C64 : IMemoryBus
                 if ((address & 0x1F) > 0x18)
                     break;
                 _chip?.Write(Cpu.AccessCycle, chip + 1, address & 0x1F, value);
+                _quiet[chip + 1].Write(Cpu.AccessCycle, address & 0x1F, value);
                 if (_record && Context() is var extra && Keep?.Invoke(extra) != false)
                 {
                     _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
@@ -304,6 +412,7 @@ public sealed class C64 : IMemoryBus
 
         _sidRegisters[register] = (byte)value;
         _chip?.Write(Cpu.AccessCycle, 0, register, value);
+        _quiet[0].Write(Cpu.AccessCycle, register, value);
         if (!_record)
             return;
 
@@ -315,6 +424,8 @@ public sealed class C64 : IMemoryBus
 
         // A write not kept is lost to a chip model started later - see Keep.
         var context = Context();
+        if (register == 0x18 && context != WriteContext.Call)
+            VolumeWritesOutsideCalls++;
         if (Keep?.Invoke(context) == false)
             return;
         _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));

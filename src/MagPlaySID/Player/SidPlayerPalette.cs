@@ -35,6 +35,10 @@ internal static class SidPlayerPalette
 
     public static Color VoiceColour(int voice) => Sample(VoicePositions[voice]);
 
+    /// <summary>A digi's: the sweep's other end from the voices', its ember red - apart from them, as
+    /// it is played apart from them, and of the same colours.</summary>
+    public static readonly Color Digi = Sample(0f);
+
     /// <summary>The sweep at <paramref name="position"/> in [0, 1], linearly between stops.</summary>
     public static Color Sample(float position)
     {

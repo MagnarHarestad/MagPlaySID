@@ -140,8 +140,8 @@ internal sealed class TuneList : ObservableCollection<PlaylistTune>
 }
 
 /// <summary>
-/// Tunes to play one after another: a folder dropped on the window, or a favourite playlist the
-/// user made from tunes they played. The folder's is for this run only; the favourites are kept.
+/// Tunes to play one after another: a folder dropped on the window or opened from the menu, or a
+/// playlist the user made from tunes they played - all of them kept, to come back to.
 /// Sorted, it shows and plays its tunes in that order, with the user's own kept to go back to.
 /// </summary>
 internal sealed class Playlist : Observable
@@ -150,10 +150,9 @@ internal sealed class Playlist : Observable
     private string? _heart;
     private List<PlaylistTune> _own = [];
 
-    public Playlist(string name, bool isFolder, IEnumerable<string> paths)
+    public Playlist(string name, IEnumerable<string> paths)
     {
         _name = name;
-        IsFolder = isFolder;
         foreach (var path in paths)
             Tunes.Add(new PlaylistTune(path));
         Renumber();
@@ -164,9 +163,6 @@ internal sealed class Playlist : Observable
 
     /// <summary>The colour the user gave a favourite's heart, as #RRGGBB; null for the usual one.</summary>
     public string? Heart { get => _heart; set => Set(ref _heart, value); }
-
-    /// <summary>A dropped folder's - not one of the favourites, and not kept.</summary>
-    public bool IsFolder { get; }
 
     /// <summary>In the order shown and played.</summary>
     public TuneList Tunes { get; } = new();
@@ -355,7 +351,7 @@ internal static class Favourites
             var playlists = new List<Playlist>();
             foreach (var s in (kept?.Playlists ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Name)))
             {
-                var playlist = new Playlist(s.Name, isFolder: false, s.Tunes ?? []) { Heart = s.Heart };
+                var playlist = new Playlist(s.Name, s.Tunes ?? []) { Heart = s.Heart };
                 playlist.SortBy(s.Sort);
                 playlists.Add(playlist);
             }

@@ -28,7 +28,6 @@ internal sealed class PlaylistStrip : Border
 {
     public const double StripWidth = 290;
 
-    private static readonly Geometry FolderIcon = Geometry.Parse("M1,3 H6 L7.5,4.5 H15 V13 H1 Z");
     private static readonly Geometry HeartIcon = Geometry.Parse(
         "M8,14 C8,14 1,9.5 1,5.2 C1,3 2.7,1.5 4.6,1.5 C6,1.5 7.3,2.3 8,3.5 C8.7,2.3 10,1.5 11.4,1.5 C13.3,1.5 15,3 15,5.2 C15,9.5 8,14 8,14 Z");
     private static readonly Geometry PlusIcon = Geometry.Parse("M7,1 H9 V7 H15 V9 H9 V15 H7 V9 H1 V7 H7 Z");
@@ -85,7 +84,6 @@ internal sealed class PlaylistStrip : Border
     private readonly Button _sort = new();
     private readonly TextBlock _sortName = new();
     private readonly Dictionary<TuneSort, MenuItem> _sortItems = [];
-    private Playlist? _folder;
     private PlaylistTune? _playing;
     private double _scale = 1;
 
@@ -104,7 +102,7 @@ internal sealed class PlaylistStrip : Border
     /// <summary>A playlist was made or a folder opened: the strip should be shown, if it is not.</summary>
     public event Action? ShowRequested;
 
-    /// <summary>Whether there is any playlist - a folder's or a favourite.</summary>
+    /// <summary>Whether there is any playlist.</summary>
     public bool HasPlaylists => _lists.Count > 0;
 
     public PlaylistStrip(Window owner)
@@ -269,7 +267,7 @@ internal sealed class PlaylistStrip : Border
     /// <summary>A playlist in the list: a folder or a heart, its name, how many tunes.</summary>
     private Control PlaylistRow()
     {
-        var icon = new PathIcon { Width = 14 * _scale, Height = 14 * _scale, VerticalAlignment = VerticalAlignment.Center };
+        var icon = new PathIcon { Data = HeartIcon, Width = 14 * _scale, Height = 14 * _scale, VerticalAlignment = VerticalAlignment.Center };
         var name = new TextBlock
         {
             FontSize = 13 * _scale,
@@ -295,20 +293,14 @@ internal sealed class PlaylistStrip : Border
         grid.Children.Add(count);
         var row = new Border { Padding = new Thickness(10, 7), Background = Brushes.Transparent, Child = grid };
 
-        icon.Bind(PathIcon.ForegroundProperty, new MultiBinding
+        icon.Bind(PathIcon.ForegroundProperty, new Binding(nameof(Playlist.Heart))
         {
-            Bindings = { new Binding(nameof(Playlist.IsFolder)), new Binding(nameof(Playlist.Heart)) },
-            Converter = new FuncMultiValueConverter<object?, IBrush>(values =>
-            {
-                var both = values.ToList();
-                return SidPlayerPalette.Brush(both[0] is true ? SidPlayerPalette.Control : HeartColour(both[1] as string));
-            }),
+            Converter = new FuncValueConverter<string?, IBrush>(heart => SidPlayerPalette.Brush(HeartColour(heart))),
         });
-        row.DataContextChanged += (_, _) => icon.Data = row.DataContext is Playlist { IsFolder: true } ? FolderIcon : HeartIcon;
         row.ContextRequested += (_, e) =>
         {
             e.Handled = true;
-            if (row.DataContext is Playlist { IsFolder: false } playlist)
+            if (row.DataContext is Playlist playlist)
                 OpenMenu(row, [Item("Rename...", () => _ = RenameAsync(playlist)),
                                HeartColourItem(playlist),
                                Item("Delete playlist...", () => _ = DeleteAsync(playlist))]);
@@ -437,7 +429,7 @@ internal sealed class PlaylistStrip : Border
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
             var items = new List<Control> { add };
-            if (Shown is { IsFolder: false } playlist)
+            if (Shown is { } playlist)
                 items.Add(Item("Remove from playlist", () => Remove(playlist, tune)));
             OpenMenu(row, items);
         };
@@ -511,11 +503,10 @@ internal sealed class PlaylistStrip : Border
         EndDrag();
     }
 
-    /// <summary>The drag over: a favourite's new order kept. A folder's is for this run, as the
-    /// folder playlist is.</summary>
+    /// <summary>The drag over: the playlist's new order kept.</summary>
     private void EndDrag()
     {
-        if (_dragging && Shown is { IsFolder: false })
+        if (_dragging && Shown is not null)
             Favourites.Save(_favourites);
         _dragTune = null;
         _dragging = false;
@@ -558,6 +549,20 @@ internal sealed class PlaylistStrip : Border
     /// <summary>The playlist whose tunes are shown.</summary>
     private Playlist? Shown => _listBox.SelectedItem as Playlist;
 
+    /// <summary>The name of the playlist shown; null with none.</summary>
+    public string? ShownName => Shown?.Name;
+
+    /// <summary>The playlist called <paramref name="name"/>; null when there is none.</summary>
+    public Playlist? Find(string? name) =>
+        name is null ? null : _lists.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The playlist called <paramref name="name"/> shown, if there is one.</summary>
+    public void Show(string? name)
+    {
+        if (Find(name) is { } playlist)
+            _listBox.SelectedItem = playlist;
+    }
+
     private void ShowTunes()
     {
         var playlist = Shown;
@@ -566,9 +571,9 @@ internal sealed class PlaylistStrip : Border
         _playAll.IsEnabled = playlist is { Tunes.Count: > 0 };
         _playAll.IsVisible = playlist is not null;
         _empty.Text = playlist is null
-            ? "No playlists yet. Drop a folder of .sid tunes on the window to play them all, or start a playlist of favourites with +."
+            ? "No playlists yet. Drop a folder of .sid tunes on the window, or open one from the menu, to play them all as a playlist - or start one of favourites with +."
             : "No tunes yet. Play one, then add it here with Add to playlist - or right-click a tune in another playlist.";
-        _empty.IsVisible = playlist is null || playlist is { IsFolder: false, Tunes.Count: 0 };
+        _empty.IsVisible = playlist is null or { Tunes.Count: 0 };
         _sort.IsVisible = playlist is { Tunes.Count: > 0 };
         ShowSort();
         Count();
@@ -583,8 +588,7 @@ internal sealed class PlaylistStrip : Border
         if (Shown is not { } playlist)
             return;
         playlist.SortBy(sort);
-        if (!playlist.IsFolder)
-            Favourites.Save(_favourites);
+        Favourites.Save(_favourites);
         ShowSort();
         LightPlaying(playlist);
     }
@@ -628,18 +632,32 @@ internal sealed class PlaylistStrip : Border
         _count.Text = playlist is null ? "" : playlist.Tunes.Count == 1 ? "1 tune" : $"{playlist.Tunes.Count} tunes";
     }
 
-    /// <summary>A folder's tunes as the playlist at the top - in place of the folder before it -
-    /// shown, with their names read while it plays.</summary>
-    public Playlist ShowFolder(string name, IReadOnlyList<string> paths)
+    /// <summary>A folder's tunes as a playlist of its own, kept with the others and shown, with
+    /// their names read while it plays. The folder opened again, with the same tunes, is the
+    /// playlist it made before, if that still has the folder's name; else a new one beside it.</summary>
+    public Playlist AddFolder(string name, IReadOnlyList<string> paths)
     {
-        if (_folder is not null)
-            _lists.Remove(_folder);
-        _folder = new Playlist(name, isFolder: true, paths);
-        _lists.Insert(0, _folder);
-        _listBox.SelectedItem = _folder;
+        var same = _favourites.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)
+            && p.Tunes.Count == paths.Count
+            && p.OwnOrder.Select(t => t.Path).SequenceEqual(paths, StringComparer.OrdinalIgnoreCase));
+        if (same is not null)
+        {
+            ShowRequested?.Invoke();
+            _listBox.SelectedItem = same;
+            return same;
+        }
+
+        string unique = name;
+        for (int n = 2; _favourites.Any(p => string.Equals(p.Name, unique, StringComparison.OrdinalIgnoreCase)); n++)
+            unique = $"{name} {n}";
+        var playlist = new Playlist(unique, paths);
+        _favourites.Add(playlist);
+        _lists.Add(playlist);
+        Favourites.Save(_favourites);
         ShowRequested?.Invoke();
-        ReadHeaders(_folder.Tunes);
-        return _folder;
+        _listBox.SelectedItem = playlist;
+        ReadHeaders(playlist.Tunes);
+        return playlist;
     }
 
     /// <summary>The tune playing lit, wherever it is; its playlist's tunes shown and scrolled to it.</summary>
@@ -709,7 +727,7 @@ internal sealed class PlaylistStrip : Border
         if (await MessageWindow.PromptAsync(_owner, "New playlist", "A name for the playlist:", suggestion, "Create") is not { } name)
             return;
 
-        var playlist = new Playlist(name, isFolder: false, []);
+        var playlist = new Playlist(name, []);
         _favourites.Add(playlist);
         _lists.Add(playlist);
         if (path is not null)

@@ -40,6 +40,18 @@ internal sealed class Settings
     /// <summary>Which meter shows the sound's spectrum - Meter in the menu, or a click on it.</summary>
     public MeterKind Meter { get; set; }
 
+    /// <summary>Where the user left off, to start from again: the tune last played and its song -
+    /// null before any has played.</summary>
+    public string? LastTune { get; set; }
+
+    public int LastSong { get; set; }
+
+    /// <summary>The playlist the last tune played from, by name; null for a tune played on its own.</summary>
+    public string? LastQueue { get; set; }
+
+    /// <summary>The playlist shown when the program was closed, by name.</summary>
+    public string? LastShown { get; set; }
+
     public static Settings Load()
     {
         try

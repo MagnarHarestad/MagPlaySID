@@ -46,6 +46,22 @@ public sealed class Recording
     /// <summary>The writes outside the calls, in the order made.</summary>
     public required IReadOnlyList<TimedWrite> Between { get; init; }
 
+    /// <summary>A digi's samples as the tune plays them: each run of data its NMIs or main loop read
+    /// at a sample's pace, from the cycle it starts on - empty for a tune that plays none.</summary>
+    public IReadOnlyList<DataRun> Samples { get; init; } = [];
+
+    /// <summary>The pace a digi reads its samples at, in reads a second: a sample a byte or a nibble
+    /// at a time, at a few thousand to some fifteen thousand a second. Slower is a player reading its
+    /// tables; faster, a loop copying memory.</summary>
+    private const double SlowestSample = 1000, FastestSample = 30000;
+
+    /// <summary>The fewest bytes a sample runs over: a table read again and again stays put.</summary>
+    private const int ShortestSample = 32;
+
+    /// <summary>Writes a second to the volume register, outside the calls, that make a tune a digi's:
+    /// without them, runs of data read are a player's tables, not samples.</summary>
+    private const double DigiWritesPerSecond = 500;
+
     /// <summary>The cycle the recording ends on.</summary>
     public required long End { get; init; }
 
@@ -124,6 +140,8 @@ public sealed class Recording
                 between.Add(write);
         }
 
+        double clock = Machines.ClockHz(computer.Machine);
+        bool digi = computer.VolumeWritesOutsideCalls >= DigiWritesPerSecond * Math.Max(1, computer.Cycle / clock);
         return new Recording
         {
             Machine = computer.Machine,
@@ -133,7 +151,19 @@ public sealed class Recording
             CallWrites = callWrites,
             Between = between,
             End = until,
+            Samples = digi ? [.. computer.DataRuns.Where(run => run.Cycle < until && IsSample(run, clock))] : [],
         };
+    }
+
+    /// <summary>Whether a run of data read is a digi's sample: read on over
+    /// <see cref="ShortestSample"/> bytes or more, each once or twice - a byte and its two nibbles -
+    /// at a sample's pace.</summary>
+    private static bool IsSample(DataRun run, double clock)
+    {
+        int bytes = run.Address - run.Start + 1;
+        double seconds = (run.LastCycle - run.Cycle) / clock;
+        double pace = seconds > 0 ? run.Reads / seconds : double.PositiveInfinity;
+        return bytes >= ShortestSample && run.Reads <= 4 * bytes && pace is >= SlowestSample and <= FastestSample;
     }
 
     /// <summary>What the player runs from: the IRQ when its calls write to the SID at all; else

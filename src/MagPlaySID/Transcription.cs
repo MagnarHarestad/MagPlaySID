@@ -18,6 +18,9 @@ internal sealed class Transcription
 
     public required Transcriber.Report Report { get; init; }
 
+    /// <summary>The samples of a digi the tune plays, as it plays them; empty for one with none.</summary>
+    public IReadOnlyList<MagPlay.C64.DataRun> Samples { get; private init; } = [];
+
     /// <summary>The rows its notes fall on, for the whole tune to keep; null when it had too few
     /// notes to tell.</summary>
     public Music.Grid? Rows { get; private init; }
@@ -49,6 +52,7 @@ internal sealed class Transcription
             Timeline = ScoreTimeline.Of(score, Math.Max(1, recording.Calls.Count)),
             Report = report,
             Rows = grid,
+            Samples = recording.Samples,
         };
     }
 

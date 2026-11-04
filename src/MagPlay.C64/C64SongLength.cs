@@ -21,6 +21,10 @@ public static class C64SongLength
     /// <summary>Cycles the C64 is run at a time while the calls are watched.</summary>
     private const int Slice = 100_000;
 
+    /// <summary>Seconds every voice has to stay quiet for a tune to have ended there - longer than
+    /// any pause inside a tune, which a player that loops a silent pattern at its end never leaves.</summary>
+    private const double QuietEnd = 30;
+
     /// <summary>The length in calls - "frames" - and the call rate they are timed at: the tune's
     /// own, from its first call to the one it loops on. Null when the tune cannot be started, has no
     /// calls, or shows no repeating state within <paramref name="maxSeconds"/>.</summary>
@@ -43,10 +47,25 @@ public static class C64SongLength
         var seen = new Dictionary<ulong, int>();
         int calls = 0;
         SidSongLength.Result? found = null;
+        double clock = Machines.ClockHz(computer.Machine);
         void Watch()
         {
             if (found is not null)
                 return;
+
+            // Quiet for long enough: the tune ended where the quiet started. A player that loops a
+            // silent pattern at its end keeps its pulse and filter programs running, so its memory
+            // may never come round again.
+            if (computer.QuietSince() is { } quiet && (computer.Cycle - quiet) / clock >= QuietEnd && computer.Calls.Count > 0 && quiet > computer.Calls[0])
+            {
+                var cycles = computer.Calls;
+                int ended = 0;
+                while (ended < cycles.Count && cycles[ended] < quiet)
+                    ended++;
+                double rate = ended > 1 ? (ended - 1) / ((cycles[ended - 1] - cycles[0]) / clock) : 50;
+                found = new SidSongLength.Result(ended, ended, rate > 0 ? rate : 50, EndsQuiet: true);
+                return;
+            }
 
             bool grew = false;
             for (int page = 2; page < 256; page++)

@@ -85,7 +85,8 @@ public static class Music
     /// </summary>
     internal static MagSid.Playback.SidSongLength.Result? LengthByNotes(Recording recording, MagSid.Playback.SidSongLength.Result? memory)
     {
-        if (recording.Calls.Count < 2)
+        // A tune heard to end has its length: no notes repeat in what is left of it.
+        if (recording.Calls.Count < 2 || memory is { EndsQuiet: true })
             return null;
 
         var frames = Frames(recording, out var rises);
@@ -535,6 +536,8 @@ public static class Music
             int first = glides.Count;
             Glides(score.NoteTable, frames, start, end - tail, grid, glides);
             spans[i] = new NoteSpan(start, end, tail, keeps, 0, null, glides.Count > first ? glides[first].Start : null);
+            if (glides.Count == first)
+                RowSlides(frames, start, end - tail, grid, glides);
         }
 
         // A note restarts the pulse unless its program's first calls carry on the sweep before
@@ -609,14 +612,15 @@ public static class Music
     /// <paramref name="to"/>, as rows: a glide, the pitch moving one way from a note it stayed on for
     /// half a row or more until it stays on another - GoatTracker's 3xx - or a tie, the pitch changing
     /// at once, as a row starts, to a note it stays on for a whole row - where an instrument's own
-    /// steps fall anywhere and an arpeggio soon moves on. The row of a glide starts on the last call
+    /// steps fall anywhere and an arpeggio soon moves on - or anywhere in a row from a note held two
+    /// rows to one held as long. The row of a glide starts on the last call
     /// of the note before; the first move is the call after it.
     /// </summary>
     private static void Glides(int[] table, Frame[] frames, int from, int to, Grid grid, List<(int Start, Row Row)> glides)
     {
         int rowCalls = Math.Min(grid.A, grid.B);
         int tie = Math.Max(3, rowCalls), stayed = Math.Max(SettledCalls, rowCalls / 2);
-        int note = -1, last = -1;
+        int note = -1, noteFrom = -1, last = -1;
         for (int c = from; c < to;)
         {
             var frame = frames[c];
@@ -631,12 +635,12 @@ public static class Music
                 if (note >= 0 && heard != note)
                 {
                     int between = c - last - 1;
-                    if (between == 0 ? run < tie || grid.Into(c) > TieOffRow : !Slides(frames, last, c))
+                    if (between == 0 ? !Ties(c, run, last - noteFrom + 1) : !Slides(frames, last, c))
                         return;
                     int speed = between == 0 ? 0 : Math.Max(1, (int)Math.Round(Math.Abs(frame.Frequency - frames[last].Frequency) / (double)(between + 1)));
                     glides.Add((between == 0 ? c : last, Row.Of(heard, 0, new TonePortamento(speed))));
                 }
-                (note, last) = (heard, c + run - 1);
+                (note, noteFrom, last) = (heard, c, c + run - 1);
             }
             else if (note < 0 && frame.Tonal)
             {
@@ -644,7 +648,48 @@ public static class Music
             }
             c += run;
         }
+
+        // A tie: on a row's start, or a call into it, for a row or more - or anywhere in a row when
+        // the note before it was held for two rows or more and it is too, a tune that ties its
+        // notes in a rhythm of its own (Dane's Uncensored); an instrument's own step to another
+        // pitch comes soon after its note starts.
+        bool Ties(int call, int run, int held) =>
+            run >= tie && (grid.Into(call) <= TieOffRow || (run >= 2 * rowCalls && held >= 2 * rowCalls));
     }
+
+    /// <summary>
+    /// The rows of a note held on, after its own, that slide its pitch - GoatTracker's 1xx and 2xx:
+    /// the row's first call leaves the pitch where it was, and each call after it moves the pitch by
+    /// the same amount, up or down, to the row's end, gate on. Each comes as a held row with the
+    /// slide on it, from <paramref name="from"/> up to <paramref name="to"/>. The note's own program
+    /// goes on playing its pitches, so the row says what is heard without playing it twice.
+    /// </summary>
+    private static void RowSlides(Frame[] frames, int from, int to, Grid grid, List<(int Start, Row Row)> rows)
+    {
+        // The note's own row is its instrument's: a drum's pitch falling is not a slide.
+        int c = from + 1;
+        while (c < to && grid.Into(c) != 0)
+            c++;
+        while (c < to)
+        {
+            int end = c + 1;
+            while (end < to && grid.Into(end) != 0)
+                end++;
+            if (end - c >= SlideCalls && c > 0 && frames[c].Frequency == frames[c - 1].Frequency)
+            {
+                int speed = frames[c + 1].Frequency - frames[c].Frequency;
+                bool slides = speed != 0;
+                for (int k = c + 1; k < end && slides; k++)
+                    slides = frames[k].Frequency - frames[k - 1].Frequency == speed && frames[k].Gate && frames[k].Tonal;
+                if (slides)
+                    rows.Add((c, Row.Hold with { Effects = [new Portamento(speed)] }));
+            }
+            c = end;
+        }
+    }
+
+    /// <summary>The calls a row takes to be seen to slide: its first, held, and two that move alike.</summary>
+    private const int SlideCalls = 3;
 
     /// <summary>The pitch moves one way, with the gate on and a waveform that has a pitch, on every
     /// call after <paramref name="from"/> up to <paramref name="to"/>.</summary>

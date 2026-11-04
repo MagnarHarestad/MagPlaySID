@@ -6,4 +6,5 @@ internal enum MeterKind
     Spectrum,
     Landscape,
     Neon,
+    LastNinja,
 }

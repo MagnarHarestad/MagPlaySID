@@ -70,6 +70,22 @@ internal sealed class ScoreView : Control
     /// <summary>How far down the rows each call of the tune lies, counted in rows.</summary>
     private double[] _placed = [0];
 
+    /// <summary>A digi's samples as played, each with its number - S01 the first heard - and the
+    /// call it starts on in the timeline shown, worked out again when that changes.</summary>
+    private IReadOnlyList<MagPlay.C64.DataRun> _samples = [];
+    private int[] _sampleNumbers = [];
+    private int[] _sampleCalls = [];
+    private ScoreTimeline? _sampleCallsFor;
+
+    /// <summary>Each sample's name, S01 on, and its line in the panel: made once, not every frame.</summary>
+    private string[] _sampleNames = [];
+    private string[] _sampleLines = [];
+
+    /// <summary>The column of the digi's samples, after the voices': there when the tune plays one.</summary>
+    private bool HasDigi => _samples.Count > 0;
+
+    private double DigiWidth => 7 * _charWidth;
+
     /// <summary>The width the rows and the panel take.</summary>
     public double ContentWidth => TrackerWidth + Gap + PanelWidth;
 
@@ -77,7 +93,9 @@ internal sealed class ScoreView : Control
 
     private int Voices => _score?.Voices.Length ?? 3;
 
-    private double TrackerWidth => Voices * VoiceWidth + (Voices - 1) * Gap;
+    private double TrackerWidth => Voices * VoiceWidth + (Voices - 1) * Gap + (HasDigi ? Gap + DigiWidth : 0);
+
+    private double DigiLeft => Voices * (VoiceWidth + Gap);
 
     private double PanelWidth => 30 * _charWidth;
 
@@ -110,9 +128,51 @@ internal sealed class ScoreView : Control
         _firstOwn = new int[_rows.Length];
         _placed = score is not null && timeline is not null ? Placed(score, timeline) : [0];
         _call = 0;
+        ShowSamples([]);
         _selected = Math.Min(_selected, Voices - 1);
         Width = ContentWidth;
         InvalidateVisual();
+    }
+
+    /// <summary>The samples a digi plays, shown in a column of their own beside the voices: the
+    /// row each starts on named by its number.</summary>
+    public void ShowSamples(IReadOnlyList<MagPlay.C64.DataRun> samples)
+    {
+        _samples = samples;
+        var numbers = new Dictionary<int, int>();
+        var starts = new List<int>();
+        var bytes = new List<int>();
+        _sampleNumbers = new int[samples.Count];
+        for (int i = 0; i < samples.Count; i++)
+        {
+            if (!numbers.TryGetValue(samples[i].Start, out int number))
+            {
+                numbers[samples[i].Start] = number = numbers.Count + 1;
+                starts.Add(samples[i].Start);
+                bytes.Add(0);
+            }
+            _sampleNumbers[i] = number;
+            bytes[number - 1] = Math.Max(bytes[number - 1], samples[i].Address - samples[i].Start + 1);
+        }
+        // Index 0 unused: a sample's number is its place.
+        _sampleNames = ["", .. starts.Select((_, n) => $"S{n + 1:D2}")];
+        _sampleLines = [.. starts.Select((start, n) => $"S{n + 1:D2}  ${start:X4}  {bytes[n],5} bytes")];
+        _sampleCallsFor = null;
+        if (!HasDigi && _selected >= Voices)
+            _selected = Voices - 1;
+        Width = ContentWidth;
+        InvalidateVisual();
+    }
+
+    /// <summary>The call each sample starts on, by the timeline shown.</summary>
+    private int[] SampleCalls(ScoreTimeline timeline)
+    {
+        if (_sampleCallsFor != timeline)
+        {
+            _sampleCalls = [.. _samples.Select(s => Math.Max(0, timeline.CallAt(s.Cycle)))];
+            _sampleCallsFor = timeline;
+        }
+        return _sampleCalls;
     }
 
     /// <summary>
@@ -271,6 +331,11 @@ internal sealed class ScoreView : Control
                 InvalidateVisual();
             }
         }
+        if (HasDigi && x >= DigiLeft && x < DigiLeft + DigiWidth)
+        {
+            _selected = Voices;
+            InvalidateVisual();
+        }
         base.OnPointerPressed(e);
     }
 
@@ -289,6 +354,8 @@ internal sealed class ScoreView : Control
                                   new Rect(0, line, TrackerWidth, RowHeight));
             for (int v = 0; v < Voices; v++)
                 DrawVoice(context, score, timeline, v, v * (VoiceWidth + Gap), line, bounds.Height);
+            if (HasDigi)
+                DrawDigi(context, timeline, line, bounds.Height);
         }
 
         for (int v = 0; v < Voices; v++)
@@ -299,8 +366,102 @@ internal sealed class ScoreView : Control
             if (v == _selected)
                 context.FillRectangle(SidPlayerPalette.Brush(colour), new Rect(left, HeaderHeight - 3, VoiceWidth, 2));
         }
+        if (HasDigi)
+        {
+            bool chosen = _selected == Voices;
+            Text(context, "DIGI", DigiLeft + 4, 5 * _scale, chosen ? SidPlayerPalette.Digi : SidPlayerPalette.WithAlpha(SidPlayerPalette.Digi, 140), bold: true);
+            if (chosen)
+                context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.Digi), new Rect(DigiLeft, HeaderHeight - 3, DigiWidth, 2));
+        }
 
-        DrawPanel(context, score, timeline, TrackerWidth + Gap, bounds.Height);
+        if (_selected >= Voices)
+            DrawSamplePanel(context, timeline, TrackerWidth + Gap);
+        else
+            DrawPanel(context, score, timeline, TrackerWidth + Gap, bounds.Height);
+    }
+
+    // ------------------------------------------------------------------ the digi
+
+    /// <summary>The digi's column: on the rows of the voice with the most, each sample by its number
+    /// on the row it starts in, and the rows between dotted as a tracker's empty rows are.</summary>
+    private void DrawDigi(DrawingContext context, ScoreTimeline timeline, double line, double height)
+    {
+        var rows = _rows.MaxBy(r => r.Count);
+        if (rows is not { Count: > 0 })
+            return;
+
+        var calls = SampleCalls(timeline);
+        int now = Math.Max(0, RowAt(rows, (int)Math.Floor(_call)));
+        double at = PlacedAt(_call);
+        double Y(int i) => line + (PlacedAt(rows[i].Call) - at) * RowHeight;
+        int first = now;
+        while (first > 0 && Y(first - 1) > HeaderHeight - RowHeight)
+            first--;
+
+        // The first sample starting on or after the first row drawn, and on from there.
+        int sample = 0;
+        while (sample < calls.Length && calls[sample] < rows[first].Call)
+            sample++;
+        double last = double.NegativeInfinity;
+        for (int i = first; i < rows.Count && Y(i) < height; i++)
+        {
+            int end = i + 1 < rows.Count ? rows[i + 1].Call : int.MaxValue;
+            int starts = -1;
+            while (sample < calls.Length && calls[sample] < end)
+            {
+                if (starts < 0)
+                    starts = sample;
+                sample++;
+            }
+
+            double y = Y(i);
+            if (y - last < RowHeight * TooClose)
+                continue;
+            last = y;
+            bool sounding = i == now;
+            if (starts >= 0)
+                Text(context, _sampleNames[_sampleNumbers[starts]], DigiLeft + 4, y + 1, sounding ? SidPlayerPalette.Title : SidPlayerPalette.Digi, bold: sounding);
+            else
+                Text(context, "...", DigiLeft + 4, y + 1, sounding ? SidPlayerPalette.Title : SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 110), bold: sounding);
+        }
+    }
+
+    /// <summary>The digi's samples listed, the one playing lit: each where it is in the tune's
+    /// memory and how many bytes it is, at the longest it was played.</summary>
+    private void DrawSamplePanel(DrawingContext context, ScoreTimeline timeline, double left)
+    {
+        double y = 5 * _scale;
+        Text(context, "DIGI", left, y, SidPlayerPalette.Digi, bold: true);
+        y += RowHeight;
+        Text(context, "Samples through the volume", left, y, SidPlayerPalette.Subtitle);
+        y += RowHeight * 1.5;
+
+        // The last sample started by now, if it is still being read.
+        long cycle = timeline.CycleOf((int)Math.Floor(_call));
+        int low = 0, high = _samples.Count - 1, latest = -1;
+        while (low <= high)
+        {
+            int middle = (low + high) / 2;
+            if (_samples[middle].Cycle <= cycle)
+            {
+                latest = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+        int playing = latest >= 0 && cycle <= _samples[latest].LastCycle ? _sampleNumbers[latest] : -1;
+
+        for (int n = 0; n < _sampleLines.Length && y < Bounds.Height - RowHeight; n++)
+        {
+            bool lit = playing == n + 1;
+            if (lit)
+                context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Digi, 60)), new Rect(left - 4, y, PanelWidth, RowHeight));
+            Text(context, _sampleLines[n], left, y + 1, lit ? SidPlayerPalette.Title : SidPlayerPalette.Control, bold: lit);
+            y += RowHeight;
+        }
     }
 
     // ------------------------------------------------------------------ the rows

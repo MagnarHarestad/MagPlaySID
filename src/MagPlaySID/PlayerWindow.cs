@@ -34,8 +34,11 @@ internal sealed class PlayerWindow : Window
     /// <summary>The big text against the small: a quarter larger.</summary>
     private const double BigFont = 1.25;
 
-    /// <summary>How many times its speed a tune plays while it fast-forwards.</summary>
+    /// <summary>How many times its speed a tune plays as a fast-forward starts: twice that each
+    /// <see cref="FastForwardDoubling"/> seconds it is held, up to what the computer can play.</summary>
     private const int FastForwardSpeed = 4;
+
+    private const double FastForwardDoubling = 1.5;
 
     /// <summary>How long a playlist's tune plays when its length cannot be measured.</summary>
     private static readonly TimeSpan UnmeasuredLength = TimeSpan.FromMinutes(3);
@@ -47,6 +50,7 @@ internal sealed class PlayerWindow : Window
     private readonly SpectrumView _spectrum = new();
     private readonly LandscapeView _landscape = new();
     private readonly NeonSpectrumView _neon = new();
+    private readonly NinjaView _ninja = new();
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
     private readonly TransportButton _previous = new(TransportGlyph.Previous);
@@ -78,6 +82,7 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _spectrumMeter = new() { Header = "Spectrum" };
     private readonly MenuItem _landscapeMeter = new() { Header = "Landscape" };
     private readonly MenuItem _neonMeter = new() { Header = "Neon" };
+    private readonly MenuItem _ninjaMeter = new() { Header = "Last Ninja" };
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly MenuItem _exportNotes = new();
@@ -112,6 +117,7 @@ internal sealed class PlayerWindow : Window
     private const int PlayCountsAfter = 10;
     /// <summary>Fast-forward held - its button or F: on into the next song or tune, until let go.</summary>
     private bool _fastForwarding;
+    private readonly System.Diagnostics.Stopwatch _fastForwardHeld = new();
     /// <summary>The tune's sample the meters last showed: they are worked out and painted again only
     /// when it moves on.</summary>
     private long _metersAt = -1;
@@ -213,6 +219,8 @@ internal sealed class PlayerWindow : Window
 
         Closed += (_, _) =>
         {
+            _settings.LastShown = _strip.ShownName;
+            _settings.Save();
             _timer.Stop();
             _transcribing?.Cancel();
             StopPlayback();
@@ -222,6 +230,8 @@ internal sealed class PlayerWindow : Window
         ShowEmpty();
         if (path is not null)
             Opened += (_, _) => PlayFile(path);
+        else
+            Opened += (_, _) => Resume();
         Opened += async (_, _) => await CheckForUpdatesAsync();
     }
 
@@ -285,7 +295,7 @@ internal sealed class PlayerWindow : Window
         _fastForward.Held += () => FastForward(true);
         _fastForward.LetGo += () => FastForward(false);
         ToolTip.SetTip(_previous, "Previous tune in the playlist - or this one from its start");
-        ToolTip.SetTip(_fastForward, "Hold to fast-forward, 4x (or hold F)");
+        ToolTip.SetTip(_fastForward, "Hold to fast-forward - the longer it is held, the faster (or hold F)");
         ToolTip.SetTip(_next, "Next tune in the playlist");
         _playPause.Click += TogglePause;
         _next.Click += NextTune;
@@ -314,6 +324,7 @@ internal sealed class PlayerWindow : Window
         spectrumHost.Children.Add(_spectrum);
         spectrumHost.Children.Add(_landscape);
         spectrumHost.Children.Add(_neon);
+        spectrumHost.Children.Add(_ninja);
         spectrumHost.Children.Add(_empty);
         spectrumHost.PointerPressed += (_, e) =>
         {
@@ -493,7 +504,7 @@ internal sealed class PlayerWindow : Window
         openFolder.Click += (_, _) => _ = PickFolderAsync();
 
         var meter = new MenuItem { Header = "Meter" };
-        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon) })
+        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon), (_ninjaMeter, MeterKind.LastNinja) })
         {
             item.ToggleType = MenuItemToggleType.Radio;
             item.GroupName = "Meter";
@@ -550,7 +561,8 @@ internal sealed class PlayerWindow : Window
     {
         _landscape.IsVisible = _landscapeMeter.IsChecked = _settings.Meter == MeterKind.Landscape;
         _neon.IsVisible = _neonMeter.IsChecked = _settings.Meter == MeterKind.Neon;
-        _spectrum.IsVisible = _spectrumMeter.IsChecked = !_landscape.IsVisible && !_neon.IsVisible;
+        _ninja.IsVisible = _ninjaMeter.IsChecked = _settings.Meter == MeterKind.LastNinja;
+        _spectrum.IsVisible = _spectrumMeter.IsChecked = !_landscape.IsVisible && !_neon.IsVisible && !_ninja.IsVisible;
     }
 
     private void ShowFontSize()
@@ -600,30 +612,43 @@ internal sealed class PlayerWindow : Window
 
     /// <summary>A scope for each voice - three a chip, headed as the score's columns are - made
     /// again only when the number changes; a change of chips unmutes every voice.</summary>
-    private void BuildScopes(int voices)
+    /// <summary>A scope for each voice - and one more for a digi, when the tune turns out to play
+    /// one, put beside the voices' without making them anew, so their muting stays.</summary>
+    private void BuildScopes(int voices, bool digi = false)
     {
-        if (_scopes.Length == voices)
+        int count = voices + (digi ? 1 : 0);
+        if (_scopes.Length == count)
             return;
 
-        Array.Clear(_muted);
-        _scopeRow.Children.Clear();
-        _scopeRow.ColumnDefinitions = new ColumnDefinitions(string.Join(",", Enumerable.Repeat("*", voices)));
-        _scopes = new VoiceScopeView[voices];
-        for (int i = 0; i < voices; i++)
+        if (_scopes.Length != voices)
         {
-            var scope = new VoiceScopeView(i, voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null)
+            Array.Clear(_muted);
+            _scopeRow.Children.Clear();
+            _scopes = new VoiceScopeView[voices];
+            for (int i = 0; i < voices; i++)
             {
-                Margin = new Thickness(i == 0 ? 0 : 5, 0, i == voices - 1 ? 0 : 5, 0),
-                TextScale = TextScale,
-            };
-            scope.MuteToggled += (voice, muted) =>
-            {
-                _muted[voice] = muted;
-                _engine?.SetVoiceMuted(voice, muted);
-            };
-            Grid.SetColumn(scope, i);
+                var scope = new VoiceScopeView(i, voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null) { TextScale = TextScale };
+                scope.MuteToggled += (voice, muted) =>
+                {
+                    _muted[voice] = muted;
+                    _engine?.SetVoiceMuted(voice, muted);
+                };
+                _scopes[i] = scope;
+                _scopeRow.Children.Add(scope);
+            }
+        }
+        if (digi)
+        {
+            var scope = new VoiceScopeView(voices, "DIGI", SidPlayerPalette.Digi, mutable: false) { TextScale = TextScale };
+            _scopes = [.. _scopes, scope];
             _scopeRow.Children.Add(scope);
-            _scopes[i] = scope;
+        }
+
+        _scopeRow.ColumnDefinitions = new ColumnDefinitions(string.Join(",", Enumerable.Repeat("*", count)));
+        for (int i = 0; i < count; i++)
+        {
+            _scopes[i].Margin = new Thickness(i == 0 ? 0 : 5, 0, i == count - 1 ? 0 : 5, 0);
+            Grid.SetColumn(_scopes[i], i);
         }
     }
 
@@ -749,8 +774,8 @@ internal sealed class PlayerWindow : Window
         }
     }
 
-    /// <summary>The tunes in folders - and any tunes - dropped or chosen, as the folder playlist,
-    /// played from the first.</summary>
+    /// <summary>The tunes in folders - and any tunes - dropped or chosen, as a playlist kept with
+    /// the others, played from the first.</summary>
     private async Task OpenFolderAsync(IReadOnlyList<string> paths)
     {
         var tunes = await Task.Run(() => Playlist.FindTunes(paths));
@@ -763,7 +788,7 @@ internal sealed class PlayerWindow : Window
             return;
         }
 
-        var playlist = _strip.ShowFolder(name, tunes);
+        var playlist = _strip.AddFolder(name, tunes);
         PlayFromList(playlist, playlist.Tunes[0]);
     }
 
@@ -890,17 +915,56 @@ internal sealed class PlayerWindow : Window
         return string.Join("   ·   ", parts);
     }
 
+    /// <summary>Where the user left off: the tune last played, at the song it was on, paused at
+    /// its start - in its playlist, so the tunes after it follow - and the playlist that was shown.
+    /// Nothing, when the tune is no longer there.</summary>
+    private void Resume()
+    {
+        if (_settings.LastTune is { } path && File.Exists(path))
+        {
+            var playlist = _strip.Find(_settings.LastQueue);
+            var tune = playlist?.Tunes.FirstOrDefault(t => Playlist.SamePath(t.Path, path));
+            if (playlist is not null && tune is not null)
+            {
+                (_queue, _queueTune, _finished) = (playlist, tune, false);
+                _strip.ShowPlaying(playlist, tune);
+            }
+            if (Load(path, quiet: true, firstSong: _settings.LastSong > 0 ? _settings.LastSong : null))
+            {
+                if (_engine is { } engine)
+                {
+                    engine.Paused = true;
+                    _playPause.Glyph = TransportGlyph.Play;
+                }
+            }
+            else
+                (_queue, _queueTune) = (null, null);
+        }
+        _strip.Show(_settings.LastShown);
+    }
+
+    /// <summary>The tune and song playing kept, to start from next time.</summary>
+    private void RememberPlace()
+    {
+        _settings.LastTune = _path;
+        _settings.LastSong = _song;
+        _settings.LastQueue = _queue?.Name;
+        _settings.Save();
+    }
+
     private void Restart()
     {
         _metersAt = -1;
         _spectrum.Clear();
         _landscape.Clear();
         _neon.Clear();
+        _ninja.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
         _piano.Clear();
         Start(_song);
         Transcribe(_song);
+        RememberPlace();
     }
 
     private void Start(int song)
@@ -926,7 +990,7 @@ internal sealed class PlayerWindow : Window
         }
 
         _playPause.Glyph = TransportGlyph.Pause;
-        _engine.Speed = _fastForwarding ? FastForwardSpeed : 1;
+        _engine.Speed = FastForwardingSpeed();
         _fastForward.Lit = _fastForwarding;
         _details.Text = DescribeFile();
         LightSongPills();
@@ -978,6 +1042,7 @@ internal sealed class PlayerWindow : Window
                         return;
                     _transcription = opening;
                     _view.SetScore(opening.Score, opening.Timeline);
+                    _view.ShowSamples(opening.Samples);
                     _retroStatus.Text = $"The first {OpeningSeconds} seconds - the whole tune is on its way";
                     // At once where the tune has got to, not a frame at its start first.
                     Refresh();
@@ -996,6 +1061,7 @@ internal sealed class PlayerWindow : Window
                         _strip.Measured(key);
                     }
                     _view.ContinueWith(whole.Score, whole.Timeline);
+                    _view.ShowSamples(whole.Samples);
                     _retroStatus.Text = whole.Describe();
                 });
             }
@@ -1059,13 +1125,29 @@ internal sealed class PlayerWindow : Window
         Restart();
     }
 
-    /// <summary>Fast-forward on while it is held, off when it is let go.</summary>
+    /// <summary>Fast-forward on while it is held, off when it is let go - held on, as a key held
+    /// down says so again and again, it keeps the speed it has climbed to.</summary>
     private void FastForward(bool on)
     {
+        bool was = _fastForwarding;
         _fastForwarding = on && _file is not null;
+        if (_fastForwarding && !was)
+            _fastForwardHeld.Restart();
         if (_engine is { } engine)
-            engine.Speed = _fastForwarding ? FastForwardSpeed : 1;
+            engine.Speed = FastForwardingSpeed();
         _fastForward.Lit = _fastForwarding;
+        if (!_fastForwarding)
+            _fastForward.Badge = null;
+    }
+
+    /// <summary>The speed asked of the tune: 1, or the fast-forward's, doubled for each
+    /// <see cref="FastForwardDoubling"/> seconds it has been held.</summary>
+    private int FastForwardingSpeed()
+    {
+        if (!_fastForwarding)
+            return 1;
+        int doublings = Math.Min(8, (int)(_fastForwardHeld.Elapsed.TotalSeconds / FastForwardDoubling));
+        return Math.Min(C64PlaybackEngine.MaxSpeed, FastForwardSpeed << doublings);
     }
 
     /// <summary>The keys without a modifier: 1-9 a song, + and - the next or last song, the arrows
@@ -1169,6 +1251,13 @@ internal sealed class PlayerWindow : Window
 
         long at = engine.TuneSampleAt(output.SamplesPlayed);
         ShowNextTune();
+        if (engine.PlaysDigi)
+            BuildScopes(3 * engine.Chips, digi: true);
+        if (_fastForwarding)
+        {
+            engine.Speed = FastForwardingSpeed();
+            _fastForward.Badge = engine.PlayingSpeed > 1 ? $"{engine.PlayingSpeed}x" : null;
+        }
         if (_queueTune is not null && !_finished && !engine.Paused && TuneEnded(engine, at))
         {
             if (_settings.PlayEverySong && engine.Failure is null && _file is { } file && _song < file.Songs)
@@ -1186,6 +1275,7 @@ internal sealed class PlayerWindow : Window
             _spectrum.Update(engine, at);
             _landscape.Update(_spectrum.Relative, at);
             _neon.Update(_spectrum.Relative, at);
+            _ninja.Update(engine, at);
             foreach (var scope in _scopes)
                 scope.Update(engine, at);
             _piano.Update(engine, at, _muted);

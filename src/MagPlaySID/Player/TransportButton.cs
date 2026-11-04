@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 
 namespace MagPlaySid.Player;
 
@@ -21,6 +22,8 @@ internal sealed class TransportButton : Control
     private bool _hovered;
     private bool _pressed;
     private bool _lit;
+    private string? _badge;
+    private TextLayout? _badgeText;
 
     public TransportButton(TransportGlyph glyph)
     {
@@ -55,6 +58,22 @@ internal sealed class TransportButton : Control
         set
         {
             _lit = value;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>A few characters in its corner while it is lit - the speed of a fast-forward.</summary>
+    public string? Badge
+    {
+        get => _badge;
+        set
+        {
+            if (_badge == value)
+                return;
+            _badge = value;
+            _badgeText = value is { Length: > 0 }
+                ? new TextLayout(value, Typeface.Default, 9, SidPlayerPalette.Brush(SidPlayerPalette.VoiceColour(1)))
+                : null;
             InvalidateVisual();
         }
     }
@@ -160,6 +179,9 @@ internal sealed class TransportButton : Control
                 context.FillRectangle(brush, new Rect(box.Right - bar, box.Top, bar, box.Height));
                 break;
         }
+
+        if (_lit && _badgeText is { } badge)
+            badge.Draw(context, new Point(w - badge.Width - 1, h - badge.Height + 1));
     }
 
     private static void Triangle(DrawingContext context, IBrush brush, Rect box, bool pointingLeft)

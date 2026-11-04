@@ -1,5 +1,6 @@
 using MagPlay.Score;
 using MagSid.Playback;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using MagSid.Sid;
 using NAudio.Wave;
@@ -38,6 +39,16 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// <summary>How loud a fast-forward is: quieter than the tune, as tape winding on is.</summary>
     private const float FastForwardVolume = 0.3f;
 
+    /// <summary>The fastest a tune is asked to play.</summary>
+    public const int MaxSpeed = 32;
+
+    /// <summary>A speed always played as asked, however long the computer takes over it.</summary>
+    private const int SafeSpeed = 4;
+
+    /// <summary>The share of the audio thread's time a fast-forward may take: the rest is the margin
+    /// that keeps the sound from breaking up, and the transcription's and the window's.</summary>
+    private const double Headroom = 0.5;
+
     private readonly SidChip[] _chips;
     private readonly SidTune _tune;
     private long _chipCycle;
@@ -47,6 +58,17 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
     private readonly float[][] _voiceScopes;
     private readonly float[] _mixScope = new float[RingSamples];
+
+    /// <summary>The volume the first chip is set to, sample by sample: a digi's sound, as it plays
+    /// its samples through the volume register.</summary>
+    private readonly float[] _digiScope = new float[RingSamples];
+
+    /// <summary>Writes to the volume register a second that make it a digi's: a player sets it a few
+    /// times a second at most, a digi thousands.</summary>
+    private const int DigiWritesPerSecond = 500;
+
+    private long _volumeSecond = -1;
+    private int _volumeWrites;
     private readonly int[][] _voiceStates;
     private readonly int[][] _registers;
     private readonly short[] _extraSample = new short[1];
@@ -120,10 +142,19 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     public int Speed
     {
         get => _speed;
-        set => _speed = Math.Clamp(value, 1, 8);
+        set => _speed = Math.Clamp(value, 1, MaxSpeed);
     }
 
     private volatile int _speed = 1;
+
+    /// <summary>How many times its own speed the tune is playing now: <see cref="Speed"/>, or less
+    /// when this computer cannot make its sound that fast; 0 while silent.</summary>
+    public int PlayingSpeed => _playing;
+
+    private volatile int _playing;
+
+    /// <summary>The time a sample of the tune takes to make, in seconds, as it has lately.</summary>
+    private double _secondsPerSample;
 
     /// <summary>What the sound is multiplied by, 0-1: the listener's volume. Only what is heard - the
     /// scopes and the spectrum show the tune as it is, whatever the volume.</summary>
@@ -170,7 +201,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     public int Read(byte[] buffer, int offset, int count)
     {
         int wanted = count / 2;
-        int rate = Paused || Failure is not null ? 0 : _speed;
+        int rate = Paused || Failure is not null ? 0 : Affordable(_speed);
+        _playing = rate;
         lock (_turns)
         {
             if (_turns[^1].Rate != rate)
@@ -188,6 +220,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         }
 
         int needed = wanted * rate;
+        int before = _pendingCount;
+        long started = Stopwatch.GetTimestamp();
         try
         {
             while (_pendingCount < needed)
@@ -200,6 +234,11 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         {
             // The audio thread must not die with the tune: what it played stays, then silence.
             Failure = ex.Message;
+        }
+        if (_pendingCount > before)
+        {
+            double each = Stopwatch.GetElapsedTime(started).TotalSeconds / (_pendingCount - before);
+            _secondsPerSample = _secondsPerSample == 0 ? each : _secondsPerSample + ((each - _secondsPerSample) * 0.1);
         }
 
         // Fast-forwarding, each sample out is the average of as many of the tune's - its pitch goes
@@ -236,6 +275,17 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         return wanted * 2;
     }
 
+    /// <summary>The speed the tune can play at here: <paramref name="speed"/>, or as many of its
+    /// samples to each of the device's as this computer makes in <see cref="Headroom"/> of the time
+    /// a device's sample lasts - a 2SID tune, or a slower computer, tops out lower.</summary>
+    private int Affordable(int speed)
+    {
+        if (speed <= SafeSpeed || _secondsPerSample <= 0)
+            return speed;
+        int most = (int)(Headroom / (SampleRate * _secondsPerSample));
+        return Math.Clamp(most, SafeSpeed, speed);
+    }
+
     void ISidPort.Write(long cycle, int chip, int register, int value)
     {
         if (chip >= _chips.Length)
@@ -243,7 +293,21 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         ClockTo(cycle);
         _chips[chip].Write(register, value);
         _registers[chip][register] = value & 0xFF;
+        if (chip == 0 && register == 0x18 && !PlaysDigi)
+        {
+            long second = (long)(cycle / ClockHz);
+            if (second != _volumeSecond)
+                (_volumeSecond, _volumeWrites) = (second, 0);
+            if (++_volumeWrites > DigiWritesPerSecond)
+                PlaysDigi = true;
+        }
     }
+
+    /// <summary>Whether the tune plays a digi through the volume register - known once it has.</summary>
+    public bool PlaysDigi { get; private set; }
+
+    /// <summary>The scope index of the digi: the one after the voices.</summary>
+    public int DigiScope => _voiceScopes.Length;
 
     byte ISidPort.Read(long cycle, int chip, int register)
     {
@@ -310,6 +374,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
                                           | (chip.Voice(voice % 3).Envelope.Output() << 24);
             }
             _mixScope[at] = mix / 32768f;
+            _digiScope[at] = ((_registers[0][0x18] & 0x0F) - 7.5f) / 7.5f;
             _scopeWritten++;
         }
     }
@@ -333,8 +398,9 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     public double NoteOf(int frequency) =>
         frequency <= 0 ? double.NaN : 12 * Math.Log2(frequency * ClockHz / 16777216.0 / 16.3516);
 
+    /// <summary>A voice's own output; past the last voice, the digi's.</summary>
     public void CaptureVoiceScope(int voice, float[] destination, long endingAt) =>
-        CaptureRing(_voiceScopes[voice], destination, endingAt);
+        CaptureRing(voice < _voiceScopes.Length ? _voiceScopes[voice] : _digiScope, destination, endingAt);
 
     public void CaptureMix(float[] destination, long endingAt) => CaptureRing(_mixScope, destination, endingAt);
 

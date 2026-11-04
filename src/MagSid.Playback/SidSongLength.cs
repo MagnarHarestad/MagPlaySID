@@ -36,7 +36,9 @@ public static class SidSongLength
     /// tune has an intro it never returns to.</param>
     /// <param name="CallsPerSecond">How often play is called - 50 on the vertical blank, the
     /// timer's own rate for a tune on CIA 1. A "frame" here is one play call.</param>
-    public sealed record Result(int TotalFrames, int LoopStartFrame, double CallsPerSecond = 50.0)
+    /// <param name="EndsQuiet">The tune does not loop back to music: it ends, every voice gone
+    /// quiet, where <paramref name="TotalFrames"/> says, and plays nothing from there on.</param>
+    public sealed record Result(int TotalFrames, int LoopStartFrame, double CallsPerSecond = 50.0, bool EndsQuiet = false)
     {
         public int LoopFrames => TotalFrames - LoopStartFrame;
 
