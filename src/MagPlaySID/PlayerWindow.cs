@@ -1174,7 +1174,8 @@ internal sealed class PlayerWindow : Window
                     }
                     _view.ContinueWith(whole.Score, whole.Timeline);
                     _view.ShowSamples(whole.Samples);
-                    _retroStatus.Text = whole.Describe();
+                    // With no player, the opening knows what the whole run keeps none of: whether it is a digi.
+                    _retroStatus.Text = whole.NoPlayer && opening.NoPlayer ? opening.Describe() : whole.Describe();
                 });
             }
             catch (OperationCanceledException)

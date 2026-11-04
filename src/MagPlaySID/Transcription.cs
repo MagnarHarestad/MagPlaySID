@@ -25,6 +25,11 @@ internal sealed class Transcription
     /// notes to tell.</summary>
     public Music.Grid? Rows { get; private init; }
 
+    /// <summary>No player found: the tune writes nothing that comes as a player's calls do - Reed's
+    /// Flamethrower, for one, silences the voices and then only streams samples through the volume
+    /// register, its whole song a recording. Nothing to make notes of.</summary>
+    public bool NoPlayer { get; private init; }
+
     /// <summary>The first <paramref name="seconds"/> of the tune - quick to make, to show while the
     /// whole of it is.</summary>
     public static Transcription Opening(SidFile file, int song, double seconds, CancellationToken cancel) =>
@@ -53,12 +58,17 @@ internal sealed class Transcription
             Report = report,
             Rows = grid,
             Samples = recording.Samples,
+            NoPlayer = recording.Player is null,
         };
     }
 
     /// <summary>What the view says about it.</summary>
     public string Describe()
     {
+        if (NoPlayer)
+            return Samples.Count > 0
+                ? "No notes to show: the whole tune is a digi - samples played through the volume register, not notes on the voices"
+                : "No notes to show: nothing the tune writes comes as a player's notes do";
         var score = Score;
         string grid = score.FunkTempo is { } funk ? $"{score.Tempo}/{funk}" : $"{score.Tempo}";
         return $"{score.Instruments.Count} instruments, {score.Patterns.Count} patterns, rows of {grid} calls - " +
