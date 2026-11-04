@@ -16,7 +16,10 @@ internal sealed class DireModel
     /// <summary>What a part does in a dance: which of a pose's angles turn it.</summary>
     public enum Role : byte { Body, Spine, Head, UpperArm, Forearm, Hand, Thigh, Shin, Rigid }
 
-    public sealed record Part(string Name, int Guy, int Parent, Vector3 Joint, Role Role, int Side, Vector3[] Corners, Vector3[] Normals, uint[] Colours);
+    /// <summary>A part: its triangles' corners, three each, their normals and colours, and the layer
+    /// each lies in - 0, or 1 for one lying on another surface of the part (the blue guy's bib on
+    /// his shirt), 2 for one on that (a button on the bib).</summary>
+    public sealed record Part(string Name, int Guy, int Parent, Vector3 Joint, Role Role, int Side, Vector3[] Corners, Vector3[] Normals, uint[] Colours, byte[] Layers);
 
     /// <summary>The parts of both guys, every part after the one it hangs from.</summary>
     public IReadOnlyList<Part> Parts { get; }
@@ -35,7 +38,7 @@ internal sealed class DireModel
         if (Encoding.ASCII.GetString(reader.ReadBytes(4)) != "DIRE")
             throw new InvalidDataException("Not the Dire Guys' model.");
         int count = reader.ReadInt32();
-        var raw = new List<(string Name, int Guy, int Parent, Vector3 Origin, Vector3[] Corners, Vector3[] Normals, uint[] Colours)>();
+        var raw = new List<(string Name, int Guy, int Parent, Vector3 Origin, Vector3[] Corners, Vector3[] Normals, uint[] Colours, byte[] Layers)>();
         for (int i = 0; i < count; i++)
         {
             string name = Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadByte()));
@@ -45,14 +48,18 @@ internal sealed class DireModel
             var corners = new Vector3[triangles * 3];
             var normals = new Vector3[triangles];
             var colours = new uint[triangles];
+            var layers = new byte[triangles];
             for (int t = 0; t < triangles; t++)
             {
                 normals[t] = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-                colours[t] = reader.ReadUInt32();
+                // The colour's top byte is the triangle's layer; it is drawn solid.
+                uint colour = reader.ReadUInt32();
+                layers[t] = (byte)(colour >> 24);
+                colours[t] = colour | 0xFF000000;
                 for (int c = 0; c < 3; c++)
                     corners[(3 * t) + c] = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             }
-            raw.Add((name, guy, parent, origin, corners, normals, colours));
+            raw.Add((name, guy, parent, origin, corners, normals, colours, layers));
         }
 
         // Each guy stood with his feet's middle at the origin.
@@ -117,7 +124,7 @@ internal sealed class DireModel
             var (role, side) = RoleOf(p.Name);
             index[i] = parts.Count;
             parts.Add(new Part(p.Name, p.Guy, parents[i] < 0 ? -1 : index[parents[i]], JointOf(p.Name, p.Origin) - shift, role, side,
-                Array.ConvertAll(p.Corners, c => c - shift), p.Normals, p.Colours));
+                Array.ConvertAll(p.Corners, c => c - shift), p.Normals, p.Colours, p.Layers));
         }
         return new DireModel(parts);
     }

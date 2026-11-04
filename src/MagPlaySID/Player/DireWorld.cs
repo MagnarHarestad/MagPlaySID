@@ -138,6 +138,9 @@ internal sealed class DireWorld
         public float Strength;
         public int Side = 1;
         public int Next;
+
+        /// <summary>How hard he has been dancing lately: his moves, the big ones twice, fading.</summary>
+        public float Action;
         public readonly float[] Pose = new float[Angles];
         public readonly float[] Scratch = new float[Angles];
 
@@ -166,6 +169,7 @@ internal sealed class DireWorld
         foreach (var part in _model.Parts)
             if (part.Role == DireModel.Role.Shin)
                 _guys[part.Guy].Knees = true;
+        SnapCamera(Wide);
     }
 
     public void Reset()
@@ -183,6 +187,15 @@ internal sealed class DireWorld
         _beats = 0;
         _kicks = 0;
         _sparkle = 0;
+        _energy = 0;
+        _usual = UsualAtStart;
+        _breath = (0, 0);
+        _closeOn = 1;
+        foreach (var guy in _guys)
+            guy.Action = 0;
+        _shotAt = 0;
+        _shotBeats = _calmNext = _livelyNext = 0;
+        SnapCamera(Wide);
     }
 
     public void Advance(double time)
@@ -192,9 +205,15 @@ internal sealed class DireWorld
         for (int i = 0; i < _lights.Length; i++)
             _lights[i].Level = Math.Max(0.35f, _lights[i].Level - (float)(step * 1.6));
         _sparkle = Math.Max(0, _sparkle - (float)(step * 2.5));
+        _energy *= MathF.Exp(-(float)step / 2.5f);
+        _usual += (_energy - _usual) * (1 - MathF.Exp(-(float)step / 25));
         foreach (var guy in _guys)
+        {
+            guy.Action *= MathF.Exp(-(float)step / 3);
             if (guy.Move is { } move && _time - guy.Since > move.Length)
                 guy.Move = null;
+        }
+        MoveCamera((float)step);
     }
 
     /// <summary>A note of the tune: a beat to dip on, a move to make, a light to flash.</summary>
@@ -203,6 +222,7 @@ internal sealed class DireWorld
         var light = _lights[voice % 3];
         _lights[voice % 3] = (colour, Math.Max(light.Level, 0.5f + (0.6f * loudness)));
         _sparkle = Math.Min(1.5f, _sparkle + (0.35f * loudness));
+        _energy += 0.12f * loudness;
         Guy blue = _guys[0], red = _guys[1];
 
         if (beat is Beat.Kick or Beat.Snare or Beat.Bass)
@@ -223,6 +243,7 @@ internal sealed class DireWorld
         {
             case Beat.Kick:
                 (_kickAt, _kickStrength) = (_time, loudness);
+                _breath.Speed += 0.17f * Math.Min(1, loudness) * Math.Max(0, 1 - (_breath.Value / DeepestBreath));
                 // Now and then, on a loud kick, they both jump.
                 if (++_kicks % 16 == 0 && _time - _lastJump > 6 && blue.Free(_time) && red.Free(_time))
                 {
@@ -265,6 +286,7 @@ internal sealed class DireWorld
         guy.From[(int)J.Turn] = MathF.IEEERemainder(guy.From[(int)J.Turn], MathF.Tau);
         guy.Move = move;
         guy.Since = _time;
+        guy.Action += move == Spin || move == Jump || move == Kick ? 2 : 1;
     }
 
     private static float Ease(float t) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - (2 * t));
@@ -333,15 +355,141 @@ internal sealed class DireWorld
     private Vector3 _eye, _right, _up, _forward;
     private float _focal, _cx, _cy, _width, _height;
 
+    /// <summary>A shot the camera works its way to: how far out it stands, the point it looks at,
+    /// how far round from the front it is and how high above that point.</summary>
+    private readonly record struct Shot(float Distance, float TargetX, float TargetY, float Yaw, float Lift);
+
+    private static readonly Shot Wide = new(8.9f, 0, 0.17f, 0.15f, 0.6f);
+    private static readonly Shot High = new(7f, 0, 0.5f, -0.35f, 2.4f);
+    private static readonly Shot TwoShot = new(6.2f, 0, 0.8f, -0.12f, 0.55f);
+    private static readonly Shot Low = new(5.6f, 0, 1.15f, 0.45f, -0.25f);
+    private static readonly Shot Close = new(5f, 0, 1.12f, 0.1f, 0.4f);
+    private static readonly Shot CloseBlue = new(3.7f, -0.62f, 1.12f, -0.25f, 0.35f);
+    private static readonly Shot CloseRed = new(3.9f, 0.6f, 1.3f, 0.25f, 0.4f);
+
+    /// <summary>The shots taken in turn while the music is quiet, and while it is busy.</summary>
+    private static readonly Shot[] CalmShots = [Wide, TwoShot, High, Wide, Low, TwoShot];
+    private static readonly Shot[] LivelyShots = [Close, Low, TwoShot, Close, High];
+
+    /// <summary>A shot is held this long at least, and moved on from after this many beats - a
+    /// phrase - or this long without them.</summary>
+    private const double ShortestShot = 5.5, LongestShot = 13;
+
+    private const int PhraseBeats = 16;
+
+    /// <summary>How busy the music is: its notes, each as loud as it was, fading over a few seconds;
+    /// and how busy it has been over the last half minute or so. Busier than it has been, and the
+    /// camera goes in close; quieter, and it goes out wide - whatever the tune's own pace.</summary>
+    private float _energy, _usual = UsualAtStart;
+
+    private const float UsualAtStart = 2;
+
+    /// <summary>Lively: busier than usual by this much, and not near silent.</summary>
+    private bool Lively => _energy > _usual * 1.08f && _energy > 0.6f;
+
+    /// <summary>The guy the next close-up is on: they take turns.</summary>
+    private int _closeOn = 1;
+
+    private Shot _shot = Wide;
+    private double _shotAt;
+    private int _shotBeats, _calmNext, _livelyNext;
+
+    /// <summary>The camera's place as it moves - each part with its own speed - on springs that
+    /// ease it off and in to every shot, never faster than a walk.</summary>
+    private (float Value, float Speed) _distance, _targetX, _targetY, _yaw, _lift;
+
+    /// <summary>How far the camera has breathed in, as a share of its distance: each kick nudges it
+    /// in, a spring brings it back - never more than <see cref="DeepestBreath"/>, however fast they come.</summary>
+    private (float Value, float Speed) _breath;
+
+    private const float DeepestBreath = 0.035f;
+
+    private void SnapCamera(Shot shot)
+    {
+        _shot = shot;
+        _distance = (shot.Distance, 0);
+        _targetX = (shot.TargetX, 0);
+        _targetY = (shot.TargetY, 0);
+        _yaw = (shot.Yaw, 0);
+        _lift = (shot.Lift, 0);
+    }
+
+    /// <summary>The camera moved on by <paramref name="step"/> seconds towards its shot, and a new
+    /// shot chosen at the end of a phrase.</summary>
+    private void MoveCamera(float step)
+    {
+        double inShot = _time - _shotAt;
+        if (inShot >= ShortestShot && (_beats - _shotBeats >= PhraseBeats || inShot >= LongestShot))
+            ChooseShot();
+        // Within a shot it creeps slowly in.
+        float creep = 1 - (0.06f * (float)Math.Min(1, inShot / 12));
+        Follow(ref _distance, _shot.Distance * creep, 2.2f, 1.1f, step);
+        Follow(ref _targetX, _shot.TargetX, 2f, 0.45f, step);
+        Follow(ref _targetY, _shot.TargetY, 2f, 0.45f, step);
+        Follow(ref _yaw, _shot.Yaw, 2.8f, 0.15f, step);
+        Follow(ref _lift, _shot.Lift, 2.4f, 0.5f, step);
+        Follow(ref _breath, 0, 0.8f, 0.2f, step);
+    }
+
+    /// <summary>The next shot: in close on the guy dancing hardest when the music is busy, the
+    /// lively shots in turn, or - when it is quiet - the wide ones; never the one it has.</summary>
+    private void ChooseShot()
+    {
+        bool onOne = _shot == CloseBlue || _shot == CloseRed;
+        bool lively = Lively;
+        Shot next;
+        if (lively && !onOne && Math.Max(_guys[0].Action, _guys[1].Action) > 1.5f)
+        {
+            // In close on the guy whose turn it is - unless he is standing about and the other is not.
+            int on = _guys[_closeOn].Action < 1 ? 1 - _closeOn : _closeOn;
+            next = on == 0 ? CloseBlue : CloseRed;
+            _closeOn = 1 - on;
+        }
+        else if (lively)
+        {
+            next = LivelyShots[_livelyNext++ % LivelyShots.Length];
+            if (next == _shot)
+                next = LivelyShots[_livelyNext++ % LivelyShots.Length];
+        }
+        else
+        {
+            next = CalmShots[_calmNext++ % CalmShots.Length];
+            if (next == _shot)
+                next = CalmShots[_calmNext++ % CalmShots.Length];
+        }
+        _shot = next;
+        _shotAt = _time;
+        _shotBeats = _beats;
+    }
+
+    /// <summary>A value eased towards <paramref name="goal"/> on a critically damped spring that
+    /// settles in about <paramref name="settle"/> seconds and moves no faster than
+    /// <paramref name="fastest"/> a second.</summary>
+    private static void Follow(ref (float Value, float Speed) state, float goal, float settle, float fastest, float step)
+    {
+        if (step <= 0)
+            return;
+        float omega = 2 / settle;
+        float x = omega * step;
+        float decay = 1 / (1 + x + (0.48f * x * x) + (0.235f * x * x * x));
+        float change = Math.Clamp(state.Value - goal, -fastest * settle, fastest * settle);
+        float target = state.Value - change;
+        float temp = (state.Speed + (omega * change)) * step;
+        float speed = (state.Speed - (omega * temp)) * decay;
+        float value = target + ((change + temp) * decay);
+        if ((goal - state.Value > 0) == (value > goal))
+            (value, speed) = (goal, 0);
+        state = (value, speed);
+    }
+
     private void Aim(Size size)
     {
         float t = (float)_time;
-        // Now out wide, the whole ball seen, now in close on the guys - slowly, back and forth.
-        float wide = 0.5f + (0.5f * MathF.Sin(t * 0.075f));
-        float distance = 5.3f + (3.6f * wide);
-        var target = new Vector3(0, 1.12f - (0.95f * wide), 0);
-        float yaw = 0.32f * MathF.Sin(t * 0.11f);
-        float lift = 0.55f + (0.35f * MathF.Sin(t * 0.083f));
+        // It drifts a little round, and each kick it breathes in a touch and out again.
+        float distance = _distance.Value * (1 - Math.Clamp(_breath.Value, 0, DeepestBreath));
+        var target = new Vector3(_targetX.Value, _targetY.Value, 0);
+        float yaw = _yaw.Value + (0.07f * MathF.Sin(t * 0.23f));
+        float lift = _lift.Value;
         _eye = target + new Vector3(MathF.Sin(yaw) * distance, lift, MathF.Cos(yaw) * distance);
         _forward = Vector3.Normalize(target - _eye);
         _right = Vector3.Normalize(Vector3.Cross(_forward, Vector3.UnitY));
@@ -700,10 +848,13 @@ internal sealed class DireWorld
             var b = Vector3.Transform(corners[(3 * t) + 1], placed);
             var c = Vector3.Transform(corners[(3 * t) + 2], placed);
             var normal = Vector3.TransformNormal(part.Normals[t], placed);
+            // Two-sided, as Blender draws them: some of the model's faces point inwards - the blue
+            // guy's bib among them - and left out as turned away, the shirt behind showed through.
+            // Each is lit on the side the camera sees.
             var middle = (a + b + c) / 3;
-            if (Vector3.Dot(normal, _eye - middle) <= 0)
-                continue;
             normal = Vector3.Normalize(normal);
+            if (Vector3.Dot(normal, _eye - middle) < 0)
+                normal = -normal;
 
             uint colour = part.Colours[t];
             float r = ((colour >> 16) & 0xFF) / 255f, g = ((colour >> 8) & 0xFF) / 255f, bl = (colour & 0xFF) / 255f;
@@ -714,15 +865,22 @@ internal sealed class DireWorld
             float lr = (r * light) + (left * ((rimA >> 16) & 0xFF) / 255f) + (right * ((rimB >> 16) & 0xFF) / 255f) + (below * ((under >> 16) & 0xFF) / 255f);
             float lg = (g * light) + (left * ((rimA >> 8) & 0xFF) / 255f) + (right * ((rimB >> 8) & 0xFF) / 255f) + (below * ((under >> 8) & 0xFF) / 255f);
             float lb = (bl * light) + (left * (rimA & 0xFF) / 255f) + (right * (rimB & 0xFF) / 255f) + (below * (under & 0xFF) / 255f);
-            _guyMesh.Add(a, b, c, new SKColor((byte)Math.Clamp(lr * 255, 0, 255), (byte)Math.Clamp(lg * 255, 0, 255), (byte)Math.Clamp(lb * 255, 0, 255)));
+            _guyMesh.Add(a, b, c, new SKColor((byte)Math.Clamp(lr * 255, 0, 255), (byte)Math.Clamp(lg * 255, 0, 255), (byte)Math.Clamp(lb * 255, 0, 255)), part.Layers[t] * LayerNearer);
         }
     }
 
-    /// <summary>Triangles of one colour each, laid back to front into a frame's mesh slot.</summary>
+    /// <summary>How much nearer a triangle lying on another surface of its part is taken to be, a
+    /// layer, when they are laid back to front: the blue guy's bib lies a few millimetres in front of
+    /// his shirt, too close for their middles to tell which is in front.</summary>
+    private const float LayerNearer = 0.03f;
+
+    /// <summary>Triangles of one colour each, laid back to front into a frame's mesh slot - each by
+    /// its middle's distance, less what it is taken to be nearer.</summary>
     private sealed class FlatMesh
     {
         private Vector3[] _corners = new Vector3[3 * 4096];
         private SKColor[] _colours = new SKColor[4096];
+        private float[] _nearer = new float[4096];
         private int _count;
         private SKPoint[] _screen = [];
         private float[] _depth = [];
@@ -730,16 +888,18 @@ internal sealed class DireWorld
 
         public void Begin() => _count = 0;
 
-        public void Add(Vector3 a, Vector3 b, Vector3 c, SKColor colour)
+        public void Add(Vector3 a, Vector3 b, Vector3 c, SKColor colour, float nearer = 0)
         {
             if (_count == _colours.Length)
             {
                 Array.Resize(ref _colours, _count * 2);
+                Array.Resize(ref _nearer, _count * 2);
                 Array.Resize(ref _corners, _count * 6);
             }
             _corners[3 * _count] = a;
             _corners[(3 * _count) + 1] = b;
             _corners[(3 * _count) + 2] = c;
+            _nearer[_count] = nearer;
             _colours[_count++] = colour;
         }
 
@@ -766,7 +926,7 @@ internal sealed class DireWorld
                 }
                 if (!seen || outside != 0)
                     continue;
-                _depth[drawn] = -sum;
+                _depth[drawn] = -(sum - (3 * _nearer[t]));
                 _order[drawn++] = t;
             }
             if (drawn == 0)
