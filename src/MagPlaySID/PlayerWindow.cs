@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using MagPlay.C64;
+using MagPlaySid.Export;
 using MagPlaySid.Player;
 using MagSid.Playback;
 
@@ -51,12 +52,24 @@ internal sealed class PlayerWindow : Window
     private readonly LandscapeView _landscape = new();
     private readonly NeonSpectrumView _neon = new();
     private readonly NinjaView _ninja = new();
+    private readonly DireView _dire = new();
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
     private readonly TransportButton _previous = new(TransportGlyph.Previous);
     private readonly TransportButton _playPause = new(TransportGlyph.Pause);
     private readonly TransportButton _fastForward = new(TransportGlyph.FastForward);
     private readonly TransportButton _next = new(TransportGlyph.Next);
+    private readonly TransportButton _repeat = new(TransportGlyph.Repeat);
+
+    /// <summary>The times a tune may be set to play in all; <see cref="Favourites.Forever"/>, on and on.</summary>
+    private static readonly (int? Times, string Name)[] RepeatChoices =
+    [
+        (null, "Play once"), (2, "Twice"), (3, "3 times"), (4, "4 times"), (5, "5 times"), (10, "10 times"),
+        (Favourites.Forever, "Forever"),
+    ];
+
+    /// <summary>The times the tune playing has played to its end, this time round.</summary>
+    private int _played;
     private readonly TextBlock _title = new();
     private readonly TextBlock _details = new();
     private readonly TextBlock _elapsed = new();
@@ -83,9 +96,11 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _landscapeMeter = new() { Header = "Landscape" };
     private readonly MenuItem _neonMeter = new() { Header = "Neon" };
     private readonly MenuItem _ninjaMeter = new() { Header = "Last Ninja" };
+    private readonly MenuItem _direMeter = new() { Header = "Dire Guys" };
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly MenuItem _exportNotes = new();
+    private readonly MenuItem _exportSound = new();
     private readonly TextBlock _songLabel = new() { Text = "SONG", VerticalAlignment = VerticalAlignment.Center };
     private readonly StackPanel _songPills = new() { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
     private readonly ScrollViewer _songScroller = new();
@@ -141,8 +156,13 @@ internal sealed class PlayerWindow : Window
         Background = SidPlayerPalette.Brush(SidPlayerPalette.Background);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-        _strip = new PlaylistStrip(this);
+        _strip = new PlaylistStrip(this) { PlaylistsHeight = _settings.PlaylistsHeight };
         _strip.Play += PlayFromList;
+        _strip.PlaylistsResized += height =>
+        {
+            _settings.PlaylistsHeight = height;
+            _settings.Save();
+        };
         _piano.KeyStruck += StrikeKey;
         _volumeKnob.Value = _settings.Volume;
         _pianoSynth.Volume = _volumeKnob.Gain;
@@ -299,13 +319,15 @@ internal sealed class PlayerWindow : Window
         ToolTip.SetTip(_next, "Next tune in the playlist");
         _playPause.Click += TogglePause;
         _next.Click += NextTune;
+        _repeat.Click += OpenRepeatMenu;
+        ToolTip.SetTip(_repeat, "Repeat this tune - a number of times, or forever");
 
         var transport = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(18, 4, 18, 6),
-            Children = { _previous, _elapsed, _playPause, _fastForward, _next },
+            Children = { _previous, _elapsed, _playPause, _fastForward, _repeat, _next },
         };
 
         _empty.Text = "Open a .sid file - or drop one here";
@@ -325,6 +347,7 @@ internal sealed class PlayerWindow : Window
         spectrumHost.Children.Add(_landscape);
         spectrumHost.Children.Add(_neon);
         spectrumHost.Children.Add(_ninja);
+        spectrumHost.Children.Add(_dire);
         spectrumHost.Children.Add(_empty);
         spectrumHost.PointerPressed += (_, e) =>
         {
@@ -486,6 +509,16 @@ internal sealed class PlayerWindow : Window
         _exportNotes.Items.Add(asSheet);
         _exportNotes.IsEnabled = false;
 
+        // The song playing's sound, once its length is known - or known not to be.
+        _exportSound.Header = "Export sound";
+        foreach (var format in new[] { SoundFormat.Wav, SoundFormat.Flac, SoundFormat.Mp3 })
+        {
+            var item = new MenuItem { Header = $"As {SoundExport.Name(format)}..." };
+            item.Click += (_, _) => _ = ExportSoundAsync(format);
+            _exportSound.Items.Add(item);
+        }
+        _exportSound.IsEnabled = false;
+
         _smallFont.Header = "Small font";
         _bigFont.Header = "Big font";
         foreach (var (item, big) in new[] { (_smallFont, false), (_bigFont, true) })
@@ -504,7 +537,7 @@ internal sealed class PlayerWindow : Window
         openFolder.Click += (_, _) => _ = PickFolderAsync();
 
         var meter = new MenuItem { Header = "Meter" };
-        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon), (_ninjaMeter, MeterKind.LastNinja) })
+        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon), (_ninjaMeter, MeterKind.LastNinja), (_direMeter, MeterKind.DireGuys) })
         {
             item.ToggleType = MenuItemToggleType.Radio;
             item.GroupName = "Meter";
@@ -522,7 +555,7 @@ internal sealed class PlayerWindow : Window
             },
             Padding = new Thickness(9, 7),
             VerticalAlignment = VerticalAlignment.Center,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, _everySong, new Separator(), _exportNotes, new Separator(), meter, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, _everySong, new Separator(), _exportNotes, _exportSound, new Separator(), meter, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
@@ -562,7 +595,8 @@ internal sealed class PlayerWindow : Window
         _landscape.IsVisible = _landscapeMeter.IsChecked = _settings.Meter == MeterKind.Landscape;
         _neon.IsVisible = _neonMeter.IsChecked = _settings.Meter == MeterKind.Neon;
         _ninja.IsVisible = _ninjaMeter.IsChecked = _settings.Meter == MeterKind.LastNinja;
-        _spectrum.IsVisible = _spectrumMeter.IsChecked = !_landscape.IsVisible && !_neon.IsVisible && !_ninja.IsVisible;
+        _dire.IsVisible = _direMeter.IsChecked = _settings.Meter == MeterKind.DireGuys;
+        _spectrum.IsVisible = _spectrumMeter.IsChecked = !_landscape.IsVisible && !_neon.IsVisible && !_ninja.IsVisible && !_dire.IsVisible;
     }
 
     private void ShowFontSize()
@@ -656,7 +690,7 @@ internal sealed class PlayerWindow : Window
     {
         bool loaded = _file is not null;
         _empty.IsVisible = !loaded;
-        _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = loaded;
+        _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = _repeat.IsEnabled = loaded;
         // Only with a tune to add: an empty window offers Open alone, not a button that cannot be used.
         _favourite.IsVisible = loaded;
         ShowNextTune();
@@ -736,6 +770,79 @@ internal sealed class PlayerWindow : Window
         {
             await MessageWindow.ShowAsync(this, "Cannot export the notes", ex.Message);
         }
+    }
+
+    /// <summary>The song playing's sound saved where the user says, as WAV, FLAC or MP3: played
+    /// apart from what is heard, as fast as it goes, a window showing how far with a Cancel.</summary>
+    private async Task ExportSoundAsync(SoundFormat format)
+    {
+        if (_file is not { } file || !(_wholeTranscribed || _lengthUnknown))
+            return;
+        int song = _song;
+        var length = _length?.Total ?? UnmeasuredLength;
+        bool fadeOut = _length is not { EndsQuiet: true };
+        var muted = _muted.ToArray();
+        string name = SoundExport.Name(format), extension = SoundExport.Extension(format);
+        var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = $"Export the sound as {name}",
+            SuggestedFileName = SoundExport.FileName(file, song),
+            DefaultExtension = extension,
+            FileTypeChoices = [new FilePickerFileType(name) { Patterns = [$"*.{extension}"] }],
+            ShowOverwritePrompt = true,
+        });
+        if (target is null)
+            return;
+
+        using var cancel = new CancellationTokenSource();
+        var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6 };
+        var status = new TextBlock { Text = $"Playing {Clock(length)} of {SoundExport.FileName(file, song)}...", TextWrapping = TextWrapping.Wrap };
+        var stop = new Button { Content = "Cancel", MinWidth = 80, IsCancel = true, HorizontalAlignment = HorizontalAlignment.Right };
+        bool done = false;
+        var dialog = new Window
+        {
+            Title = $"Export the sound as {name}",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel { Margin = new Thickness(18), Spacing = 14, Children = { status, bar, stop } },
+        };
+        stop.Click += (_, _) => dialog.Close();
+        dialog.Closing += (_, _) =>
+        {
+            if (!done)
+                cancel.Cancel();
+        };
+        _ = dialog.ShowDialog(this);
+
+        string? failure = null;
+        try
+        {
+            var progress = new Progress<double>(part => bar.Value = part);
+            var samples = await Task.Run(() => SoundExport.Render(file, song, length, fadeOut, muted, progress, cancel.Token));
+            status.Text = $"Writing the {name} file...";
+            bar.IsIndeterminate = true;
+            stop.IsEnabled = false;
+            await using var stream = await target.OpenWriteAsync();
+            if (stream.CanSeek)
+                stream.SetLength(0);
+            await Task.Run(() => SoundExport.Write(stream, format, samples, file, song));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SidPlaybackException or InvalidOperationException or ArgumentException)
+        {
+            failure = ex.Message;
+        }
+        finally
+        {
+            done = true;
+            dialog.Close();
+        }
+        if (failure is not null)
+            await MessageWindow.ShowAsync(this, "Cannot export the sound", failure);
     }
 
     private async Task OpenAsync()
@@ -876,12 +983,14 @@ internal sealed class PlayerWindow : Window
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
         _playCounted = false;
+        _played = 0;
         _song = firstSong ?? ChosenFirstSong(file, path) ?? OwnFirstSong(file);
         Title = $"{(string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : file.Name)} - {UpdateCheck.Product}";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
         BuildSongPills();
         ShowEmpty();
         Restart();
+        ShowRepeat();
         return true;
     }
 
@@ -959,6 +1068,7 @@ internal sealed class PlayerWindow : Window
         _landscape.Clear();
         _neon.Clear();
         _ninja.Clear();
+        _dire.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
         _piano.Clear();
@@ -1019,6 +1129,7 @@ internal sealed class PlayerWindow : Window
         _transcription = null;
         _wholeTranscribed = false;
         _exportNotes.IsEnabled = false;
+        _exportSound.IsEnabled = false;
         _length = null;
         _lengthUnknown = false;
         _view.SetScore(null, null);
@@ -1054,6 +1165,7 @@ internal sealed class PlayerWindow : Window
                     (_transcription, _length) = (whole, length);
                     _wholeTranscribed = true;
                     _exportNotes.IsEnabled = true;
+                    _exportSound.IsEnabled = true;
                     _lengthUnknown = length is null;
                     if (length is not null && _tuneKey is { } key)
                     {
@@ -1070,7 +1182,7 @@ internal sealed class PlayerWindow : Window
             }
             catch (Exception ex)
             {
-                Show(() => _lengthUnknown = true);
+                Show(() => _exportSound.IsEnabled = _lengthUnknown = true);
                 Show(() => _retroStatus.Text = _transcription is null
                     ? $"No rows to show: {ex.Message}"
                     : $"Only the first {OpeningSeconds} seconds: {ex.Message}");
@@ -1258,10 +1370,12 @@ internal sealed class PlayerWindow : Window
             engine.Speed = FastForwardingSpeed();
             _fastForward.Badge = engine.PlayingSpeed > 1 ? $"{engine.PlayingSpeed}x" : null;
         }
-        if (_queueTune is not null && !_finished && !engine.Paused && TuneEnded(engine, at))
+        if ((_queueTune is not null || RepeatsAgain()) && !_finished && !engine.Paused && TuneEnded(engine, at))
         {
             if (_settings.PlayEverySong && engine.Failure is null && _file is { } file && _song < file.Songs)
                 PlaySong(_song + 1);
+            else if (RepeatsAgain() && engine.Failure is null)
+                PlayAgain();
             else
                 PlayNextInList();
             return;
@@ -1276,6 +1390,7 @@ internal sealed class PlayerWindow : Window
             _landscape.Update(_spectrum.Relative, at);
             _neon.Update(_spectrum.Relative, at);
             _ninja.Update(engine, at);
+            _dire.Update(engine, at);
             foreach (var scope in _scopes)
                 scope.Update(engine, at);
             _piano.Update(engine, at, _muted);
@@ -1294,6 +1409,77 @@ internal sealed class PlayerWindow : Window
             _view.SetCycle(engine.CycleAt(position.TotalSeconds * C64PlaybackEngine.SampleRate));
         if (engine.Failure is { } failure && !_details.Text!.StartsWith("The tune stopped", StringComparison.Ordinal))
             _details.Text = $"The tune stopped: {failure}";
+    }
+
+    // ------------------------------------------------------------------ repeat
+
+    /// <summary>How many times in all the tune playing is to play; <see cref="Favourites.Forever"/>
+    /// on and on, null once.</summary>
+    private int? RepeatTimes => _path is { } path ? Favourites.Repeat(path) : null;
+
+    /// <summary>Whether the tune is to play again when it ends.</summary>
+    private bool RepeatsAgain() => RepeatTimes is { } times && (times == Favourites.Forever || _played + 1 < times);
+
+    /// <summary>The tune from its start again - from its first song, when every song of it plays -
+    /// its transcription and length kept, as they are the same.</summary>
+    private void PlayAgain()
+    {
+        _played++;
+        if (_settings.PlayEverySong && _file is { Songs: > 1 } && _song != 1)
+        {
+            PlaySong(1);
+        }
+        else
+        {
+            _metersAt = -1;
+            _spectrum.Clear();
+            _landscape.Clear();
+            _neon.Clear();
+            _ninja.Clear();
+            _dire.Clear();
+            foreach (var scope in _scopes)
+                scope.Clear();
+            _piano.Clear();
+            Start(_song);
+            RememberPlace();
+        }
+        ShowRepeat();
+    }
+
+    /// <summary>The repeat button lit while the tune repeats, saying which time of how many plays.</summary>
+    private void ShowRepeat()
+    {
+        var times = RepeatTimes;
+        _repeat.Lit = times is not null;
+        _repeat.Badge = times switch
+        {
+            null => null,
+            Favourites.Forever => "∞",
+            { } n => $"{Math.Min(_played + 1, n)}/{n}",
+        };
+    }
+
+    /// <summary>The choices of how many times the tune plays, the one it has ticked: kept for the
+    /// tune, wherever it is played from.</summary>
+    private void OpenRepeatMenu()
+    {
+        if (_path is not { } path)
+            return;
+        var current = RepeatTimes;
+        var menu = new ContextMenu { Placement = PlacementMode.TopEdgeAlignedRight, PlacementTarget = _repeat };
+        foreach (var (times, name) in RepeatChoices)
+        {
+            var item = new MenuItem { Header = name, ToggleType = MenuItemToggleType.Radio, GroupName = "Repeat", IsChecked = times == current };
+            item.Click += (_, _) =>
+            {
+                // Counted from the time playing now: the first of however many.
+                _played = 0;
+                _strip.ChooseRepeat(path, times);
+                ShowRepeat();
+            };
+            menu.Items.Add(item);
+        }
+        menu.Open(_repeat);
     }
 
     /// <summary>Where the listener is inside the song: past the end it folds back into the loop.</summary>

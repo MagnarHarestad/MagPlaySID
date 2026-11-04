@@ -96,6 +96,26 @@ internal sealed class PlaylistStrip : Border
     /// <summary>The click that ends a drag is not a click on the tune: it does not play it.</summary>
     private bool _dragged;
 
+    /// <summary>A playlist held to be moved up or down the list, as a tune is.</summary>
+    private Playlist? _dragList;
+    private Point _dragListStart;
+    private bool _draggingList;
+
+    /// <summary>The strip's parts: the playlists above the line the user drags to make them taller
+    /// or shorter, the line, and the tunes below it.</summary>
+    private readonly Grid _layout = new();
+    private readonly GridSplitter _splitter = new();
+    private readonly Border _line = new();
+
+    /// <summary>The height the user dragged the playlists to, in pixels; 0 when they have not, and
+    /// the playlists take what they need, up to <see cref="PlaylistsShown"/>.</summary>
+    private double _playlistsHeight;
+
+    private const double PlaylistsShown = 210, FewestPlaylistPixels = 44, FewestTunePixels = 140;
+
+    /// <summary>The playlists dragged taller or shorter: the height to keep.</summary>
+    public event Action<double>? PlaylistsResized;
+
     /// <summary>A tune chosen to play, and the playlist to go on with after it.</summary>
     public event Action<Playlist, PlaylistTune>? Play;
 
@@ -167,14 +187,32 @@ internal sealed class PlaylistStrip : Border
 
         Restyle(_listBox);
         _listBox.ItemsSource = _lists;
-        _listBox.MaxHeight = 210;
+        _listBox.MaxHeight = PlaylistsShown;
         _listBox.ItemTemplate = new FuncDataTemplate<Playlist>((_, _) => PlaylistRow(), supportsRecycling: true);
+        _listBox.AddHandler(PointerPressedEvent, ListDragPressed, RoutingStrategies.Tunnel);
+        _listBox.AddHandler(PointerMovedEvent, ListDragMoved, RoutingStrategies.Tunnel);
+        _listBox.AddHandler(PointerReleasedEvent, ListDragReleased, RoutingStrategies.Tunnel);
+        _listBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndListDrag(), RoutingStrategies.Direct);
 
-        var divider = new Border
+        // The line between the playlists and the tunes, dragged up or down to give either more room.
+        _line.Height = 1;
+        _line.Margin = new Thickness(18, 0);
+        _line.VerticalAlignment = VerticalAlignment.Center;
+        _line.IsHitTestVisible = false;
+        _line.Background = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder);
+        _splitter.ResizeDirection = GridResizeDirection.Rows;
+        _splitter.Height = 22;
+        _splitter.Background = Brushes.Transparent;
+        _splitter.Cursor = new Cursor(StandardCursorType.SizeNorthSouth);
+        _splitter.Template = new FuncControlTemplate<GridSplitter>((_, _) => new Border { Background = Brushes.Transparent });
+        ToolTip.SetTip(_splitter, "Drag to give the playlists or the tunes more room");
+        _splitter.PointerEntered += (_, _) => _line.Background = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
+        _splitter.PointerExited += (_, _) => _line.Background = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder);
+        _splitter.DragStarted += (_, _) => HoldPlaylistsHeight();
+        _splitter.DragCompleted += (_, _) =>
         {
-            Height = 1,
-            Margin = new Thickness(18, 10, 18, 12),
-            Background = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder),
+            _playlistsHeight = Math.Round(_layout.RowDefinitions[1].ActualHeight);
+            PlaylistsResized?.Invoke(_playlistsHeight);
         };
 
         _heading.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
@@ -254,14 +292,61 @@ internal sealed class PlaylistStrip : Border
         _tuneBox.AddHandler(PointerReleasedEvent, DragReleased, RoutingStrategies.Tunnel);
         _tuneBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Direct);
 
-        var panel = new DockPanel();
-        foreach (var docked in new Control[] { top, _listBox, divider, heading, _sort, _empty })
+        var tunes = new DockPanel();
+        foreach (var docked in new Control[] { heading, _sort, _empty })
         {
             DockPanel.SetDock(docked, Dock.Top);
-            panel.Children.Add(docked);
+            tunes.Children.Add(docked);
         }
-        panel.Children.Add(_tuneBox);
-        return panel;
+        tunes.Children.Add(_tuneBox);
+
+        _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto) { MinHeight = FewestPlaylistPixels });
+        _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        _layout.RowDefinitions.Add(new RowDefinition(1, GridUnitType.Star) { MinHeight = FewestTunePixels });
+        Grid.SetRow(_listBox, 1);
+        Grid.SetRow(_line, 2);
+        Grid.SetRow(_splitter, 2);
+        Grid.SetRow(tunes, 3);
+        _layout.Children.Add(top);
+        _layout.Children.Add(_listBox);
+        _layout.Children.Add(_line);
+        _layout.Children.Add(_splitter);
+        _layout.Children.Add(tunes);
+        return _layout;
+    }
+
+    /// <summary>The playlists' height the user dragged them to, in pixels; 0 for as many as fit in
+    /// <see cref="PlaylistsShown"/>.</summary>
+    public double PlaylistsHeight
+    {
+        get => _playlistsHeight;
+        set
+        {
+            _playlistsHeight = Math.Max(0, value);
+            if (_playlistsHeight > 0)
+            {
+                _listBox.MaxHeight = double.PositiveInfinity;
+                _layout.RowDefinitions[1].Height = new GridLength(Math.Max(FewestPlaylistPixels, _playlistsHeight), GridUnitType.Pixel);
+            }
+            else
+            {
+                _listBox.MaxHeight = PlaylistsShown;
+                _layout.RowDefinitions[1].Height = GridLength.Auto;
+            }
+        }
+    }
+
+    /// <summary>A drag of the line starts from the height the playlists have now; from then on they
+    /// are as tall as it is dragged, not only as tall as they need.</summary>
+    private void HoldPlaylistsHeight()
+    {
+        var row = _layout.RowDefinitions[1];
+        if (row.Height.IsAbsolute)
+            return;
+        double now = Math.Max(FewestPlaylistPixels, row.ActualHeight);
+        _listBox.MaxHeight = double.PositiveInfinity;
+        row.Height = new GridLength(now, GridUnitType.Pixel);
     }
 
     /// <summary>A playlist in the list: a folder or a heart, its name, how many tunes.</summary>
@@ -446,6 +531,69 @@ internal sealed class PlaylistStrip : Border
         menu.Open(target);
     }
 
+    // ------------------------------------------------------------------ moving a playlist
+
+    private void ListDragPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(_listBox).Properties.IsLeftButtonPressed
+            || (e.Source as StyledElement)?.DataContext is not Playlist playlist)
+            return;
+        _dragList = playlist;
+        _dragListStart = e.GetPosition(_listBox);
+    }
+
+    /// <summary>The playlist held follows the pointer, past the middle of the next one up or down
+    /// taking its place - as a tune does in its playlist.</summary>
+    private void ListDragMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragList is not { } playlist || !_lists.Contains(playlist))
+            return;
+
+        var at = e.GetPosition(_listBox);
+        if (!_draggingList)
+        {
+            if (Math.Abs(at.Y - _dragListStart.Y) < DragThreshold)
+                return;
+            _draggingList = true;
+            e.Pointer.Capture(_listBox);
+            _listBox.Cursor = new Cursor(StandardCursorType.SizeNorthSouth);
+            _listBox.SelectedItem = playlist;
+        }
+
+        int from = _lists.IndexOf(playlist);
+        if (IndexAt(_listBox, at.Y) is { } to && to != from)
+        {
+            _lists.Move(from, to);
+            _listBox.SelectedItem = playlist;
+        }
+        ScrollNearEdge(_listBox, at.Y);
+        e.Handled = true;
+    }
+
+    private void ListDragReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_draggingList)
+        {
+            e.Pointer.Capture(null);
+            e.Handled = true;
+        }
+        EndListDrag();
+    }
+
+    /// <summary>The drag over: the playlists kept in their new order.</summary>
+    private void EndListDrag()
+    {
+        if (_draggingList)
+        {
+            _favourites.Clear();
+            _favourites.AddRange(_lists);
+            Favourites.Save(_favourites);
+        }
+        _dragList = null;
+        _draggingList = false;
+        _listBox.Cursor = null;
+    }
+
     // ------------------------------------------------------------------ moving a tune
 
     private void DragPressed(object? sender, PointerPressedEventArgs e)
@@ -484,12 +632,12 @@ internal sealed class PlaylistStrip : Border
         }
 
         int from = playlist.Tunes.IndexOf(tune);
-        if (IndexAt(at.Y) is { } to && to != from)
+        if (IndexAt(_tuneBox, at.Y) is { } to && to != from)
         {
             playlist.Tunes.Move(from, to);
             _tuneBox.SelectedItem = tune;
         }
-        ScrollNearEdge(at.Y);
+        ScrollNearEdge(_tuneBox, at.Y);
         e.Handled = true;
     }
 
@@ -513,17 +661,17 @@ internal sealed class PlaylistStrip : Border
         _tuneBox.Cursor = null;
     }
 
-    /// <summary>The place in the playlist of the row at <paramref name="y"/> in the list - the first
-    /// or last row shown when it is above or below them all.</summary>
-    private int? IndexAt(double y)
+    /// <summary>The place in the list of the row at <paramref name="y"/> in it - the first or last
+    /// row shown when it is above or below them all.</summary>
+    private static int? IndexAt(ListBox list, double y)
     {
         int? first = null, last = null;
         double top = double.MaxValue, bottom = double.MinValue;
-        foreach (var container in _tuneBox.GetRealizedContainers())
+        foreach (var container in list.GetRealizedContainers())
         {
-            if (container.TranslatePoint(default, _tuneBox) is not { } origin)
+            if (container.TranslatePoint(default, list) is not { } origin)
                 continue;
-            int index = _tuneBox.IndexFromContainer(container);
+            int index = list.IndexFromContainer(container);
             double height = container.Bounds.Height;
             if (y >= origin.Y && y < origin.Y + height)
                 return index;
@@ -535,14 +683,14 @@ internal sealed class PlaylistStrip : Border
         return y < top ? first : y >= bottom ? last : null;
     }
 
-    private void ScrollNearEdge(double y)
+    private void ScrollNearEdge(ListBox list, double y)
     {
-        if (_tuneBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } scroller)
+        if (list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } scroller)
             return;
         double edge = 24 * _scale, step = 12 * _scale;
         if (y < edge)
             scroller.Offset = scroller.Offset.WithY(Math.Max(0, scroller.Offset.Y - step));
-        else if (y > _tuneBox.Bounds.Height - edge)
+        else if (y > list.Bounds.Height - edge)
             scroller.Offset = scroller.Offset.WithY(scroller.Offset.Y + step);
     }
 
@@ -615,6 +763,13 @@ internal sealed class PlaylistStrip : Border
     public void ChooseFirstSong(string path, int? song)
     {
         Favourites.SetFirstSong(path, song);
+        Favourites.Save(_favourites);
+    }
+
+    /// <summary>How many times in all a tune plays, kept with the favourites: null, once.</summary>
+    public void ChooseRepeat(string path, int? times)
+    {
+        Favourites.SetRepeat(path, times);
         Favourites.Save(_favourites);
     }
 

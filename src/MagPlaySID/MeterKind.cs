@@ -7,4 +7,5 @@ internal enum MeterKind
     Landscape,
     Neon,
     LastNinja,
+    DireGuys,
 }

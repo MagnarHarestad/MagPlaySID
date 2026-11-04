@@ -52,6 +52,9 @@ internal sealed class Settings
     /// <summary>The playlist shown when the program was closed, by name.</summary>
     public string? LastShown { get; set; }
 
+    /// <summary>How tall the playlists were dragged in the strip, in pixels; 0 for as many as fit.</summary>
+    public double PlaylistsHeight { get; set; }
+
     public static Settings Load()
     {
         try

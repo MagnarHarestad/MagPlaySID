@@ -5,7 +5,8 @@ namespace MagPlaySid.Player;
 /// <summary>
 /// A fighter of the Last Ninja meter: a body of joints in three dimensions, posed by angles - each
 /// limb's from hanging straight down, positive towards the way the fighter faces, the lower limbs'
-/// from the upper's - and moved through its moves by key poses in time, eased between, back to its
+/// from the upper's, so a forearm bends at the elbow by a positive angle and a shin at the knee by a
+/// negative one, as they bend - and moved through its moves by key poses in time, eased between, back to its
 /// stance at the end. A move can lift it, carry it forward, turn it about on the spot (a roundhouse
 /// kick) or head over heels (a flip).
 /// </summary>
@@ -43,8 +44,8 @@ internal sealed class Fighter(Fighter.Clothes look)
 
     // ------------------------------------------------------------------ the fighters' clothes
 
-    private static readonly Pose NinjaStance = new(0.15f, 0.95f, -1.75f, 0.35f, -1.35f, 0.45f, -0.4f, -0.4f, -0.3f, Lift: -0.06f);
-    private static readonly Pose GuardStance = new(0.1f, 0.9f, -1.0f, 0.7f, -1.2f, 0.3f, -0.25f, -0.3f, -0.2f);
+    private static readonly Pose NinjaStance = new(0.15f, 0.95f, 1.75f, 0.35f, 1.35f, 0.45f, -0.4f, -0.4f, -0.3f, Lift: -0.06f);
+    private static readonly Pose GuardStance = new(0.1f, 0.9f, 1.0f, 0.7f, 1.2f, 0.3f, -0.25f, -0.3f, -0.2f);
 
     public static readonly Clothes Ninja = new(0xFF0C0E16, 0x5A6A8AC8, 0xFF2A2E3A, 0xFFC8202C, 0xFF10121A, 0xFFE8F4FF, 0, 0, NinjaStance);
 
@@ -62,90 +63,90 @@ internal sealed class Fighter(Fighter.Clothes look)
         new(lean, fa, ff, ba, bf, ft, fs, bt, bs, lift, flip, twist, forward, spread, sword);
 
     public static readonly Act Punch = new(
-        [(0.06f, P(0.32f, 1.55f, 0f, -0.25f, -1.75f, 0.6f, -0.35f, -0.55f, -0.2f, -0.06f, forward: 0.15f))],
+        [(0.06f, P(0.32f, 1.55f, 0f, -0.25f, 1.75f, 0.6f, -0.35f, -0.55f, -0.2f, -0.06f, forward: 0.15f))],
         0.24f, Lands: 0.06f);
 
     public static readonly Act PalmPush = new(
-        [(0.07f, P(-0.1f, 0.3f, -2.1f, 0.3f, -2.1f, 0.45f, -0.4f, -0.45f, -0.3f, -0.1f)),
-         (0.14f, P(0.38f, 1.5f, -0.1f, 1.45f, -0.1f, 0.7f, -0.3f, -0.6f, -0.1f, -0.12f, forward: 0.4f, spread: 0.15f)),
-         (0.26f, P(0.38f, 1.5f, -0.1f, 1.45f, -0.1f, 0.7f, -0.3f, -0.6f, -0.1f, -0.12f, forward: 0.4f, spread: 0.15f))],
+        [(0.07f, P(-0.1f, 0.3f, 2.1f, 0.3f, 2.1f, 0.45f, -0.4f, -0.45f, -0.3f, -0.1f)),
+         (0.14f, P(0.38f, 1.5f, 0.1f, 1.45f, 0.1f, 0.7f, -0.3f, -0.6f, -0.1f, -0.12f, forward: 0.4f, spread: 0.15f)),
+         (0.26f, P(0.38f, 1.5f, 0.1f, 1.45f, 0.1f, 0.7f, -0.3f, -0.6f, -0.1f, -0.12f, forward: 0.4f, spread: 0.15f))],
         0.25f, Lands: 0.14f);
 
     public static readonly Act Uppercut = new(
-        [(0.08f, P(0.3f, 0.2f, -1.9f, 0.4f, -1.4f, 0.6f, -0.8f, -0.5f, -0.6f, -0.18f)),
-         (0.17f, P(-0.12f, 2.85f, -0.3f, 0.2f, -1.6f, 0.35f, -0.2f, -0.3f, -0.2f, 0.1f))],
+        [(0.08f, P(0.3f, 0.2f, 1.9f, 0.4f, 1.4f, 0.6f, -0.8f, -0.5f, -0.6f, -0.18f)),
+         (0.17f, P(-0.12f, 2.85f, 0.3f, 0.2f, 1.6f, 0.35f, -0.2f, -0.3f, -0.2f, 0.1f))],
         0.26f, Lands: 0.17f);
 
     public static readonly Act FrontKick = new(
-        [(0.07f, P(-0.1f, 0.8f, -1.6f, 0.9f, -1.3f, 1.65f, -2.3f, -0.2f, -0.1f)),
-         (0.13f, P(-0.3f, 0.6f, -1.5f, 1.0f, -1.2f, 1.65f, 0f, -0.15f, -0.05f, forward: 0.15f)),
-         (0.22f, P(-0.3f, 0.6f, -1.5f, 1.0f, -1.2f, 1.65f, 0f, -0.15f, -0.05f, forward: 0.15f))],
+        [(0.07f, P(-0.1f, 0.8f, 1.6f, 0.9f, 1.3f, 1.65f, -2.3f, -0.2f, -0.1f)),
+         (0.13f, P(-0.3f, 0.6f, 1.5f, 1.0f, 1.2f, 1.65f, 0f, -0.15f, -0.05f, forward: 0.15f)),
+         (0.22f, P(-0.3f, 0.6f, 1.5f, 1.0f, 1.2f, 1.65f, 0f, -0.15f, -0.05f, forward: 0.15f))],
         0.25f, Lands: 0.13f, Kick: true, Fast: true);
 
     public static readonly Act Roundhouse = new(
-        [(0.08f, P(-0.1f, 1.3f, -1.4f, 0.4f, -1.2f, 1.4f, -2.0f, -0.1f, 0f, twist: 0.8f)),
-         (0.2f, P(-0.5f, 1.6f, -0.6f, -0.6f, -0.8f, 1.7f, -0.05f, -0.05f, 0f, 0.05f, twist: 3.6f)),
-         (0.32f, P(-0.2f, 1.2f, -1.4f, 0.4f, -1.2f, 0.6f, -0.4f, -0.3f, -0.2f, twist: MathF.Tau))],
+        [(0.08f, P(-0.1f, 1.3f, 1.4f, 0.4f, 1.2f, 1.4f, -2.0f, -0.1f, 0f, twist: 0.8f)),
+         (0.2f, P(-0.5f, 1.6f, 0.6f, -0.6f, 0.8f, 1.7f, -0.05f, -0.05f, 0f, 0.05f, twist: 3.6f)),
+         (0.32f, P(-0.2f, 1.2f, 1.4f, 0.4f, 1.2f, 0.6f, -0.4f, -0.3f, -0.2f, twist: MathF.Tau))],
         0.25f, Lands: 0.2f, Kick: true, Heavy: true, Fast: true, Committed: 0.3f);
 
     public static readonly Act FlyingKick = new(
-        [(0.1f, P(0.4f, 0.4f, -1.6f, 0.3f, -1.5f, 0.9f, -1.6f, -0.2f, -1.2f, -0.25f)),
-         (0.26f, P(-0.35f, 2.2f, -0.8f, -0.8f, -0.4f, 1.6f, 0f, 1.0f, -2.3f, 0.75f, forward: 1.0f)),
-         (0.36f, P(-0.35f, 2.2f, -0.8f, -0.8f, -0.4f, 1.6f, 0f, 1.0f, -2.3f, 0.6f, forward: 1.25f)),
-         (0.48f, P(0.3f, 1.2f, -1.5f, 0.4f, -1.3f, 0.6f, -0.9f, -0.5f, -0.4f, -0.2f, forward: 1.3f))],
+        [(0.1f, P(0.4f, 0.4f, 1.6f, 0.3f, 1.5f, 0.9f, -1.6f, -0.2f, -1.2f, -0.25f)),
+         (0.26f, P(-0.35f, 2.2f, 0.8f, -0.8f, 0.4f, 1.6f, 0f, 1.0f, -2.3f, 0.75f, forward: 1.0f)),
+         (0.36f, P(-0.35f, 2.2f, 0.8f, -0.8f, 0.4f, 1.6f, 0f, 1.0f, -2.3f, 0.6f, forward: 1.25f)),
+         (0.48f, P(0.3f, 1.2f, 1.5f, 0.4f, 1.3f, 0.6f, -0.9f, -0.5f, -0.4f, -0.2f, forward: 1.3f))],
         0.4f, Lands: 0.3f, Kick: true, Heavy: true, Fast: true, Committed: 0.45f);
 
     /// <summary>The seconds into a back flip it lands, kneeling.</summary>
     public const float FlipLands = 0.55f;
 
     public static readonly Act BackFlip = new(
-        [(0.08f, P(0.4f, -0.3f, -0.6f, -0.3f, -0.6f, 0.8f, -1.6f, 0.6f, -1.6f, -0.25f)),
-         (0.28f, P(0f, 2.6f, -0.6f, 2.6f, -0.6f, 1.6f, -2.4f, 1.5f, -2.4f, 1.05f, flip: -MathF.PI, forward: -0.45f)),
-         (0.44f, P(0f, 2.0f, -0.4f, 2.0f, -0.4f, 1.2f, -1.6f, 1.0f, -1.6f, 0.45f, flip: -MathF.Tau, forward: -0.85f)),
-         (FlipLands, P(0.25f, 1.25f, -0.7f, -0.35f, -0.4f, 1.5f, -1.5f, -0.1f, -1.55f, -0.42f, flip: -MathF.Tau, forward: -0.9f)),
-         (0.95f, P(0.25f, 1.25f, -0.7f, -0.35f, -0.4f, 1.5f, -1.5f, -0.1f, -1.55f, -0.42f, flip: -MathF.Tau, forward: -0.9f))],
+        [(0.08f, P(0.4f, -0.3f, 0.6f, -0.3f, 0.6f, 0.8f, -1.6f, 0.6f, -1.6f, -0.25f)),
+         (0.28f, P(0f, 2.6f, 0.6f, 2.6f, 0.6f, 1.6f, -2.4f, 1.5f, -2.4f, 1.05f, flip: -MathF.PI, forward: -0.45f)),
+         (0.44f, P(0f, 2.0f, 0.4f, 2.0f, 0.4f, 1.2f, -1.6f, 1.0f, -1.6f, 0.45f, flip: -MathF.Tau, forward: -0.85f)),
+         (FlipLands, P(0.25f, 1.25f, 0.7f, -0.35f, 0.4f, 1.5f, -1.5f, -0.1f, -1.55f, -0.42f, flip: -MathF.Tau, forward: -0.9f)),
+         (0.95f, P(0.25f, 1.25f, 0.7f, -0.35f, 0.4f, 1.5f, -1.5f, -0.1f, -1.55f, -0.42f, flip: -MathF.Tau, forward: -0.9f))],
         0.35f, Fast: true, Committed: 0.6f);
 
     public static readonly Act Sweep = new(
-        [(0.08f, P(0.5f, 1.2f, -0.6f, -0.3f, -0.8f, 0.9f, -1.8f, -1.0f, 1.6f, -0.5f)),
-         (0.24f, P(0.55f, 1.3f, -0.4f, -0.5f, -0.8f, 1.6f, 0f, -1.2f, 1.9f, -0.52f, twist: MathF.PI)),
-         (0.34f, P(0.5f, 1.2f, -0.6f, -0.3f, -0.8f, 1.6f, 0f, -1.2f, 1.9f, -0.5f, twist: MathF.Tau))],
+        [(0.08f, P(0.5f, 1.2f, 0.6f, -0.3f, 0.8f, 0.9f, -1.8f, -1.0f, 1.6f, -0.5f)),
+         (0.24f, P(0.55f, 1.3f, 0.4f, -0.5f, 0.8f, 1.6f, 0f, -1.2f, 1.9f, -0.52f, twist: MathF.PI)),
+         (0.34f, P(0.5f, 1.2f, 0.6f, -0.3f, 0.8f, 1.6f, 0f, -1.2f, 1.9f, -0.5f, twist: MathF.Tau))],
         0.3f, Lands: 0.2f, Kick: true, Fast: true, Committed: 0.3f);
 
     public static readonly Act Stomp = new(
-        [(0.1f, P(-0.1f, 1.3f, -1.6f, 0.6f, -1.4f, 1.3f, -1.7f, -0.2f, -0.2f, 0.12f)),
-         (0.16f, P(0.2f, 1.0f, -1.9f, 0.4f, -1.5f, 0.35f, -0.15f, -0.4f, -0.3f, -0.14f))],
+        [(0.1f, P(-0.1f, 1.3f, 1.6f, 0.6f, 1.4f, 1.3f, -1.7f, -0.2f, -0.2f, 0.12f)),
+         (0.16f, P(0.2f, 1.0f, 1.9f, 0.4f, 1.5f, 0.35f, -0.15f, -0.4f, -0.3f, -0.14f))],
         0.25f, Lands: 0.16f, Kick: true);
 
     public static readonly Act Block = new(
-        [(0.06f, P(-0.1f, 1.95f, -2.3f, 1.75f, -2.1f, 0.35f, -0.3f, -0.45f, -0.3f, -0.05f)),
-         (0.26f, P(-0.15f, 1.95f, -2.3f, 1.75f, -2.1f, 0.35f, -0.3f, -0.45f, -0.3f, -0.08f, forward: -0.15f))],
+        [(0.06f, P(-0.1f, 1.95f, 2.3f, 1.75f, 2.1f, 0.35f, -0.3f, -0.45f, -0.3f, -0.05f)),
+         (0.26f, P(-0.15f, 1.95f, 2.3f, 1.75f, 2.1f, 0.35f, -0.3f, -0.45f, -0.3f, -0.08f, forward: -0.15f))],
         0.25f);
 
     public static readonly Act Slash = new(
-        [(0.09f, P(-0.15f, 3.05f, -0.5f, 0.3f, -1.5f, 0.45f, -0.3f, -0.45f, -0.3f, sword: 1)),
-         (0.17f, P(0.4f, 1.0f, 0.1f, -0.25f, -1.6f, 0.7f, -0.4f, -0.6f, -0.2f, -0.12f, forward: 0.25f, sword: 1)),
-         (0.27f, P(0.4f, 1.0f, 0.1f, -0.25f, -1.6f, 0.7f, -0.4f, -0.6f, -0.2f, -0.12f, forward: 0.25f, sword: 1))],
+        [(0.09f, P(-0.15f, 3.05f, 0.5f, 0.3f, 1.5f, 0.45f, -0.3f, -0.45f, -0.3f, sword: 1)),
+         (0.17f, P(0.4f, 1.0f, 0.1f, -0.25f, 1.6f, 0.7f, -0.4f, -0.6f, -0.2f, -0.12f, forward: 0.25f, sword: 1)),
+         (0.27f, P(0.4f, 1.0f, 0.1f, -0.25f, 1.6f, 0.7f, -0.4f, -0.6f, -0.2f, -0.12f, forward: 0.25f, sword: 1))],
         0.3f, Lands: 0.17f, Fast: true);
 
     /// <summary>A guard's swing of its staff, high, down at the ninja.</summary>
     public static readonly Act Swing = new(
-        [(0.14f, P(-0.2f, 2.9f, -0.6f, 2.6f, -0.8f, 0.3f, -0.2f, -0.3f, -0.2f)),
-         (0.24f, P(0.45f, 1.3f, -0.2f, 1.1f, -0.4f, 0.6f, -0.4f, -0.5f, -0.2f, -0.1f, forward: 0.2f))],
+        [(0.14f, P(-0.2f, 2.9f, 0.6f, 2.6f, 0.8f, 0.3f, -0.2f, -0.3f, -0.2f)),
+         (0.24f, P(0.45f, 1.3f, 0.2f, 1.1f, 0.4f, 0.6f, -0.4f, -0.5f, -0.2f, -0.1f, forward: 0.2f))],
         0.3f);
 
     /// <summary>A guard struck: rocked back, and back to its stance.</summary>
     public static readonly Act Reel = new(
-        [(0.05f, P(-0.55f, 0.3f, -0.6f, -0.4f, -0.4f, -0.1f, -0.2f, -0.6f, -0.1f, forward: -0.35f)),
-         (0.16f, P(-0.4f, 0.4f, -0.8f, -0.3f, -0.6f, 0.1f, -0.3f, -0.5f, -0.2f, forward: -0.45f))],
+        [(0.05f, P(-0.55f, 0.3f, 0.6f, -0.4f, 0.4f, -0.1f, -0.2f, -0.6f, -0.1f, forward: -0.35f)),
+         (0.16f, P(-0.4f, 0.4f, 0.8f, -0.3f, 0.6f, 0.1f, -0.3f, -0.5f, -0.2f, forward: -0.45f))],
         0.4f);
 
     /// <summary>A guard knocked down: thrown back onto the ground, lying there, and up again.</summary>
     public static readonly Act KnockDown = new(
-        [(0.08f, P(-0.7f, 0.4f, -0.4f, -0.4f, -0.3f, 0.3f, -0.3f, -0.5f, -0.2f, 0.15f, forward: -0.5f)),
-         (0.38f, P(0f, 2.8f, -0.3f, 2.4f, -0.4f, 0.4f, -0.2f, 0.2f, -0.3f, -0.72f, flip: -MathF.PI / 2, forward: -0.9f)),
-         (1.3f, P(0f, 2.8f, -0.3f, 2.4f, -0.4f, 0.4f, -0.2f, 0.2f, -0.3f, -0.72f, flip: -MathF.PI / 2, forward: -0.9f)),
-         (1.65f, P(0.3f, 1.2f, -0.8f, 0.2f, -0.6f, 1.5f, -1.5f, -0.1f, -1.55f, -0.42f, forward: -0.8f))],
+        [(0.08f, P(-0.7f, 0.4f, 0.4f, -0.4f, 0.3f, 0.3f, -0.3f, -0.5f, -0.2f, 0.15f, forward: -0.5f)),
+         (0.38f, P(0f, 2.8f, 0.3f, 2.4f, 0.4f, 0.4f, -0.2f, 0.2f, -0.3f, -0.72f, flip: -MathF.PI / 2, forward: -0.9f)),
+         (1.3f, P(0f, 2.8f, 0.3f, 2.4f, 0.4f, 0.4f, -0.2f, 0.2f, -0.3f, -0.72f, flip: -MathF.PI / 2, forward: -0.9f)),
+         (1.65f, P(0.3f, 1.2f, 0.8f, 0.2f, 0.6f, 1.5f, -1.5f, -0.1f, -1.55f, -0.42f, forward: -0.8f))],
         0.45f);
 
     // ------------------------------------------------------------------ the fighter

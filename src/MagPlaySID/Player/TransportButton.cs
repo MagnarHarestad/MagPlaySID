@@ -13,6 +13,7 @@ internal enum TransportGlyph
     Pause,
     FastForward,
     Next,
+    Repeat,
 }
 
 /// <summary>One transport control, drawn rather than imaged, so it is sharp at any scale.</summary>
@@ -178,10 +179,39 @@ internal sealed class TransportButton : Control
                 context.FillRectangle(brush, new Rect(box.Left, box.Top, bar, box.Height));
                 context.FillRectangle(brush, new Rect(box.Right - bar, box.Top, bar, box.Height));
                 break;
+            case TransportGlyph.Repeat:
+                Loop(context, colour, brush, box);
+                break;
         }
 
         if (_lit && _badgeText is { } badge)
             badge.Draw(context, new Point(w - badge.Width - 1, h - badge.Height + 1));
+    }
+
+    /// <summary>Two arrows round a loop, as a player marks repeat: along the top to the right, and
+    /// back along the bottom to the left.</summary>
+    private static void Loop(DrawingContext context, Color colour, IBrush brush, Rect box)
+    {
+        var loop = box.Deflate(new Thickness(0, box.Height * 0.14));
+        double round = loop.Height * 0.42, head = loop.Height * 0.36;
+        var pen = SidPlayerPalette.Pen(colour, Math.Max(1.6, loop.Height * 0.15));
+        var geometry = new StreamGeometry();
+        using (var path = geometry.Open())
+        {
+            path.BeginFigure(new Point(loop.Right - head, loop.Top), false);
+            path.LineTo(new Point(loop.Left + round, loop.Top));
+            path.ArcTo(new Point(loop.Left, loop.Top + round), new Size(round, round), 0, false, SweepDirection.CounterClockwise);
+            path.LineTo(new Point(loop.Left, loop.Bottom - round));
+            path.EndFigure(false);
+            path.BeginFigure(new Point(loop.Left + head, loop.Bottom), false);
+            path.LineTo(new Point(loop.Right - round, loop.Bottom));
+            path.ArcTo(new Point(loop.Right, loop.Bottom - round), new Size(round, round), 0, false, SweepDirection.CounterClockwise);
+            path.LineTo(new Point(loop.Right, loop.Top + round));
+            path.EndFigure(false);
+        }
+        context.DrawGeometry(null, pen, geometry);
+        Triangle(context, brush, new Rect(loop.Right - head, loop.Top - (head / 2), head, head), pointingLeft: false);
+        Triangle(context, brush, new Rect(loop.Left, loop.Bottom - (head / 2), head, head), pointingLeft: true);
     }
 
     private static void Triangle(DrawingContext context, IBrush brush, Rect box, bool pointingLeft)

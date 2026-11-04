@@ -7,8 +7,10 @@ namespace MagPlay.C64;
 /// plays on the timer, or streams a digi from an NMI, runs on these.
 ///
 /// A timer counts its latch down to zero and underflows on the cycle after, so it underflows every
-/// latch + 1 cycles; the interrupt line follows the underflow a cycle later, as on the 6526. Tunes
-/// read the counters to time themselves to the cycle, so the chip keeps the cycle it is on. The
+/// latch + 1 cycles; the interrupt line goes active on the underflow's own cycle - a cycle later,
+/// and a digi that reads the timers to steady its NMI (Mahoney's Storebror) jumps to a delay it never
+/// set up and stops, as it does not in VICE. Tunes read the counters to time themselves to the
+/// cycle, so the chip keeps the cycle it is on. The
 /// ports read as nothing pressed; the time-of-day clock keeps what is written.
 /// </summary>
 public sealed class Cia
@@ -119,13 +121,13 @@ public sealed class Cia
 
     private void Flag(int bit) => Flag(bit, _cycle);
 
-    /// <summary>An underflow on <paramref name="at"/>: its flag set, and the line raised the cycle
-    /// after when it is to be reported.</summary>
+    /// <summary>An underflow on <paramref name="at"/>: its flag set, and the line raised then when it
+    /// is to be reported.</summary>
     private void Flag(int bit, long at)
     {
         _flags |= bit;
         if ((_mask & bit) != 0)
-            Raise(at + 1);
+            Raise(at);
     }
 
     private void Raise(long at)

@@ -635,12 +635,17 @@ public static class Music
                 if (note >= 0 && heard != note)
                 {
                     int between = c - last - 1;
-                    if (between == 0 ? !Ties(c, run, last - noteFrom + 1) : !Slides(frames, last, c))
+                    bool slide = between > 0 && Slides(frames, last, c);
+                    bool tied = !slide && (between == 0 || Jumps(frames, last, c)) && Ties(c, run, c - noteFrom);
+                    if (!slide && !tied)
                         return;
-                    int speed = between == 0 ? 0 : Math.Max(1, (int)Math.Round(Math.Abs(frame.Frequency - frames[last].Frequency) / (double)(between + 1)));
-                    glides.Add((between == 0 ? c : last, Row.Of(heard, 0, new TonePortamento(speed))));
+                    int speed = slide ? Math.Max(1, (int)Math.Round(Math.Abs(frame.Frequency - frames[last].Frequency) / (double)(between + 1))) : 0;
+                    glides.Add((slide ? last : c, Row.Of(heard, 0, new TonePortamento(speed))));
                 }
-                (note, noteFrom, last) = (heard, c, c + run - 1);
+                // Held from where it first settled: vibrato coming back to it does not start it again.
+                if (heard != note)
+                    noteFrom = c;
+                (note, last) = (heard, c + run - 1);
             }
             else if (note < 0 && frame.Tonal)
             {
@@ -656,6 +661,23 @@ public static class Music
         bool Ties(int call, int run, int held) =>
             run >= tie && (grid.Into(call) <= TieOffRow || (run >= 2 * rowCalls && held >= 2 * rowCalls));
     }
+
+    /// <summary>The pitch leaps into the note at <paramref name="to"/> from a vibrato on the note
+    /// before - each step of the wobble since <paramref name="last"/>, gate on, a small part of the
+    /// leap - so the note is tied on, in the middle of the vibrato, not slid to (Dane's Uncensored).</summary>
+    private static bool Jumps(Frame[] frames, int last, int to)
+    {
+        int leap = Math.Abs(frames[to].Frequency - frames[to - 1].Frequency);
+        for (int c = last + 1; c < to; c++)
+        {
+            if (!frames[c].Gate || !frames[c].Tonal || Math.Abs(frames[c].Frequency - frames[c - 1].Frequency) * VibratoOfLeap > leap)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>How many times a vibrato's step the leap to a tied note is, at least.</summary>
+    private const int VibratoOfLeap = 4;
 
     /// <summary>
     /// The rows of a note held on, after its own, that slide its pitch - GoatTracker's 1xx and 2xx:

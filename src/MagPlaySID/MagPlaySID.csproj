@@ -20,6 +20,8 @@
        embedded for the window's title bar and taskbar on every system. -->
   <ItemGroup>
     <EmbeddedResource Include="MagPlaySID.ico" />
+    <!-- The Dire Guys meter's two dancers, exported from 3d-objects/DireGuys_new.blend. -->
+    <EmbeddedResource Include="Player\DireGuys.bin" LogicalName="DireGuys.bin" />
   </ItemGroup>
 
   <ItemGroup>
