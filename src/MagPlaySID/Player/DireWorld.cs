@@ -112,8 +112,8 @@ internal sealed class DireWorld
 
     /// <summary>The hustle: hips to one side, a hand rolling in front.</summary>
     private static readonly Move Hustle = new(
-        [(0.1f, P((J.Tilt, 0.15f), (J.Sway, 0.08f), (J.RaiseL, 1.0f), (J.ElbowL, 1.5f), (J.RaiseR, 0.7f), (J.ElbowR, 1.7f), (J.HeadTilt, -0.15f))),
-         (0.25f, P((J.Tilt, -0.15f), (J.Sway, -0.08f), (J.RaiseL, 0.7f), (J.ElbowL, 1.7f), (J.RaiseR, 1.0f), (J.ElbowR, 1.5f), (J.HeadTilt, 0.15f)))],
+        [(0.1f, P((J.Tilt, 0.15f), (J.Sway, 0.08f), (J.RaiseL, 0.75f), (J.ElbowL, 0.9f), (J.OutL, -0.3f), (J.RaiseR, 0.45f), (J.ElbowR, 1.1f), (J.OutR, -0.3f), (J.HeadTilt, -0.15f))),
+         (0.25f, P((J.Tilt, -0.15f), (J.Sway, -0.08f), (J.RaiseL, 0.45f), (J.ElbowL, 1.1f), (J.OutL, -0.3f), (J.RaiseR, 0.75f), (J.ElbowR, 0.9f), (J.OutR, -0.3f), (J.HeadTilt, 0.15f)))],
         0.25f, 0.2f);
 
     /// <summary>A jump, knees tucked, arms flung up.</summary>
@@ -122,9 +122,106 @@ internal sealed class DireWorld
          (0.22f, P((J.Jump, 0.32f), (J.LiftL, 0.5f), (J.LiftR, 0.5f), (J.KneeL, 0.9f), (J.KneeR, 0.9f), (J.RaiseL, 2.5f), (J.RaiseR, 2.5f), (J.OutL, 0.5f), (J.OutR, 0.5f), (J.Nod, -0.2f)))],
         0.22f, 0.35f);
 
-    private static readonly Move[] MelodyMoves = [Point, Wave, PointDown, Kick, Hustle, Point, Pump, PointDown];
-    private static readonly Move[] BassMoves = [Step, Twist, HeadBang, Step, Hustle, Twist];
-    private static readonly Move[] SnareMoves = [Clap, Pump, Clap, Wave];
+
+    // The newer moves - the club's and the internet's: the floss, the dab, the running man, the
+    // robot, the sprinkler, the cabbage patch, the moonwalk, the Carlton, the griddy, the shuffle,
+    // the horse ride, the lawnmower and the hip bump.
+
+    /// <summary>The floss: straight arms swung from behind on one side to in front on the other,
+    /// the hips swinging the other way, twice over.</summary>
+    private static readonly float[] FlossA = P((J.OutR, 0.4f), (J.RaiseR, -0.4f), (J.ElbowR, -0.3f), (J.OutL, -0.4f), (J.RaiseL, 0.4f), (J.ElbowL, -0.3f), (J.Sway, -0.06f), (J.Tilt, 0.1f));
+    private static readonly float[] FlossB = P((J.OutR, -0.4f), (J.RaiseR, 0.4f), (J.ElbowR, -0.3f), (J.OutL, 0.4f), (J.RaiseL, -0.4f), (J.ElbowL, -0.3f), (J.Sway, 0.06f), (J.Tilt, -0.1f));
+
+    private static readonly Move Floss = new([(0.08f, FlossA), (0.18f, FlossB), (0.28f, FlossA), (0.38f, FlossB)], 0.2f, 0.3f);
+
+    /// <summary>The dab: the head dropped into the crook of one elbow, the other arm flung up and out.</summary>
+    private static readonly float[] DabPose = P((J.RaiseR, 2.2f), (J.OutR, 0.75f), (J.ElbowR, -0.35f), (J.RaiseL, 1.5f), (J.OutL, -0.55f), (J.ElbowL, 2.2f), (J.Nod, 0.5f), (J.HeadTurn, 0.45f), (J.Lean, 0.2f), (J.Tilt, -0.1f));
+
+    private static readonly Move Dab = new([(0.09f, DabPose), (0.42f, DabPose)], 0.25f, 0.3f);
+
+    /// <summary>The running man: a knee up and the foot slid back, the other, on the spot, the arms
+    /// pumping with them.</summary>
+    private static readonly float[] RunA = P((J.LiftL, 0.8f), (J.KneeL, 1.3f), (J.RaiseR, 0.7f), (J.ElbowR, 1.2f), (J.RaiseL, -0.5f), (J.ElbowL, 1.2f), (J.Dip, 0.03f), (J.Lean, 0.08f));
+    private static readonly float[] RunB = P((J.LiftR, 0.8f), (J.KneeR, 1.3f), (J.RaiseL, 0.7f), (J.ElbowL, 1.2f), (J.RaiseR, -0.5f), (J.ElbowR, 1.2f), (J.Dip, 0.03f), (J.Lean, 0.08f));
+
+    private static readonly Move RunningMan = new([(0.1f, RunA), (0.22f, RunB), (0.34f, RunA), (0.46f, RunB)], 0.22f, 0.35f);
+
+    /// <summary>The robot: arms bent square, the body and head turning in stiff jerks, held between.</summary>
+    private static readonly float[] RobotA = P((J.RaiseL, 0.25f), (J.RaiseR, 0.25f), (J.ElbowL, 1.25f), (J.ElbowR, 1.25f), (J.OutL, 0.15f), (J.OutR, 0.15f), (J.Turn, 0.35f), (J.HeadTurn, -0.4f));
+    private static readonly float[] RobotB = P((J.RaiseL, 1.3f), (J.RaiseR, 0.25f), (J.ElbowL, 0.25f), (J.ElbowR, 1.25f), (J.OutL, 0.15f), (J.OutR, 0.15f), (J.Turn, 0f), (J.HeadTurn, 0.3f));
+    private static readonly float[] RobotC = P((J.RaiseL, 0.25f), (J.RaiseR, 1.3f), (J.ElbowL, 1.25f), (J.ElbowR, 0.25f), (J.OutL, 0.15f), (J.OutR, 0.15f), (J.Turn, -0.35f), (J.HeadTurn, 0.4f));
+
+    private static readonly Move Robot = new([(0.05f, RobotA), (0.16f, RobotA), (0.2f, RobotB), (0.31f, RobotB), (0.35f, RobotC), (0.48f, RobotC)], 0.15f, 0.4f);
+
+    /// <summary>The sprinkler: a hand behind the head, the other arm out in front, ticking round
+    /// in steps and sweeping back.</summary>
+    private static float[] Sprinkle(float turn, float dip) => P((J.RaiseL, 2.6f), (J.OutL, 1f), (J.ElbowL, 2.2f), (J.RaiseR, 1.55f), (J.OutR, 0.2f), (J.ElbowR, -0.3f), (J.Turn, turn), (J.Dip, dip), (J.HeadTurn, turn * 0.5f));
+
+    private static readonly Move Sprinkler = new(
+        [(0.06f, Sprinkle(-0.45f, 0.03f)), (0.14f, Sprinkle(-0.45f, 0)), (0.18f, Sprinkle(-0.15f, 0.03f)), (0.26f, Sprinkle(-0.15f, 0)),
+         (0.3f, Sprinkle(0.15f, 0.03f)), (0.38f, Sprinkle(0.15f, 0)), (0.42f, Sprinkle(0.45f, 0.03f)), (0.62f, Sprinkle(-0.45f, 0))],
+        0.2f, 0.45f);
+
+    /// <summary>The cabbage patch: fists together in front, stirring round in a circle with the hips.</summary>
+    private static float[] Stir(float sway, float raise, float twist) => P((J.RaiseL, 0.5f + raise), (J.RaiseR, 0.5f + raise), (J.OutL, -0.45f), (J.OutR, -0.45f), (J.ElbowL, 1.1f), (J.ElbowR, 1.1f), (J.Sway, sway), (J.Twist, twist), (J.Nod, 0.1f));
+
+    private static readonly Move CabbagePatch = new(
+        [(0.12f, Stir(0.06f, 0.25f, 0.2f)), (0.24f, Stir(0, -0.2f, 0)), (0.36f, Stir(-0.06f, 0.25f, -0.2f)), (0.48f, Stir(0, -0.2f, 0))],
+        0.22f, 0.35f);
+
+    /// <summary>The moonwalk: turned side on, gliding backwards a heel at a time.</summary>
+    private static readonly Move Moonwalk = new(
+        [(0.15f, P((J.Turn, 1.3f), (J.KneeL, 0.7f), (J.LiftL, 0.2f), (J.ElbowL, 0.9f), (J.ElbowR, 0.9f), (J.Nod, 0.1f))),
+         (0.4f, P((J.Turn, 1.3f), (J.Sway, -0.12f), (J.KneeR, 0.7f), (J.LiftR, 0.2f), (J.ElbowL, 0.9f), (J.ElbowR, 0.9f), (J.Nod, 0.1f))),
+         (0.65f, P((J.Turn, 1.3f), (J.Sway, -0.24f), (J.KneeL, 0.7f), (J.LiftL, 0.2f), (J.ElbowL, 0.9f), (J.ElbowR, 0.9f), (J.Nod, 0.1f))),
+         (0.85f, P((J.Turn, 1.3f), (J.Sway, -0.32f), (J.KneeR, 0.5f), (J.LiftR, 0.1f), (J.ElbowL, 0.9f), (J.ElbowR, 0.9f), (J.Nod, 0.1f)))],
+        0.45f, 0.8f);
+
+    /// <summary>The Carlton: arms swung together side to side, bent, the hips and head swaying with them.</summary>
+    private static readonly float[] CarltonA = P((J.RaiseL, 0.6f), (J.OutL, -0.5f), (J.ElbowL, 0.6f), (J.RaiseR, 0.4f), (J.OutR, 0.6f), (J.ElbowR, 0.6f), (J.Sway, -0.06f), (J.Tilt, 0.1f), (J.Nod, 0.1f), (J.HeadTurn, -0.3f));
+    private static readonly float[] CarltonB = P((J.RaiseR, 0.6f), (J.OutR, -0.5f), (J.ElbowR, 0.6f), (J.RaiseL, 0.4f), (J.OutL, 0.6f), (J.ElbowL, 0.6f), (J.Sway, 0.06f), (J.Tilt, -0.1f), (J.Nod, 0.1f), (J.HeadTurn, 0.3f));
+
+    private static readonly Move Carlton = new([(0.1f, CarltonA), (0.24f, CarltonB), (0.38f, CarltonA), (0.52f, CarltonB)], 0.22f, 0.4f);
+
+    /// <summary>The griddy: leaning forward, heels kicked back in turn, the arms swinging.</summary>
+    private static readonly float[] GriddyA = P((J.Lean, 0.3f), (J.LiftL, -0.25f), (J.KneeL, 1.4f), (J.RaiseR, 0.9f), (J.ElbowR, 0.8f), (J.RaiseL, -0.7f), (J.Nod, -0.1f));
+    private static readonly float[] GriddyB = P((J.Lean, 0.3f), (J.LiftR, -0.25f), (J.KneeR, 1.4f), (J.RaiseL, 0.9f), (J.ElbowL, 0.8f), (J.RaiseR, -0.7f), (J.Nod, -0.1f));
+
+    private static readonly Move Griddy = new([(0.09f, GriddyA), (0.19f, GriddyB), (0.29f, GriddyA), (0.39f, GriddyB)], 0.22f, 0.3f);
+
+    /// <summary>The shuffle: a foot kicked out to the side and back in, the other, the arms with them.</summary>
+    private static readonly float[] ShuffleA = P((J.LiftL, 0.4f), (J.SpreadL, 0.35f), (J.KneeL, 0.5f), (J.RaiseL, 0.8f), (J.ElbowL, 1.2f), (J.RaiseR, -0.3f), (J.Sway, 0.05f), (J.Dip, 0.02f));
+    private static readonly float[] ShuffleB = P((J.LiftR, 0.4f), (J.SpreadR, 0.35f), (J.KneeR, 0.5f), (J.RaiseR, 0.8f), (J.ElbowR, 1.2f), (J.RaiseL, -0.3f), (J.Sway, -0.05f), (J.Dip, 0.02f));
+
+    private static readonly Move Shuffle = new([(0.08f, ShuffleA), (0.17f, ShuffleB), (0.26f, ShuffleA), (0.35f, ShuffleB)], 0.2f, 0.3f);
+
+    /// <summary>The horse ride: wrists crossed in front holding the reins, hopping from foot to foot.</summary>
+    private static float[] Ride(J lift, J knee, float jump) => P((J.RaiseL, 1f), (J.RaiseR, 1f), (J.OutL, -0.35f), (J.OutR, -0.35f), (J.ElbowL, 0.35f), (J.ElbowR, 0.35f), (lift, 0.5f), (knee, 0.6f), (J.Jump, jump), (J.Dip, 0.04f));
+
+    private static readonly Move HorseRide = new(
+        [(0.1f, Ride(J.LiftL, J.KneeL, 0.06f)), (0.2f, Ride(J.LiftR, J.KneeR, 0)), (0.3f, Ride(J.LiftL, J.KneeL, 0.06f)), (0.4f, Ride(J.LiftR, J.KneeR, 0))],
+        0.22f, 0.3f);
+
+    /// <summary>The lawnmower: bent over, a hand on the knee, the other pulling the cord.</summary>
+    private static readonly Move Lawnmower = new(
+        [(0.1f, P((J.Lean, 0.35f), (J.RaiseL, 0.4f), (J.ElbowL, 0.4f), (J.RaiseR, 0.9f), (J.OutR, -0.2f), (J.ElbowR, 0.2f), (J.Nod, 0.15f))),
+         (0.22f, P((J.Lean, 0.15f), (J.RaiseL, 0.4f), (J.ElbowL, 0.4f), (J.RaiseR, -0.5f), (J.OutR, 0.3f), (J.ElbowR, 1.6f), (J.Twist, -0.3f), (J.Nod, -0.1f))),
+         (0.36f, P((J.Lean, 0.15f), (J.RaiseL, 0.4f), (J.ElbowL, 0.4f), (J.RaiseR, -0.5f), (J.OutR, 0.3f), (J.ElbowR, 1.6f), (J.Twist, -0.3f), (J.Nod, -0.1f)))],
+        0.25f, 0.3f);
+
+    /// <summary>The hip bump: the two of them bumping hips, each upper body leaning away - twice.
+    /// The blue guy's to his left, toward the red guy; the red guy's to his right.</summary>
+    private static float[] Bump(float side, float amount) => P((J.Sway, 0.12f * side * amount), (J.Tilt, 0.22f * side * amount), (J.OutL, 0.3f), (J.OutR, 0.3f), (J.ElbowL, 0.8f), (J.ElbowR, 0.8f), (J.HeadTurn, -0.4f * side));
+
+    private static readonly Move BumpBlue = new([(0.14f, Bump(1, 1)), (0.24f, Bump(1, 0.3f)), (0.36f, Bump(1, 1))], 0.3f, 0.4f);
+    private static readonly Move BumpRed = new([(0.14f, Bump(-1, 1)), (0.24f, Bump(-1, 0.3f)), (0.36f, Bump(-1, 1))], 0.3f, 0.4f);
+
+    /// <summary>The moves each part of the music starts, in turn: the melody's the red guy's, the
+    /// bass's and the snare's the blue guy's; a leap of the melody a spin or a moonwalk.</summary>
+    private static readonly Move[] MelodyMoves = [Point, Wave, Dab, PointDown, Floss, Kick, Sprinkler, Hustle, Robot, Carlton, Griddy, Lawnmower, Point, Pump];
+    private static readonly Move[] BassMoves = [Step, Twist, RunningMan, HeadBang, Shuffle, CabbagePatch, HorseRide, Hustle];
+    private static readonly Move[] SnareMoves = [Clap, Pump, Dab, Clap, Wave, Floss];
+    private static readonly Move[] LeapMoves = [Spin, Moonwalk, Point];
 
     private sealed class Guy(int index, Vector3 home)
     {
@@ -138,6 +235,9 @@ internal sealed class DireWorld
         public float Strength;
         public int Side = 1;
         public int Next;
+
+        /// <summary>The melody's leaps so far, for the move each makes.</summary>
+        public int Leaps;
 
         /// <summary>How hard he has been dancing lately: his moves, the big ones twice, fading.</summary>
         public float Action;
@@ -248,8 +348,10 @@ internal sealed class DireWorld
                 if (++_kicks % 16 == 0 && _time - _lastJump > 6 && blue.Free(_time) && red.Free(_time))
                 {
                     _lastJump = _time;
-                    Start(blue, Jump);
-                    Start(red, Jump);
+                    // A jump together, or a bump of the hips, in turn.
+                    bool bump = (_kicks / 16) % 2 == 0;
+                    Start(blue, bump ? BumpBlue : Jump);
+                    Start(red, bump ? BumpRed : Jump);
                 }
                 break;
             case Beat.Snare:
@@ -270,7 +372,7 @@ internal sealed class DireWorld
                 break;
             case Beat.Leap:
                 if (red.Free(_time))
-                    Start(red, red.Next++ % 2 == 0 ? Spin : Point);
+                    Start(red, LeapMoves[red.Leaps++ % LeapMoves.Length]);
                 break;
             case Beat.Fall:
                 if (red.Free(_time))
@@ -804,7 +906,9 @@ internal sealed class DireWorld
         float dip = A(J.Dip);
         float drop = guy.Knees ? dip : 0;
         float bend = guy.Knees ? MathF.Acos(Math.Clamp(1 - (dip / 0.77f), -1, 1)) : 0;
-        var root = Matrix4x4.CreateRotationY(A(J.Turn)) * Matrix4x4.CreateTranslation(guy.Home + new Vector3(A(J.Sway), A(J.Jump) - drop, 0));
+        // Sliding to the side - a sway, a moonwalk - his feet keep to the ball's curve.
+        var standing = OnBall(guy.Home.X + A(J.Sway)) with { Z = guy.Home.Z };
+        var root = Matrix4x4.CreateRotationY(A(J.Turn)) * Matrix4x4.CreateTranslation(standing + new Vector3(0, A(J.Jump) - drop, 0));
 
         var parts = _model.Parts;
         for (int i = 0; i < parts.Count; i++)
@@ -817,7 +921,9 @@ internal sealed class DireWorld
             {
                 DireModel.Role.Spine => Matrix4x4.CreateFromYawPitchRoll(A(J.Twist), A(J.Lean), A(J.Tilt)),
                 DireModel.Role.Head => Matrix4x4.CreateFromYawPitchRoll(A(J.HeadTurn), A(J.Nod), A(J.HeadTilt)),
-                DireModel.Role.UpperArm => Matrix4x4.CreateRotationX(-(s > 0 ? A(J.RaiseL) : A(J.RaiseR))) * Matrix4x4.CreateRotationZ(s * (s > 0 ? A(J.OutL) : A(J.OutR))),
+                // Out to the side first, then forward: an arm brought in across the body stays in
+                // as it comes up in front - fists together for the cabbage patch.
+                DireModel.Role.UpperArm => Matrix4x4.CreateRotationZ(s * (s > 0 ? A(J.OutL) : A(J.OutR))) * Matrix4x4.CreateRotationX(-(s > 0 ? A(J.RaiseL) : A(J.RaiseR))),
                 DireModel.Role.Forearm => Matrix4x4.CreateRotationX(-(s > 0 ? A(J.ElbowL) : A(J.ElbowR))),
                 DireModel.Role.Thigh => Matrix4x4.CreateRotationX(-((s > 0 ? A(J.LiftL) : A(J.LiftR)) + bend)) * Matrix4x4.CreateRotationZ(s * (s > 0 ? A(J.SpreadL) : A(J.SpreadR))),
                 DireModel.Role.Shin => Matrix4x4.CreateRotationX((s > 0 ? A(J.KneeL) : A(J.KneeR)) + (2 * bend)),
