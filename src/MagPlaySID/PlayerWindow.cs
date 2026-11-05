@@ -237,6 +237,8 @@ internal sealed class PlayerWindow : Window
                 _ = OpenFolderAsync(dropped);
         });
 
+        // The lists' scrolling read while they are still on screen.
+        Closing += (_, _) => (_settings.PlaylistsScroll, _settings.TunesScroll) = _strip.ScrollOffsets;
         Closed += (_, _) =>
         {
             _settings.LastShown = _strip.ShownName;
@@ -918,8 +920,8 @@ internal sealed class PlayerWindow : Window
             _queueTune = next;
             _finished = false;
             _strip.ShowPlaying(playlist, next);
-            // Every song of it from the first, or the one it starts on.
-            if (Load(next.Path, quiet: true, firstSong: _settings.PlayEverySong ? 1 : null))
+            // Every song of it, from the one chosen to play first - or the first - or the one it starts on.
+            if (Load(next.Path, quiet: true, everySong: _settings.PlayEverySong))
                 return;
         }
 
@@ -958,10 +960,10 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>Plays the tune at <paramref name="path"/> - from <paramref name="firstSong"/>, or the
-    /// song the user chose to play first of it, or the song it starts on: false, and nothing changed,
-    /// when it cannot be - said in a message unless
-    /// <paramref name="quiet"/>, as a playlist passes it over.</summary>
-    private bool Load(string path, bool quiet = false, int? firstSong = null)
+    /// song the user chose to play first of it, or the song it starts on - or, to play
+    /// <paramref name="everySong"/> of it, the first: false, and nothing changed, when it cannot be -
+    /// said in a message unless <paramref name="quiet"/>, as a playlist passes it over.</summary>
+    private bool Load(string path, bool quiet = false, int? firstSong = null, bool everySong = false)
     {
         SidFile file;
         byte[] bytes;
@@ -984,7 +986,8 @@ internal sealed class PlayerWindow : Window
         _tuneKey = TuneHistory.KeyOf(bytes);
         _playCounted = false;
         _played = 0;
-        _song = firstSong ?? ChosenFirstSong(file, path) ?? OwnFirstSong(file);
+        _everyFrom = ChosenFirstSong(file, path) ?? 1;
+        _song = firstSong ?? (everySong ? _everyFrom : ChosenFirstSong(file, path) ?? OwnFirstSong(file));
         Title = $"{(string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : file.Name)} - {UpdateCheck.Product}";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
         BuildSongPills();
@@ -992,6 +995,20 @@ internal sealed class PlayerWindow : Window
         Restart();
         ShowRepeat();
         return true;
+    }
+
+    /// <summary>The song a run of every song of the tune starts on, and ends before: the song
+    /// chosen to play first - from it to the last, then round from the first - or else the first.</summary>
+    private int _everyFrom = 1;
+
+    /// <summary>The next song of a run of every song of the tune; null when it is not one, or every
+    /// song has played.</summary>
+    private int? NextEverySong()
+    {
+        if (!_settings.PlayEverySong || _file is not { Songs: > 1 } file)
+            return null;
+        int next = (_song % file.Songs) + 1;
+        return next == _everyFrom ? null : next;
     }
 
     /// <summary>The song a tune starts on by itself.</summary>
@@ -1050,6 +1067,7 @@ internal sealed class PlayerWindow : Window
                 (_queue, _queueTune) = (null, null);
         }
         _strip.Show(_settings.LastShown);
+        _strip.RestoreScroll(_settings.PlaylistsScroll, _settings.TunesScroll);
     }
 
     /// <summary>The tune and song playing kept, to start from next time.</summary>
@@ -1373,8 +1391,8 @@ internal sealed class PlayerWindow : Window
         }
         if ((_queueTune is not null || RepeatsAgain()) && !_finished && !engine.Paused && TuneEnded(engine, at))
         {
-            if (_settings.PlayEverySong && engine.Failure is null && _file is { } file && _song < file.Songs)
-                PlaySong(_song + 1);
+            if (engine.Failure is null && NextEverySong() is { } nextSong)
+                PlaySong(nextSong);
             else if (RepeatsAgain() && engine.Failure is null)
                 PlayAgain();
             else
@@ -1421,14 +1439,14 @@ internal sealed class PlayerWindow : Window
     /// <summary>Whether the tune is to play again when it ends.</summary>
     private bool RepeatsAgain() => RepeatTimes is { } times && (times == Favourites.Forever || _played + 1 < times);
 
-    /// <summary>The tune from its start again - from its first song, when every song of it plays -
+    /// <summary>The tune from its start again - from the song its run starts on, when every song of it plays -
     /// its transcription and length kept, as they are the same.</summary>
     private void PlayAgain()
     {
         _played++;
-        if (_settings.PlayEverySong && _file is { Songs: > 1 } && _song != 1)
+        if (_settings.PlayEverySong && _file is { Songs: > 1 } && _song != _everyFrom)
         {
-            PlaySong(1);
+            PlaySong(_everyFrom);
         }
         else
         {

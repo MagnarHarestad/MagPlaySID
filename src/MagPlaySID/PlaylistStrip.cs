@@ -152,8 +152,71 @@ internal sealed class PlaylistStrip : Border
         _listBox.SelectionChanged += (_, _) => ShowTunes();
         if (_lists.Count > 0)
             _listBox.SelectedIndex = 0;
-        ReadHeaders(_favourites.SelectMany(p => p.Tunes));
+        ReadHeaders(_favourites.SelectMany(p => p.Tunes), HeadersRead);
         ApplyScale();
+
+        // Scrolled by hand before the view kept is back: the hand wins.
+        foreach (var list in new[] { _listBox, _tuneBox })
+        {
+            list.AddHandler(PointerWheelChangedEvent, (_, _) => _scrolledByHand = true, RoutingStrategies.Tunnel, handledEventsToo: true);
+            list.AddHandler(PointerPressedEvent, (_, _) => _scrolledByHand = true, RoutingStrategies.Tunnel, handledEventsToo: true);
+        }
+    }
+
+    // ------------------------------------------------------------------ the view kept
+
+    /// <summary>The headers of the playlists' tunes have all been read: each tune's row is as tall
+    /// as it will be - a composer's line under its name - so a list can be scrolled to where it was.</summary>
+    private bool _headersRead;
+
+    private (double Playlists, double Tunes)? _restore;
+    private bool _scrolledByHand;
+
+    private static ScrollViewer? Scroller(ListBox list) => list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+
+    /// <summary>How far the playlists and the tunes shown are scrolled down, in pixels.</summary>
+    public (double Playlists, double Tunes) ScrollOffsets =>
+        (Scroller(_listBox)?.Offset.Y ?? 0, Scroller(_tuneBox)?.Offset.Y ?? 0);
+
+    /// <summary>
+    /// The lists scrolled back to where they were - once every row is as tall as it will be. Scrolled
+    /// at once, the rows still without their composers' lines put the tune playing far below the
+    /// view when those came in: Lightforce, 48th of Rob Hubbard's tunes, opened on the 26th to 37th.
+    /// With nothing kept, below zero, the tune playing is scrolled into view instead.
+    /// </summary>
+    public void RestoreScroll(double playlists, double tunes)
+    {
+        _restore = (playlists, tunes);
+        _scrolledByHand = false;
+        if (_headersRead)
+            Dispatcher.UIThread.Post(ApplyRestore, DispatcherPriority.Background);
+    }
+
+    private void HeadersRead()
+    {
+        _headersRead = true;
+        if (_restore is not null)
+            Dispatcher.UIThread.Post(ApplyRestore, DispatcherPriority.Background);
+    }
+
+    private void ApplyRestore()
+    {
+        if (_restore is not { } restore || _scrolledByHand)
+            return;
+        _restore = null;
+        _listBox.UpdateLayout();
+        _tuneBox.UpdateLayout();
+        if (restore.Playlists >= 0 && Scroller(_listBox) is { } lists)
+            lists.Offset = lists.Offset.WithY(restore.Playlists);
+        if (restore.Tunes >= 0 && Scroller(_tuneBox) is { } tunes)
+        {
+            tunes.Offset = tunes.Offset.WithY(restore.Tunes);
+            // Rows not yet laid out are reckoned at a guess; laid out, the offset is set again.
+            _tuneBox.UpdateLayout();
+            tunes.Offset = tunes.Offset.WithY(restore.Tunes);
+        }
+        else if (_playing is not null && Shown?.Tunes.Contains(_playing) == true)
+            _tuneBox.ScrollIntoView(_playing);
     }
 
     /// <summary>1 for the small text, more for bigger.</summary>
@@ -917,7 +980,7 @@ internal sealed class PlaylistStrip : Border
 
     /// <summary>Names and authors from the tunes' headers, read off the UI thread and shown as they
     /// come; a sorted playlist sorted again when they are all in, as it sorts by them.</summary>
-    private void ReadHeaders(IEnumerable<PlaylistTune> tunes)
+    private void ReadHeaders(IEnumerable<PlaylistTune> tunes, Action? done = null)
     {
         var list = tunes.ToList();
         Task.Run(() =>
@@ -936,6 +999,7 @@ internal sealed class PlaylistStrip : Border
                     playlist.Resort();
                     LightPlaying(playlist);
                 }
+                done?.Invoke();
             }, DispatcherPriority.Background);
         });
     }
