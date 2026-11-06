@@ -15,8 +15,8 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.34</span></h1>
-    <p class="released">Release date: <time id="released" datetime="2026-11-03">2026-11-03</time></p>
+    <h1>MagPlaySID <span id="version">v1.35</span></h1>
+    <p class="released">Release date: <time id="released" datetime="2026-11-06">2026-11-06</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
       in rows that scroll with the music. Drop a whole folder and it becomes a playlist; keep the tunes
@@ -25,9 +25,9 @@
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also">Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.34/MagPlaySID-1.34-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.34/MagPlaySID-1.34-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.34/MagPlaySID-1.34-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.35/MagPlaySID-1.35-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.35/MagPlaySID-1.35-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.35/MagPlaySID-1.35-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -43,7 +43,7 @@
   <div class="grid">
     <div class="card"><div class="i">💾</div><h3>Any .sid</h3><p>PSID and RSID, PAL and NTSC, played on the raster or a CIA timer, once a frame or many times. The tune's own 6502 code runs on an emulated C64 - its timers, interrupts and memory banking - and every write reaches the SID on the cycle it was made.</p></div>
     <div class="card"><div class="i">🔊</div><h3>Digis</h3><p>Samples streamed from an NMI play as they are written, thousands of times a second - the drums and voices of ThcMOD and LMan's tunes, which a player that calls a tune once a frame never hears. A digi gets a scope of its own beside the voices', and a column in the rows marking each sample as it starts.</p></div>
-    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, and the whole tune soon after takes over below what is on screen, so the rows you can see never change - with its length, measured on the C64 by watching for the tune's memory or its notes to come round again, so the clock says how long it plays before it repeats - or, for a tune that fades out and then plays on in silence, when it has gone quiet.</p></div>
+    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, and the whole tune soon after takes over below what is on screen, so the rows you can see never change - with its length, measured on the C64: the tune's memory coming round again proves it loops, and its notes say how much of that is one pass of the music - even when a player's tempo slips a call from pass to pass or its drums play at random - so the clock says how long it plays before it repeats; for a tune that fades out and plays on in silence, or stops the C64 at its end, when it has gone quiet. Against HVSC's own list of song lengths, it agrees for more than four songs in five.</p></div>
     <div class="card"><div class="i">📜</div><h3>Rows that scroll</h3><p>Each voice's rows - note, instrument, effects - go past as they sound. Click a voice to see its instrument: envelope, hard restart, and the wave, pulse and filter programs, the step sounding lit.</p></div>
     <div class="card"><div class="i">🎹</div><h3>A piano</h3><p>Eight octaves along the bottom, each voice's key lit in its colour as loud as its envelope - an arpeggio, a slide or a drum shows as it plays.</p></div>
     <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice.</p></div>
@@ -116,7 +116,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.34 stands until
+// The version, the release date and the downloads follow the latest release; v1.35 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
