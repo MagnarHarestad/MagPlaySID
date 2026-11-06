@@ -7,6 +7,8 @@
 // of the License, or (at your option) any later version. It is distributed WITHOUT ANY
 // WARRANTY; see the LICENSE file for details.
 
+using System.Runtime.CompilerServices;
+
 namespace MagSid.Sid;
 
 /// <summary>
@@ -101,6 +103,7 @@ public sealed class WaveformGenerator
     }
 
     /// <summary>SID clocking - 1 cycle.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clock()
     {
         AgeFloatingOutput(1);
@@ -174,6 +177,7 @@ public sealed class WaveformGenerator
 
     /// <summary>Synchronize oscillators - must be called after all oscillators have been
     /// clocked, since the oscillators operate in parallel.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Synchronize()
     {
         if (_syncDest is null)
@@ -214,13 +218,18 @@ public sealed class WaveformGenerator
     /// sinks to 0 in a dozen steps rather than vanishing at once. Runs whatever the test bit says:
     /// the DAC fades on its own, and a hard restart holds TEST the whole time it is fading.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AgeFloatingOutput(int cycles)
     {
-        if (!FloatingWaveformOutput || _waveform != 0 || _floatingCycles == 0)
+        if (_floatingCycles == 0 || _waveform != 0 || !FloatingWaveformOutput)
         {
             return;
         }
+        FadeFloatingOutput(cycles);
+    }
 
+    private void FadeFloatingOutput(int cycles)
+    {
         _floatingCycles -= cycles;
         while (_floatingCycles <= 0 && _floatingOutput != 0)
         {
@@ -280,7 +289,12 @@ public sealed class WaveformGenerator
 
     public int ReadOsc() => Output() >> 4;
 
+    /// <summary>Whether hard sync is on: this oscillator is reset as its source's MSB rises, which
+    /// ties the oscillators together a cycle at a time.</summary>
+    public bool Syncs => _sync != 0;
+
     /// <summary>12-bit waveform output. Selects one of 16 possible waveform combinations.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Output() => _waveform switch
     {
         0x0 => OutputNone(),

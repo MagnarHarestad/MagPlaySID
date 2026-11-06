@@ -70,7 +70,7 @@ public sealed class Recording
     public static Recording Record(SidFile file, int song, double seconds)
     {
         var tune = SidTune.Load(file, song);
-        tune.Run((long)(seconds * Machines.ClockHz(tune.Computer.Machine)));
+        tune.RunUnlessHalted((long)(seconds * Machines.ClockHz(tune.Computer.Machine)));
         return Of(tune.Computer);
     }
 
@@ -78,22 +78,27 @@ public sealed class Recording
     /// A whole tune: run until it loops - its length measured on the way - or for
     /// <paramref name="maxSeconds"/>, keeping its player's writes only, and the recording cut to
     /// the loop or <paramref name="seconds"/>. What a view of the tune needs, in one run and without
-    /// the digi it may stream beside its music. The player is found in its first ten seconds. A tune
-    /// whose notes repeat sooner than its memory does is as long as its notes say.
+    /// the digi it may stream beside its music. The player is found in its first ten seconds. A song
+    /// whose music repeats sooner than its memory does is as long as its music - see SongPeriods.
     /// </summary>
     public static (Recording Recording, SidSongLength.Result? Length) RecordWhole(SidFile file, int song,
         double seconds = 600, double maxSeconds = C64SongLength.MaxSeconds)
     {
         var player = Record(file, song, Math.Min(10, seconds)).Player;
         var tune = SidTune.Load(file, song);
-        tune.Computer.Keep = context => context == player;
+        // Init's writes too, before the first call: the volume, envelopes and waveforms the player's
+        // notes are played with.
+        tune.Computer.Keep = context => context == player || tune.Computer.Calls.Count == 0;
         var length = C64SongLength.Measure(tune, maxSeconds);
-        length = Music.LengthByNotes(Of(tune.Computer, player), length) ?? length;
+        length = SongPeriods.Refine(Of(tune.Computer, player), length);
 
         double clock = Machines.ClockHz(tune.Computer.Machine);
         double keep = length is null ? seconds : Math.Min(seconds, length.Total.TotalSeconds + 1);
         if (tune.Computer.Cycle < keep * clock)
-            tune.Run((long)(keep * clock) - tune.Computer.Cycle);
+            tune.RunUnlessHalted((long)(keep * clock) - tune.Computer.Cycle);
+        // A tune with no length that halts the CPU while it is recorded has ended there.
+        if (length is null && C64SongLength.Halted(tune) is { } halted)
+            (length, keep) = (halted, halted.Total.TotalSeconds + 1);
         return (Of(tune.Computer, player, end: (long)(keep * clock)), length);
     }
 

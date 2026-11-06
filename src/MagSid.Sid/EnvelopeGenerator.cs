@@ -7,6 +7,8 @@
 // of the License, or (at your option) any later version. It is distributed WITHOUT ANY
 // WARRANTY; see the LICENSE file for details.
 
+using System.Runtime.CompilerServices;
+
 namespace MagSid.Sid;
 
 /// <summary>
@@ -77,7 +79,9 @@ public sealed class EnvelopeGenerator
         _holdZero = true;
     }
 
-    /// <summary>SID clocking - 1 cycle.</summary>
+    /// <summary>SID clocking - 1 cycle: the rate counter counts on, and only when it reaches its
+    /// period does the envelope step - the rare case, kept out of line.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clock()
     {
         // Check for ADSR delay bug.
@@ -91,11 +95,15 @@ public sealed class EnvelopeGenerator
             _rateCounter = (_rateCounter + 1) & 0x7fff;
         }
 
-        if (_rateCounter != _ratePeriod)
+        if (_rateCounter == _ratePeriod)
         {
-            return;
+            Step();
         }
+    }
 
+    /// <summary>The rate counter has reached its period: the envelope steps.</summary>
+    private void Step()
+    {
         _rateCounter = 0;
 
         // The first envelope step in the attack state also resets the exponential
@@ -295,6 +303,7 @@ public sealed class EnvelopeGenerator
     public int ReadEnv() => Output();
 
     /// <summary>8-bit envelope output.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Output() => _envelopeCounter;
 
     /// <summary>Which of Attack/Decay-Sustain/Release the envelope is currently in - exposed

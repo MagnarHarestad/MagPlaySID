@@ -1,3 +1,5 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
 using MagPlay.Score;
 using MagSid.Playback;
 
@@ -17,6 +19,11 @@ public static class C64SongLength
 {
     /// <summary>Twenty minutes of the tune, some twenty seconds of running: SOS repeats after 14:20.</summary>
     public const double MaxSeconds = 20 * 60;
+
+    /// <summary>Seconds without a single call after which a tune is given up on: what it plays comes
+    /// from its main loop or an NMI, never from a call, and its memory is only looked at as a call
+    /// starts - so twenty minutes of it would find nothing.</summary>
+    private const double NoCalls = 10;
 
     /// <summary>Cycles the C64 is run at a time while the calls are watched.</summary>
     private const int Slice = 100_000;
@@ -92,8 +99,14 @@ public static class C64SongLength
         computer.CallStarting += Watch;
         try
         {
+            long noCalls = (long)(NoCalls * clock);
             while (found is null && computer.Cycle < end)
-                tune.Run(Slice);
+            {
+                if (computer.Calls.Count == 0 && computer.Cycle >= noCalls)
+                    return null;
+                if (!tune.RunUnlessHalted(Slice))
+                    return Halted(tune);
+            }
         }
         catch (SidPlaybackException)
         {
@@ -107,23 +120,60 @@ public static class C64SongLength
         return found;
     }
 
-    /// <summary>FNV-1a over the pages that count.</summary>
-    private static ulong Hash(byte[] ram, bool[] pages)
+    /// <summary>The length of a tune that has halted the CPU: it ended there, as Warlock's do - Cat
+    /// for Dinner at 5:17, where HVSC has 5:22. Null while it runs.</summary>
+    public static SidSongLength.Result? Halted(SidTune tune)
     {
-        const ulong offsetBasis = 14695981039346656037;
-        const ulong prime = 1099511628211;
+        if (!tune.Halted)
+            return null;
+        var computer = tune.Computer;
+        double clock = Machines.ClockHz(computer.Machine);
+        // Timed by the clock, not the calls, which may have stopped well before the CPU did.
+        var calls = computer.Calls;
+        double seconds = calls.Count > 1 ? (calls[^1] - calls[0]) / clock : 0;
+        double rate = seconds > 0 ? (calls.Count - 1) / seconds : 50;
+        // Quiet already, the tune ended as it went quiet: Dark Side's music stops at 2:34, its CPU at
+        // 2:51.
+        long end = computer.QuietSince() is { } quiet && quiet > 0 && quiet < computer.Cycle ? quiet : computer.Cycle;
+        int frames = (int)Math.Round(end / clock * rate);
+        return frames > 0 ? new SidSongLength.Result(frames, frames, rate, EndsQuiet: true) : null;
+    }
 
-        ulong hash = offsetBasis;
+    private const ulong Prime1 = 11400714785074694791, Prime2 = 14029467366897019727, Prime3 = 1609587929392839161,
+                        Prime4 = 9650029242287828579;
+
+    /// <summary>The pages that count as one number: xxHash64's rounds, eight bytes at a time in four
+    /// lanes that run side by side - a call's look at a tune of many pages costs a tenth of what a
+    /// byte at a time did.</summary>
+    internal static ulong Hash(byte[] ram, bool[] pages)
+    {
+        var words = MemoryMarshal.Cast<byte, ulong>(ram.AsSpan(0, 0x10000));
+        ulong a = unchecked(Prime1 + Prime2), b = Prime2, c = 0, d = unchecked(0 - Prime1);
+        int counted = 0;
         for (int page = 0; page < 256; page++)
         {
             if (!pages[page])
                 continue;
-            for (int i = page << 8, end = i + 0x100; i < end; i++)
+            counted++;
+            var row = words.Slice(page * 32, 32);
+            for (int i = 0; i < 32; i += 4)
             {
-                hash ^= ram[i];
-                hash *= prime;
+                a = Round(a, row[i]);
+                b = Round(b, row[i + 1]);
+                c = Round(c, row[i + 2]);
+                d = Round(d, row[i + 3]);
             }
         }
-        return hash;
+        ulong hash = BitOperations.RotateLeft(a, 1) + BitOperations.RotateLeft(b, 7) + BitOperations.RotateLeft(c, 12) + BitOperations.RotateLeft(d, 18);
+        hash = Merge(Merge(Merge(Merge(hash, a), b), c), d) + (ulong)counted;
+        hash ^= hash >> 33;
+        hash *= Prime2;
+        hash ^= hash >> 29;
+        hash *= Prime3;
+        return hash ^ (hash >> 32);
     }
+
+    private static ulong Round(ulong lane, ulong input) => BitOperations.RotateLeft(lane + input * Prime2, 31) * Prime1;
+
+    private static ulong Merge(ulong hash, ulong lane) => (hash ^ Round(0, lane)) * Prime1 + Prime4;
 }

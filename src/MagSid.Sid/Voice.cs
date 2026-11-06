@@ -7,6 +7,8 @@
 // of the License, or (at your option) any later version. It is distributed WITHOUT ANY
 // WARRANTY; see the LICENSE file for details.
 
+using System.Runtime.CompilerServices;
+
 namespace MagSid.Sid;
 
 /// <summary>Direct port of reSID's voice.h/voice.cc - combines a WaveformGenerator and an
@@ -57,5 +59,6 @@ public sealed class Voice
     }
 
     /// <summary>Amplitude modulated waveform output. Range [-2048*255, 2047*255].</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Output() => (Wave.Output() - _waveZero) * Envelope.Output() + _voiceDC;
 }

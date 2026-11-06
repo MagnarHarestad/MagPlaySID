@@ -1,5 +1,13 @@
 namespace MagPlay.C64;
 
+/// <summary>A SID envelope's times, in milliseconds, by their four bits: attack, and decay and
+/// release, which are three times as long.</summary>
+public static class EnvelopeTimes
+{
+    public static readonly int[] AttackMs = [2, 8, 16, 24, 38, 56, 68, 80, 100, 250, 500, 800, 1000, 3000, 5000, 8000];
+    public static readonly int[] DecayMs = [6, 24, 48, 72, 114, 168, 204, 240, 300, 750, 1500, 2400, 3000, 9000, 15000, 24000];
+}
+
 /// <summary>
 /// When a SID's voices have all gone quiet, by their envelopes' own times: a voice with its gate off
 /// once its release has run its course, one with its gate on and nothing to sustain once its attack
@@ -9,10 +17,7 @@ namespace MagPlay.C64;
 /// </summary>
 internal sealed class Quiet
 {
-    /// <summary>The envelope's times, in milliseconds, by their four bits: attack, and decay and
-    /// release, which are three times as long.</summary>
-    private static readonly int[] AttackMs = [2, 8, 16, 24, 38, 56, 68, 80, 100, 250, 500, 800, 1000, 3000, 5000, 8000];
-    private static readonly int[] DecayMs = [6, 24, 48, 72, 114, 168, 204, 240, 300, 750, 1500, 2400, 3000, 9000, 15000, 24000];
+    private static readonly int[] AttackMs = EnvelopeTimes.AttackMs, DecayMs = EnvelopeTimes.DecayMs;
 
     private readonly byte[] _registers = new byte[0x19];
     private readonly bool[] _gate = new bool[3];

@@ -51,6 +51,10 @@ public sealed class Mos6502
     /// for each interrupt it takes.</summary>
     public long Cycles { get; private set; }
 
+    /// <summary>The CPU moved on by <paramref name="cycles"/> as though it had run an instruction
+    /// that changes nothing - a JMP to itself, a loop waiting for an interrupt - again and again.</summary>
+    public void Idle(long cycles) => Cycles += cycles;
+
     /// <summary>Indexing crossed a page in the instruction being run.</summary>
     private bool _crossed;
 
@@ -513,7 +517,7 @@ public sealed class Mos6502
             case 0x62: case 0x72: case 0x92: case 0xB2: case 0xD2: case 0xF2:
                 throw new SidPlaybackException(
                     $"Opcode ${opcode:X2} at ${PC - 1:X4} halts the 6510 (JAM) - the tune has run into " +
-                    "something that is not code.");
+                    "something that is not code.", halts: true);
 
             default:
                 throw new SidPlaybackException($"Opcode ${opcode:X2} at ${PC - 1:X4} is not implemented.");
@@ -993,8 +997,13 @@ public sealed class Mos6502
 }
 
 /// <summary>Thrown when a tune cannot be loaded or run - a malformed header, an opcode this
-/// interpreter does not cover, a play routine that never returns.</summary>
-public sealed class SidPlaybackException(string message) : Exception(message);
+/// interpreter does not cover, a play routine that never returns - or when it halts the CPU.</summary>
+public sealed class SidPlaybackException(string message, bool halts = false) : Exception(message)
+{
+    /// <summary>Whether the tune ran into a JAM, which halts a real 6510 as well: some tunes do so
+    /// where they end.</summary>
+    public bool Halts { get; } = halts;
+}
 
 /// <summary>What the CPU reads and writes through when it runs in a whole machine rather than over
 /// flat RAM: the machine decides what each address is - RAM, ROM, a chip's register.</summary>

@@ -169,22 +169,61 @@ internal sealed class PlaylistStrip : Border
     /// as it will be - a composer's line under its name - so a list can be scrolled to where it was.</summary>
     private bool _headersRead;
 
-    private (double Playlists, double Tunes)? _restore;
+    private (ListPlace Playlists, ListPlace Tunes)? _restore;
     private bool _scrolledByHand;
+
+    /// <summary>Where a list is scrolled to: the row at its top, and the pixels of it scrolled past;
+    /// a row below zero for none.</summary>
+    public readonly record struct ListPlace(int Row, double Into);
 
     private static ScrollViewer? Scroller(ListBox list) => list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
 
-    /// <summary>How far the playlists and the tunes shown are scrolled down, in pixels.</summary>
-    public (double Playlists, double Tunes) ScrollOffsets =>
-        (Scroller(_listBox)?.Offset.Y ?? 0, Scroller(_tuneBox)?.Offset.Y ?? 0);
+    /// <summary>Where the playlists and the tunes shown are scrolled to.</summary>
+    public (ListPlace Playlists, ListPlace Tunes) Places => (TopOf(_listBox), TopOf(_tuneBox));
+
+    /// <summary>The row at the top of <paramref name="list"/>'s view - the first one any of which shows -
+    /// and how far into it the view starts.</summary>
+    private static ListPlace TopOf(ListBox list)
+    {
+        if (Scroller(list) is not { } scroller)
+            return new ListPlace(-1, 0);
+        var top = new ListPlace(-1, 0);
+        double highest = double.MaxValue;
+        foreach (var container in list.GetRealizedContainers())
+        {
+            if (!container.IsVisible || container.TranslatePoint(new Point(0, 0), scroller) is not { } at)
+                continue;
+            if (at.Y + container.Bounds.Height <= 0 || at.Y >= highest)
+                continue;
+            highest = at.Y;
+            top = new ListPlace(list.IndexFromContainer(container), Math.Max(0, -at.Y));
+        }
+        return top;
+    }
+
+    /// <summary><paramref name="list"/> scrolled so <paramref name="place"/>'s row is at the top, as far
+    /// into it as it was.</summary>
+    private static void ScrollTo(ListBox list, ListPlace place)
+    {
+        if (place.Row < 0 || place.Row >= list.ItemCount || Scroller(list) is not { } scroller)
+            return;
+        list.ScrollIntoView(place.Row);
+        list.UpdateLayout();
+        if (list.ContainerFromIndex(place.Row) is { } container && container.TranslatePoint(new Point(0, 0), scroller) is { } at)
+        {
+            scroller.Offset = scroller.Offset.WithY(Math.Max(0, scroller.Offset.Y + at.Y + place.Into));
+            list.UpdateLayout();
+        }
+    }
 
     /// <summary>
     /// The lists scrolled back to where they were - once every row is as tall as it will be. Scrolled
     /// at once, the rows still without their composers' lines put the tune playing far below the
     /// view when those came in: Lightforce, 48th of Rob Hubbard's tunes, opened on the 26th to 37th.
-    /// With nothing kept, below zero, the tune playing is scrolled into view instead.
+    /// With nothing kept, below zero, the tune playing is scrolled into view instead. Kept by row, not
+    /// by pixels, it opens on the same tunes in a bigger font too.
     /// </summary>
-    public void RestoreScroll(double playlists, double tunes)
+    public void RestoreScroll(ListPlace playlists, ListPlace tunes)
     {
         _restore = (playlists, tunes);
         _scrolledByHand = false;
@@ -206,15 +245,9 @@ internal sealed class PlaylistStrip : Border
         _restore = null;
         _listBox.UpdateLayout();
         _tuneBox.UpdateLayout();
-        if (restore.Playlists >= 0 && Scroller(_listBox) is { } lists)
-            lists.Offset = lists.Offset.WithY(restore.Playlists);
-        if (restore.Tunes >= 0 && Scroller(_tuneBox) is { } tunes)
-        {
-            tunes.Offset = tunes.Offset.WithY(restore.Tunes);
-            // Rows not yet laid out are reckoned at a guess; laid out, the offset is set again.
-            _tuneBox.UpdateLayout();
-            tunes.Offset = tunes.Offset.WithY(restore.Tunes);
-        }
+        ScrollTo(_listBox, restore.Playlists);
+        if (restore.Tunes.Row >= 0)
+            ScrollTo(_tuneBox, restore.Tunes);
         else if (_playing is not null && Shown?.Tunes.Contains(_playing) == true)
             _tuneBox.ScrollIntoView(_playing);
     }

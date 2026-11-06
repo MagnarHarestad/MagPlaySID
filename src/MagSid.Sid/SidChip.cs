@@ -7,6 +7,8 @@
 // of the License, or (at your option) any later version. It is distributed WITHOUT ANY
 // WARRANTY; see the LICENSE file for details.
 
+using System.Runtime.CompilerServices;
+
 namespace MagSid.Sid;
 
 /// <summary>
@@ -28,6 +30,11 @@ public sealed class SidChip
     private const int FixpMask = 0xffff;
 
     private readonly Voice[] _voice = [new Voice(), new Voice(), new Voice()];
+
+    // The voices' parts held directly, for the clock run a million times a second.
+    private readonly Voice _v0, _v1, _v2;
+    private readonly WaveformGenerator _w0, _w1, _w2;
+    private readonly EnvelopeGenerator _e0, _e1, _e2;
     private readonly Filter _filter = new();
     private readonly ExternalFilter _extFilter = new();
 
@@ -43,6 +50,9 @@ public sealed class SidChip
 
     public SidChip()
     {
+        (_v0, _v1, _v2) = (_voice[0], _voice[1], _voice[2]);
+        (_w0, _w1, _w2) = (_v0.Wave, _v1.Wave, _v2.Wave);
+        (_e0, _e1, _e2) = (_v0.Envelope, _v1.Envelope, _v2.Envelope);
         _voice[0].SetSyncSource(_voice[2]);
         _voice[1].SetSyncSource(_voice[0]);
         _voice[2].SetSyncSource(_voice[1]);
@@ -168,7 +178,9 @@ public sealed class SidChip
         }
     }
 
-    /// <summary>SID clocking - 1 cycle.</summary>
+    /// <summary>SID clocking - 1 cycle: the envelopes, then the oscillators, then their sync - they
+    /// run in parallel - then the filters on what the voices put out.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clock()
     {
         if (--_busValueTtl <= 0)
@@ -177,25 +189,23 @@ public sealed class SidChip
             _busValueTtl = 0;
         }
 
-        foreach (var v in _voice)
-        {
-            v.Envelope.Clock();
-        }
+        _e0.Clock();
+        _e1.Clock();
+        _e2.Clock();
 
-        foreach (var v in _voice)
-        {
-            v.Wave.Clock();
-        }
+        _w0.Clock();
+        _w1.Clock();
+        _w2.Clock();
 
-        foreach (var v in _voice)
-        {
-            v.Wave.Synchronize();
-        }
+        _w0.Synchronize();
+        _w1.Synchronize();
+        _w2.Synchronize();
 
+        var muted = _voiceMuted;
         _filter.Clock(
-            _voiceMuted[0] ? 0 : _voice[0].Output(),
-            _voiceMuted[1] ? 0 : _voice[1].Output(),
-            _voiceMuted[2] ? 0 : _voice[2].Output(),
+            muted[0] ? 0 : _v0.Output(),
+            muted[1] ? 0 : _v1.Output(),
+            muted[2] ? 0 : _v2.Output(),
             _extIn);
         _extFilter.Clock(_filter.Output());
     }

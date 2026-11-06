@@ -43,6 +43,60 @@ public sealed class Vic(int cyclesPerLine, int lines)
         _cycle = cycle;
     }
 
+    /// <summary>The first cycle after <paramref name="now"/> the raster interrupt can go active on -
+    /// the start of the line it is set to - or long.MaxValue when it is not let through.</summary>
+    public long NextInterrupt(long now)
+    {
+        if ((_mask & 0x01) == 0 || _compare >= Lines)
+            return long.MaxValue;
+        long line = now / CyclesPerLine + 1;
+        long ahead = ((_compare - (line % Lines)) % Lines + Lines) % Lines;
+        return (line + ahead) * CyclesPerLine;
+    }
+
+    // ------------------------------------------------------------------ bad lines
+
+    private bool _display;
+    private bool _displayBefore;
+    private long _displayChanged = long.MinValue;
+
+    /// <summary>Whether the VIC takes the CPU's cycles on bad lines - the 40 or so of every eighth
+    /// line it fetches the screen's characters on, when the display is on. Off, the CPU has every
+    /// cycle, as it has with the screen blanked.</summary>
+    public bool StealsCycles { get; set; }
+
+    /// <summary>Where the VIC has the bus on the line <paramref name="cycle"/> is in, as the CPU
+    /// meets it: from cycle 12, when it asks for it, to cycle 55 - or -1 when the line is not bad.
+    /// A line is bad when its low three bits are the vertical scroll's, between lines $30 and $F7,
+    /// in a frame whose line $30 had the display on.</summary>
+    private long BadLineStart(long cycle)
+    {
+        long lineStart = cycle - cycle % CyclesPerLine;
+        int line = (int)(cycle / CyclesPerLine % Lines);
+        if (line < 0x30 || line > 0xF7 || (line & 7) != (_registers[0x11] & 7))
+            return -1;
+        long line30 = lineStart - (long)(line - 0x30) * CyclesPerLine;
+        bool display = line30 >= _displayChanged ? _display : _displayBefore;
+        return display ? lineStart : -1;
+    }
+
+    /// <summary>The cycles the VIC kept the CPU waiting for an instruction run from <paramref
+    /// name="start"/> to <paramref name="end"/>: all of a bad line's from where it started, when it
+    /// started in one; when it ran into one, the 43 from cycle 12 on - unless all it did there was
+    /// write, which the CPU goes on doing (<paramref name="writesLast"/> cycles at its end).</summary>
+    public long Stolen(long start, long end, int writesLast)
+    {
+        if (!StealsCycles)
+            return 0;
+        long bad = BadLineStart(start);
+        if (bad >= 0 && start >= bad + 12 && start < bad + 55)
+            return bad + 55 - start;
+        bad = BadLineStart(end - 1);
+        if (bad >= 0 && start < bad + 12 && end > bad + 12 && end - (bad + 12) > writesLast)
+            return 43;
+        return 0;
+    }
+
     private void Flag(int bits, long at)
     {
         bool was = Interrupt;
@@ -72,7 +126,12 @@ public sealed class Vic(int cyclesPerLine, int lines)
         _registers[register] = (byte)value;
         switch (register)
         {
-            case 0x11: _compare = (_compare & 0xFF) | ((value & 0x80) << 1); break;
+            case 0x11:
+                _compare = (_compare & 0xFF) | ((value & 0x80) << 1);
+                _displayBefore = _display;
+                _display = (value & 0x10) != 0;
+                _displayChanged = _cycle;
+                break;
             case 0x12: _compare = (_compare & 0x100) | value; break;
             case 0x19: _flags &= ~value; break;
             case 0x1A:

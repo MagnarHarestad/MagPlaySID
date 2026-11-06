@@ -7,6 +7,8 @@
 // of the License, or (at your option) any later version. It is distributed WITHOUT ANY
 // WARRANTY; see the LICENSE file for details.
 
+using System.Runtime.CompilerServices;
+
 namespace MagSid.Sid;
 
 /// <summary>
@@ -169,6 +171,7 @@ public sealed class Filter
     }
 
     /// <summary>SID clocking - 1 cycle.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clock(int voice1, int voice2, int voice3, int extIn)
     {
         // Scale each voice down from 20 to 13 bits.
@@ -280,6 +283,7 @@ public sealed class Filter
     }
 
     /// <summary>SID audio output (20 bits).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Output()
     {
         if (!_enabled)

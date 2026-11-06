@@ -7,6 +7,8 @@
 // of the License, or (at your option) any later version. It is distributed WITHOUT ANY
 // WARRANTY; see the LICENSE file for details.
 
+using System.Runtime.CompilerServices;
+
 namespace MagSid.Sid;
 
 /// <summary>
@@ -63,6 +65,7 @@ public sealed class ExternalFilter
     }
 
     /// <summary>SID clocking - 1 cycle.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clock(int vi)
     {
         if (!_enabled)

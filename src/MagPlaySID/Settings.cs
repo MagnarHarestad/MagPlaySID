@@ -55,11 +55,17 @@ internal sealed class Settings
     /// <summary>How tall the playlists were dragged in the strip, in pixels; 0 for as many as fit.</summary>
     public double PlaylistsHeight { get; set; }
 
-    /// <summary>How far the playlists and the tunes shown were scrolled down when the program was
-    /// closed, in pixels, to open on the same view; below zero, none kept.</summary>
-    public double PlaylistsScroll { get; set; } = -1;
+    /// <summary>Where the playlists and the tunes shown were scrolled to when the program was closed,
+    /// to open on the same view: the row at the top of each list, and how many pixels of it were
+    /// scrolled past - kept by row, so a bigger font or a composer's line read late opens on the same
+    /// tunes. Below zero, none kept.</summary>
+    public int PlaylistsTop { get; set; } = -1;
 
-    public double TunesScroll { get; set; } = -1;
+    public double PlaylistsInto { get; set; }
+
+    public int TunesTop { get; set; } = -1;
+
+    public double TunesInto { get; set; }
 
     public static Settings Load()
     {

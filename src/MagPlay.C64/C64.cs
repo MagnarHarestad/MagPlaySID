@@ -91,14 +91,18 @@ public sealed class C64 : IMemoryBus
     private const int RunsFollowed = 12;
 
     private long _synced;
+
+    /// <summary>The first cycle a timer or the beam can change an interrupt line on; before it,
+    /// they are not brought up to date - 0 to look again.</summary>
+    private long _nextEvent;
     private long _nmiEdge = -1;
     private bool _maskedBefore = true;
     private int _port = 0x37;
     private int _direction = 0x2F;
 
-    /// <summary>A SID model, run only once a tune reads what the chip itself makes - voice 3's
-    /// oscillator or envelope - and then kept in step with every write.</summary>
-    private SidChip? _sid;
+    /// <summary>A model of what the chip itself makes - voice 3's oscillator and envelope, see
+    /// VoiceThree - started only once a tune reads one of them, and then kept in step with every write.</summary>
+    private VoiceThree? _sid;
     private long _sidCycle;
 
     /// <param name="sid">A chip to play into, for a C64 that is listened to; without one the
@@ -175,6 +179,10 @@ public sealed class C64 : IMemoryBus
     /// chip model a read of voice 3 starts is then played only the writes kept before it.</summary>
     public Func<WriteContext, bool>? Keep { get; set; }
 
+    /// <summary>Whether a JMP to itself waiting for an interrupt is jumped over - see Idling. Off
+    /// only to check that it changes nothing.</summary>
+    public bool SkipsIdle { get; set; } = true;
+
     /// <summary>A call is starting: the IRQ is about to be taken, nothing of it run yet.</summary>
     public event Action? CallStarting;
 
@@ -198,7 +206,13 @@ public sealed class C64 : IMemoryBus
         while (Cpu.Cycles < cycle)
         {
             long now = Cpu.Cycles;
-            Sync(now);
+            // The timers and the beam only change the interrupt lines when one of them is due, or
+            // when the CPU touches their registers - which brings them up to now itself.
+            if (now >= _nextEvent)
+            {
+                Sync(now);
+                _nextEvent = Math.Min(Math.Min(Cia1.NextInterrupt(), Cia2.NextInterrupt()), Vic.NextInterrupt(now));
+            }
             long seen = now - 2;
 
             // An NMI is taken on the line's falling edge, which the 6510 latches.
@@ -222,16 +236,76 @@ public sealed class C64 : IMemoryBus
             }
 
             _maskedBefore = Cpu.InterruptDisable;
+            if (Idling(cycle))
+                continue;
             if (_record)
             {
                 _stepAt = Cpu.PC;
                 _stepContext = Context();
             }
+            long started = Cpu.Cycles;
             Cpu.Step();
+            if (Vic.StealsCycles)
+                Cpu.Idle(Vic.Stolen(started, Cpu.Cycles, WritesLast[Cpu.Opcode]));
             if (Cpu.Opcode == 0x40)
                 Unwind();
         }
         Sync(Cpu.Cycles);
+    }
+
+    /// <summary>
+    /// Waiting for an interrupt in a JMP to itself - the PSID driver's main loop, and many a tune's -
+    /// jumped over to just before the next one can come: the timers and the beam keep their own
+    /// time, so nothing of the run changes but how long it takes. A tune spends most of each frame
+    /// there; skipped, a song's length is measured several times as fast.
+    /// </summary>
+    private bool Idling(long until)
+    {
+        if (!SkipsIdle)
+            return false;
+        int pc = Cpu.PC;
+        if (Code(pc) != 0x4C || (Code(pc + 1) | (Code(pc + 2) << 8)) != pc)
+            return false;
+        long now = Cpu.Cycles;
+        // An interrupt the CPU would take now is taken now.
+        if (Cia2.InterruptSince > _nmiEdge || (!Cpu.InterruptDisable && (Cia1.Interrupt || Vic.Interrupt)))
+            return false;
+        long next = Math.Min(Cia2.NextInterrupt(), Cpu.InterruptDisable ? long.MaxValue : Math.Min(Cia1.NextInterrupt(), Vic.NextInterrupt(now)));
+        // Up to the last JMP that ends before the line would be seen, and no further than asked.
+        long limit = Math.Min(until, next == long.MaxValue ? until : next + 1);
+        long jumps = (limit - now) / 3 - 1;
+        if (jumps <= 0)
+            return false;
+        Cpu.Idle(3 * jumps);
+        return true;
+    }
+
+    /// <summary>A byte of code as the CPU would fetch it - but none of the I/O, which is not code here.</summary>
+    private int Code(int address)
+    {
+        address &= 0xFFFF;
+        return address switch
+        {
+            >= 0xA000 and < 0xC000 when Banking is 3 or 7 => _basic[address - 0xA000],
+            >= 0xD000 and < 0xE000 when IoVisible => -1,
+            >= 0xE000 when (Banking & 0x02) != 0 => _kernal[address - 0xE000],
+            _ => _ram[address],
+        };
+    }
+
+    /// <summary>How many of each instruction's last cycles are writes, which a bad line does not stop:
+    /// a store's one, a read-modify-write's two, a push's one.</summary>
+    private static readonly int[] WritesLast = BuildWritesLast();
+
+    private static int[] BuildWritesLast()
+    {
+        var w = new int[256];
+        foreach (int op in new[] { 0x81, 0x84, 0x85, 0x86, 0x8C, 0x8D, 0x8E, 0x91, 0x94, 0x95, 0x96, 0x99, 0x9D, 0x48, 0x08 })
+            w[op] = 1;
+        foreach (int op in new[] { 0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x36, 0x3E, 0x46, 0x4E, 0x56, 0x5E, 0x66, 0x6E, 0x76, 0x7E,
+                                   0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE })
+            w[op] = 2;
+        return w;
     }
 
     /// <summary>An interrupt about to be taken: a call when it is an IRQ and none is being run.</summary>
@@ -357,6 +431,7 @@ public sealed class C64 : IMemoryBus
     private byte ReadIo(int address)
     {
         Sync(Cpu.AccessCycle);
+        _nextEvent = 0;
         return address switch
         {
             < 0xD400 => Vic.Read(address),
@@ -372,6 +447,7 @@ public sealed class C64 : IMemoryBus
     private void WriteIo(int address, int value)
     {
         Sync(Cpu.AccessCycle);
+        _nextEvent = 0;
         switch (address)
         {
             case < 0xD400: Vic.Write(address, value); break;
@@ -460,7 +536,7 @@ public sealed class C64 : IMemoryBus
         if (_sid is not null)
             return;
 
-        _sid = new SidChip();
+        _sid = new VoiceThree();
         _sidCycle = 0;
         foreach (var write in _sidWrites)
         {
@@ -471,7 +547,9 @@ public sealed class C64 : IMemoryBus
 
     private void ClockSidTo(long cycle)
     {
-        for (; _sidCycle < cycle; _sidCycle++)
-            _sid!.Clock();
+        if (cycle <= _sidCycle)
+            return;
+        _sid!.Clock(cycle - _sidCycle);
+        _sidCycle = cycle;
     }
 }

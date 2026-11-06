@@ -84,6 +84,28 @@ public sealed class SidTune
     /// <summary>Runs the tune on for <paramref name="cycles"/> cycles.</summary>
     public void Run(long cycles) => Computer.RunUntil(Computer.Cycle + cycles);
 
+    /// <summary>Whether the tune has halted the CPU with a JAM - which a real 6510 cannot get out of
+    /// either, so that what it played up to there is all it plays.</summary>
+    public bool Halted { get; private set; }
+
+    /// <summary>Runs the tune on for <paramref name="cycles"/> cycles, or until it halts the CPU;
+    /// whether it still runs.</summary>
+    public bool RunUnlessHalted(long cycles)
+    {
+        if (Halted)
+            return false;
+        try
+        {
+            Run(cycles);
+            return true;
+        }
+        catch (SidPlaybackException ex) when (ex.Halts)
+        {
+            Halted = true;
+            return false;
+        }
+    }
+
     /// <summary>The tune's SID writes over <paramref name="seconds"/> seconds of playing.</summary>
     public static IReadOnlyList<TimedWrite> Record(SidFile file, int song, double seconds)
     {

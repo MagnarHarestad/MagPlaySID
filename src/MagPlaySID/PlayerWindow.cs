@@ -238,7 +238,11 @@ internal sealed class PlayerWindow : Window
         });
 
         // The lists' scrolling read while they are still on screen.
-        Closing += (_, _) => (_settings.PlaylistsScroll, _settings.TunesScroll) = _strip.ScrollOffsets;
+        Closing += (_, _) =>
+        {
+            var (playlists, tunes) = _strip.Places;
+            (_settings.PlaylistsTop, _settings.PlaylistsInto, _settings.TunesTop, _settings.TunesInto) = (playlists.Row, playlists.Into, tunes.Row, tunes.Into);
+        };
         Closed += (_, _) =>
         {
             _settings.LastShown = _strip.ShownName;
@@ -1067,7 +1071,8 @@ internal sealed class PlayerWindow : Window
                 (_queue, _queueTune) = (null, null);
         }
         _strip.Show(_settings.LastShown);
-        _strip.RestoreScroll(_settings.PlaylistsScroll, _settings.TunesScroll);
+        _strip.RestoreScroll(new PlaylistStrip.ListPlace(_settings.PlaylistsTop, _settings.PlaylistsInto),
+                             new PlaylistStrip.ListPlace(_settings.TunesTop, _settings.TunesInto));
     }
 
     /// <summary>The tune and song playing kept, to start from next time.</summary>

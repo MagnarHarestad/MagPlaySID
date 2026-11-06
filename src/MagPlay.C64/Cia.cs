@@ -43,6 +43,20 @@ public sealed class Cia
     /// <summary>Timer B counts timer A's underflows rather than cycles.</summary>
     private bool BCountsA => (_controlB & 0x60) is 0x40 or 0x60;
 
+    /// <summary>The first cycle after the one the timers have run to that an underflow they report
+    /// can come on - timer A's, or B's counting cycles or A's underflows - or long.MaxValue when none
+    /// can. An underflow not reported changes only flags, which a read brings up to date.</summary>
+    public long NextInterrupt()
+    {
+        long next = long.MaxValue;
+        bool reportsA = (_mask & 0x01) != 0, reportsB = (_mask & 0x02) != 0;
+        if (RunningA && (reportsA || (reportsB && BCountsA && RunningB)))
+            next = _cycle + _counterA + 1;
+        if (reportsB && RunningB && !BCountsA)
+            next = Math.Min(next, _cycle + _counterB + 1);
+        return next;
+    }
+
     /// <summary>The timers run on to <paramref name="cycle"/>.</summary>
     public void AdvanceTo(long cycle)
     {
