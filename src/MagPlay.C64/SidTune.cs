@@ -42,8 +42,6 @@ public sealed class SidTune
     /// <summary>Why this tune cannot be started here; null when it can.</summary>
     public static string? Unsupported(SidFile file)
     {
-        if (file.IsBasic)
-            return "This RSID is a BASIC program, and there is no BASIC interpreter here to RUN it.";
         if (file.LoadAddress + file.Data.Length > 0x10000)
             return "The tune's data would run past the end of memory.";
         if (file.LoadAddress < 0x0200)
@@ -57,6 +55,8 @@ public sealed class SidTune
     {
         if (Unsupported(file) is { } reason)
             throw new SidPlaybackException(reason);
+        if (file.IsBasic)
+            return LoadBasic(file, song, sid, record);
 
         var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids, sid, record);
         // What the KERNAL leaves for a tune that asks which machine it is on, to set its pitches and
@@ -79,6 +79,29 @@ public sealed class SidTune
         machine.Cpu.InterruptDisable = true;
         machine.Cpu.PC = driver;
         return new SidTune(machine, file, song, driver);
+    }
+
+    /// <summary>
+    /// A BASIC tune: a C64 with BASIC (see <see cref="BasicRoms"/>), started as VICE's player starts
+    /// one - reset, the program loaded where it belongs with BASIC's pointers at its end, the song
+    /// number at $030C, and RUN. The screen is on, so the VIC takes its cycles on bad lines, as it
+    /// does on a C64: a BASIC tune's tempo is how fast BASIC runs.
+    /// </summary>
+    private static SidTune LoadBasic(SidFile file, int song, ISidPort? sid, bool record)
+    {
+        var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids, sid, record);
+        BasicRoms.Install(machine);
+        machine.Vic.StealsCycles = true;
+        machine.Ram[PalFlag] = machine.Machine == Machine.Pal ? (byte)1 : (byte)0;
+        file.Data.CopyTo(machine.Ram, file.LoadAddress);
+        int end = file.LoadAddress + file.Data.Length;
+        machine.Ram[0xAE] = (byte)end;
+        machine.Ram[0xAF] = (byte)(end >> 8);
+        machine.Ram[0x030C] = (byte)Math.Max(0, song - 1);
+        machine.Cpu.SP = 0xFF;
+        machine.Cpu.InterruptDisable = true;
+        machine.Cpu.PC = BasicRoms.Start;
+        return new SidTune(machine, file, song, BasicRoms.Start);
     }
 
     /// <summary>Runs the tune on for <paramref name="cycles"/> cycles.</summary>

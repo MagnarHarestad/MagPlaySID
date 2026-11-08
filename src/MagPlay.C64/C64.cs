@@ -127,6 +127,12 @@ public sealed class C64 : IMemoryBus
 
     public Machine Machine { get; }
 
+    /// <summary>The BASIC and KERNAL ROMs as this machine has them, for <see cref="BasicRoms"/> to
+    /// put BASIC in for a BASIC tune.</summary>
+    internal byte[] BasicRom => _basic;
+
+    internal byte[] KernalRom => _kernal;
+
     public Mos6502 Cpu { get; }
 
     public Cia Cia1 { get; } = new();
@@ -186,6 +192,12 @@ public sealed class C64 : IMemoryBus
     /// <summary>A call is starting: the IRQ is about to be taken, nothing of it run yet.</summary>
     public event Action? CallStarting;
 
+    /// <summary>An address whose instruction raises <see cref="Reached"/> each time it is about to
+    /// run; -1 for none. BASIC's next statement, for a BASIC tune's length.</summary>
+    public int Watch { get; set; } = -1;
+
+    public event Action? Reached;
+
     /// <summary>The 6510 has written to RAM in <paramref name="page"/> - under the ROMs and I/O too.</summary>
     public bool PageWritten(int page) => _writtenPages[page & 0xFF];
 
@@ -236,6 +248,8 @@ public sealed class C64 : IMemoryBus
             }
 
             _maskedBefore = Cpu.InterruptDisable;
+            if (Cpu.PC == Watch)
+                Reached?.Invoke();
             if (Idling(cycle))
                 continue;
             if (_record)

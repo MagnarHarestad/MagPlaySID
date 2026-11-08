@@ -43,6 +43,11 @@ public static class SongPeriods
     /// same pass of the music.</summary>
     private const double Jitter = 0.04;
 
+    /// <summary>How far, as a share of the period, a BASIC tune's note may come from where it came a
+    /// pass before: a pass after a CLR finds its variables in another order, and runs a little faster
+    /// or slower for it.</summary>
+    private const double BasicDrift = 0.02;
+
     /// <summary>The song's length by what it plays, from <paramref name="recording"/> of its player's
     /// calls up to where <paramref name="memory"/> found it looping - or the memory's own when what it
     /// plays says nothing shorter, or null when neither says anything.</summary>
@@ -84,7 +89,7 @@ public static class SongPeriods
                 best = found;
         }
         var voices = VoiceNotes(recording);
-        if (Loose(voices, memory.LoopStartFrame, memory.TotalFrames, rate) is { } loose &&
+        if (Loose(voices, memory.LoopStartFrame, memory.TotalFrames, rate, recording.Basic ? BasicDrift : 0) is { } loose &&
             (best is not { } bl || loose.Start + loose.Period < bl.Start + bl.Period))
             best = loose;
         int whole = best is { } bw ? bw.Start + bw.Period : memory.TotalFrames;
@@ -229,6 +234,11 @@ public static class SongPeriods
         // A note started silent, waiting for the call it sounds in: its place in its voice's list.
         var waiting = new int[9];
         Array.Fill(waiting, -1);
+        // A BASIC tune's legato: a new pitch on a voice whose gate stays on, a note to a listener. It
+        // is taken a call on, once a POKE of the other half of the pitch has come too.
+        var pitch = new int[9];
+        var settling = new int[9];
+        Array.Fill(settling, -1);
         for (int c = 0; c < recording.CallWrites.Count; c++)
         {
             Array.Clear(rose);
@@ -259,6 +269,22 @@ public static class SongPeriods
                     voices[v][waiting[v]] = start with { Note = (start.Note & ~0xFFFFFFFUL) | sound, Noise = (control & 0x80) != 0 };
                     waiting[v] = -1;
                 }
+                if (!recording.Basic)
+                    continue;
+                int frequency = registers[b] | (registers[b + 1] << 8);
+                if (settling[v] >= 0)
+                {
+                    var start = voices[v][settling[v]];
+                    voices[v][settling[v]] = start with { Note = (start.Note & ~0xFFFFFFFUL) | sound };
+                    settling[v] = -1;
+                }
+                else if (!rose[v] && frequency != pitch[v] && (control & 1) != 0 && Sounding(control) && voices[v].Count > 0)
+                {
+                    ulong envelope = ((ulong)(uint)registers[b + 5] << 28) | ((ulong)(uint)registers[b + 6] << 36);
+                    voices[v].Add(new NoteStart(c, envelope | sound, (control & 0x80) != 0));
+                    settling[v] = voices[v].Count - 1;
+                }
+                pitch[v] = frequency;
             }
         }
         return voices;
@@ -273,7 +299,7 @@ public static class SongPeriods
     /// note of its voice, a drum played at random: Hunters Moon's. What the passes play is otherwise
     /// the same, note for note: the same tune played on other instruments is not the same pass.
     /// </summary>
-    internal static (int Start, int Period)? Loose(List<NoteStart>[] voices, int loopStart, int total, double rate)
+    internal static (int Start, int Period)? Loose(List<NoteStart>[] voices, int loopStart, int total, double rate, double drift = 0)
     {
         int loop = total - loopStart;
         int tolerance = Math.Max(1, (int)Math.Round(Jitter * rate));
@@ -298,6 +324,8 @@ public static class SongPeriods
         for (int passes = loop / shortest; passes >= 1; passes--)
         {
             double period = (double)loop / passes;
+            // A BASIC tune's passes may differ in speed: as much as their drift of a period, more.
+            tolerance = Math.Max(tolerance, (int)Math.Round(drift * period));
             bool holds = true;
             for (int v = 0; v < voices.Length && holds; v++)
             {

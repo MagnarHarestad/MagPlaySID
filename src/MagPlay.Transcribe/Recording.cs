@@ -50,6 +50,10 @@ public sealed class Recording
     /// at a sample's pace, from the cycle it starts on - empty for a tune that plays none.</summary>
     public IReadOnlyList<DataRun> Samples { get; init; } = [];
 
+    /// <summary>A BASIC tune's, framed in sixtieths of a second: its passes may run a little apart in
+    /// speed, as BASIC finds its variables in a different order after a CLR or a RUN.</summary>
+    public bool Basic { get; init; }
+
     /// <summary>The pace a digi reads its samples at, in reads a second: a sample a byte or a nibble
     /// at a time, at a few thousand to some fifteen thousand a second. Slower is a player reading its
     /// tables; faster, a loop copying memory.</summary>
@@ -71,7 +75,7 @@ public sealed class Recording
     {
         var tune = SidTune.Load(file, song);
         tune.RunUnlessHalted((long)(seconds * Machines.ClockHz(tune.Computer.Machine)));
-        return Of(tune.Computer);
+        return Of(tune.Computer, frames: file.IsBasic);
     }
 
     /// <summary>
@@ -90,7 +94,7 @@ public sealed class Recording
         // notes are played with.
         tune.Computer.Keep = context => context == player || tune.Computer.Calls.Count == 0;
         var length = C64SongLength.Measure(tune, maxSeconds);
-        length = SongPeriods.Refine(Of(tune.Computer, player), length);
+        length = SongPeriods.Refine(Of(tune.Computer, player, frames: file.IsBasic), length);
 
         double clock = Machines.ClockHz(tune.Computer.Machine);
         double keep = length is null ? seconds : Math.Min(seconds, length.Total.TotalSeconds + 1);
@@ -99,12 +103,14 @@ public sealed class Recording
         // A tune with no length that halts the CPU while it is recorded has ended there.
         if (length is null && C64SongLength.Halted(tune) is { } halted)
             (length, keep) = (halted, halted.Total.TotalSeconds + 1);
-        return (Of(tune.Computer, player, end: (long)(keep * clock)), length);
+        return (Of(tune.Computer, player, end: (long)(keep * clock), frames: file.IsBasic), length);
     }
 
     /// <summary>What <paramref name="computer"/> has played so far - up to <paramref name="end"/>
-    /// when given - with the player its writes show, unless <paramref name="player"/> is given.</summary>
-    public static Recording Of(MagPlay.C64.C64 computer, WriteContext? player = null, long? end = null)
+    /// when given - with the player its writes show, unless <paramref name="player"/> is given. With
+    /// <paramref name="frames"/>, a player outside the calls is framed in sixtieths of a second: a
+    /// BASIC tune's, whose POKEs come as BASIC gets to them.</summary>
+    public static Recording Of(MagPlay.C64.C64 computer, WriteContext? player = null, long? end = null, bool frames = false)
     {
         // Every chip's writes in the order made: the first chip's, and each other's numbered from
         // $20 a chip.
@@ -124,6 +130,7 @@ public sealed class Recording
         List<long> calls = player switch
         {
             WriteContext.Call => [.. computer.Calls.Where(c => c < until)],
+            not null when frames => [.. Sixtieths(computer, until)],
             { } outside => Framed(Bursts(all.Where(w => w.Second == outside).Select(w => w.First.Cycle)),
                                   Machines.CyclesPerFrame(computer.Machine), until),
             _ => [.. computer.Calls.Where(c => c < until)],
@@ -153,6 +160,7 @@ public sealed class Recording
             Chips = chips,
             Player = player,
             Calls = calls,
+            Basic = frames && player is not null and not WriteContext.Call,
             CallWrites = callWrites,
             Between = between,
             End = until,
@@ -221,6 +229,15 @@ public sealed class Recording
                 calls.Add(bursts[i] + gap * j / frames);
         }
         return calls;
+    }
+
+    /// <summary>A BASIC tune's frames: a sixtieth of a second each, the KERNAL's interrupt's, from
+    /// its first - by the clock, as some programs turn the interrupt off to run faster.</summary>
+    private static IEnumerable<long> Sixtieths(MagPlay.C64.C64 computer, long until)
+    {
+        int frame = C64SongLength.BasicFrame(computer.Machine);
+        for (long cycle = C64SongLength.BasicStart(computer); cycle < until; cycle += frame)
+            yield return cycle;
     }
 
     /// <summary>Where each burst of writes starts: a write after a gap of <see cref="BurstGap"/>.</summary>

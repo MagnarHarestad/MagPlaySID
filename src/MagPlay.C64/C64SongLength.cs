@@ -43,6 +43,8 @@ public static class C64SongLength
     /// measured and recorded in one run. It is left where the loop was found.</summary>
     public static SidSongLength.Result? Measure(SidTune tune, double maxSeconds = MaxSeconds)
     {
+        if (tune.File.IsBasic)
+            return MeasureBasic(tune, maxSeconds);
         var file = tune.File;
         var computer = tune.Computer;
         var pages = new bool[256];
@@ -118,6 +120,149 @@ public static class C64SongLength
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// A BASIC tune's length: the same reasoning, but its memory looked at as each statement starts,
+    /// where a loop of the program comes round - an interrupt finds BASIC somewhere else each time. The
+    /// memory that counts is as for any tune, with the stack in use, where BASIC keeps its FOR loops
+    /// and GOSUBs - and without the jiffy clock, which never repeats, unless the program reads TI: a
+    /// program that waits for the clock is in the same state while it waits. Timed in sixtieths of a
+    /// second - the KERNAL's interrupt's, which a BASIC tune's rows are framed by too, see
+    /// <see cref="BasicFrame"/> - by the clock, as some programs turn the interrupt off to run faster.
+    /// </summary>
+    private static SidSongLength.Result? MeasureBasic(SidTune tune, double maxSeconds)
+    {
+        var file = tune.File;
+        var computer = tune.Computer;
+        var ram = computer.Ram;
+        var pages = new bool[256];
+        pages[0] = true;
+        for (int page = file.LoadAddress >> 8; page <= Math.Min(0xFF, (file.LoadAddress + file.Data.Length - 1) >> 8); page++)
+            pages[page] = true;
+        pages[1] = false;
+
+        var seen = new Dictionary<ulong, int>();
+        SidSongLength.Result? found = null;
+        double clock = Machines.ClockHz(computer.Machine);
+        bool readsClock = ReadsClock(file);
+        int frame = BasicFrame(computer.Machine);
+        double rate = clock / frame;
+        int Frames(long cycle) => (int)(Math.Max(0, cycle - BasicStart(computer)) / frame);
+        long lastQuiet = 0;
+        bool heard = false;
+        void Quiet()
+        {
+            if (found is not null || computer.Cycle - lastQuiet < frame)
+                return;
+            lastQuiet = computer.Cycle;
+            // Quiet only after it has been heard: many a program sets the chip up and then reads its
+            // DATA in silence for longer than a pause could be.
+            var since = computer.QuietSince();
+            heard |= since is null;
+            if (heard && since is { } quiet && (computer.Cycle - quiet) / clock >= QuietEnd)
+            {
+                int ended = Frames(quiet);
+                found = new SidSongLength.Result(ended, ended, rate, EndsQuiet: true);
+            }
+        }
+        void Watch()
+        {
+            Quiet();
+            if (found is not null)
+                return;
+
+            bool grew = false;
+            for (int page = 2; page < 256; page++)
+            {
+                if (!pages[page] && computer.PageWritten(page))
+                    pages[page] = grew = true;
+            }
+            if (grew)
+                seen.Clear();
+
+            // The clock out, the stack in use in.
+            byte t0 = ram[0xA0], t1 = ram[0xA1], t2 = ram[0xA2];
+            if (!readsClock)
+                ram[0xA0] = ram[0xA1] = ram[0xA2] = 0;
+            ulong hash = Hash(ram, pages);
+            (ram[0xA0], ram[0xA1], ram[0xA2]) = (t0, t1, t2);
+            int sp = computer.Cpu.SP & 0xFF;
+            hash = Merge(hash, (ulong)sp);
+            for (int at = 0x100 + sp + 1; at < 0x200; at++)
+                hash = Merge(hash, ram[at]);
+
+            // A state again within a second is a program waiting - for the clock, the beam, a key -
+            // not its music coming round; one it is still in a second on, that waits for ever.
+            if (seen.TryGetValue(hash, out int first))
+            {
+                if (Frames(computer.Cycle) - first >= rate)
+                    found = new SidSongLength.Result(Frames(computer.Cycle), first, rate);
+                return;
+            }
+            seen[hash] = Frames(computer.Cycle);
+        }
+
+        long end = (long)(maxSeconds * clock);
+        computer.Watch = BasicRoms.NextStatement;
+        computer.Reached += Watch;
+        computer.CallStarting += Quiet;
+        try
+        {
+            while (found is null && computer.Cycle < end)
+            {
+                if (!tune.RunUnlessHalted(Slice))
+                    return Halted(tune);
+            }
+        }
+        catch (SidPlaybackException)
+        {
+            return null;
+        }
+        finally
+        {
+            computer.Reached -= Watch;
+            computer.CallStarting -= Quiet;
+            computer.Watch = -1;
+        }
+        return found;
+    }
+
+    /// <summary>The cycles of a BASIC tune's frame: the KERNAL's interrupt's, sixty times a second.</summary>
+    public static int BasicFrame(Machine machine) => SidTune.KernalTimer(machine) + 1;
+
+    /// <summary>Where a BASIC tune's frames start: its first interrupt, where it is first heard from.</summary>
+    public static long BasicStart(C64 computer) => computer.Calls.Count > 0 ? computer.Calls[0] : 0;
+
+    /// <summary>Whether a BASIC program reads the jiffy clock: TI or TI$ outside quotes and REMs, or a
+    /// PEEK of 160 to 162.</summary>
+    private static bool ReadsClock(SidFile file)
+    {
+        var text = file.Data;
+        bool quoted = false, rem = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            byte b = text[i];
+            if (b == 0)
+            {
+                quoted = rem = false;
+                i += 4;     // the next line's link and number
+                continue;
+            }
+            if (rem)
+                continue;
+            if (b == 0x22)
+                quoted = !quoted;
+            else if (quoted)
+                continue;
+            else if (b == 0x8F)
+                rem = true;
+            else if (b == 'T' && i + 1 < text.Length && text[i + 1] == 'I' && (i == 0 || !char.IsLetterOrDigit((char)text[i - 1])))
+                return true;
+            else if (b == 0xC2 && i + 4 < text.Length && text[i + 1] == '(' && text[i + 2] == '1' && text[i + 3] == '6' && text[i + 4] is (byte)'0' or (byte)'1' or (byte)'2')
+                return true;
+        }
+        return false;
     }
 
     /// <summary>The length of a tune that has halted the CPU: it ended there, as Warlock's do - Cat

@@ -14,4 +14,11 @@
     <ProjectReference Include="..\MagPlay.Score\MagPlay.Score.csproj" />
   </ItemGroup>
 
+  <!-- BASIC tunes: Microsoft's 6502 BASIC as the C64's, and the KERNAL routines it uses - built
+       by Basic/build_roms.py, see Basic/README.md. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Basic\Basic.bin" LogicalName="MagPlay.C64.Basic.bin" />
+    <EmbeddedResource Include="Basic\BasicKernal.bin" LogicalName="MagPlay.C64.BasicKernal.bin" />
+  </ItemGroup>
+
 </Project>
