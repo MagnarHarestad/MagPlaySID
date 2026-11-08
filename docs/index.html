@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MagPlaySID - plays any C64 .sid and shows how it is built</title>
-<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text or sheet music, or its sound as WAV, FLAC or MP3.">
+<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text or sheet music, or its sound as WAV, FLAC or MP3. Plays Amiga ProTracker modules too.">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css?v=2">
 </head>
@@ -15,19 +15,19 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.35</span></h1>
-    <p class="released">Release date: <time id="released" datetime="2026-11-06">2026-11-06</time></p>
+    <h1>MagPlaySID <span id="version">v1.36</span></h1>
+    <p class="released">Release date: <time id="released" datetime="2026-11-08">2026-11-08</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
       in rows that scroll with the music. Drop a whole folder and it becomes a playlist; keep the tunes
-      you love in playlists of your own.</p>
+      you love in playlists of your own. Amiga ProTracker modules play too, shown as ProTracker shows them.</p>
     <div class="download">
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also">Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.35/MagPlaySID-1.35-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.35/MagPlaySID-1.35-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.35/MagPlaySID-1.35-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.36/MagPlaySID-1.36-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.36/MagPlaySID-1.36-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.36/MagPlaySID-1.36-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -41,9 +41,10 @@
   <h2 id="features">What it does</h2>
   <p class="lead">Any tune, played as the C64 plays it, and read back as a score.</p>
   <div class="grid">
-    <div class="card"><div class="i">💾</div><h3>Any .sid</h3><p>PSID and RSID, PAL and NTSC, played on the raster or a CIA timer, once a frame or many times. The tune's own 6502 code runs on an emulated C64 - its timers, interrupts and memory banking - and every write reaches the SID on the cycle it was made.</p></div>
+    <div class="card"><div class="i">💾</div><h3>Any .sid</h3><p>PSID and RSID, PAL and NTSC, played on the raster or a CIA timer, once a frame or many times - and tunes written in BASIC, run by a BASIC built to the C64's own speed. The tune's own 6502 code runs on an emulated C64 - its timers, interrupts and memory banking - and every write reaches the SID on the cycle it was made.</p></div>
     <div class="card"><div class="i">🔊</div><h3>Digis</h3><p>Samples streamed from an NMI play as they are written, thousands of times a second - the drums and voices of ThcMOD and LMan's tunes, which a player that calls a tune once a frame never hears. A digi gets a scope of its own beside the voices', and a column in the rows marking each sample as it starts.</p></div>
-    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, and the whole tune soon after takes over below what is on screen, so the rows you can see never change - with its length, measured on the C64: the tune's memory coming round again proves it loops, and its notes say how much of that is one pass of the music - even when a player's tempo slips a call from pass to pass or its drums play at random - so the clock says how long it plays before it repeats; for a tune that fades out and plays on in silence, or stops the C64 at its end, when it has gone quiet. Against HVSC's own list of song lengths, it agrees for more than four songs in five.</p></div>
+    <div class="card"><div class="i">🎼</div><h3>Transcribed as you listen</h3><p>The tune becomes a score: notes on its own row grid, instruments with their wave and pulse programs, the filter, patterns and order lists. The first half minute is ready in a moment, and the whole tune soon after takes over below what is on screen, so the rows you can see never change - with its length, measured on the C64: the tune's memory coming round again proves it loops, and its notes say how much of that is one pass of the music - even when a player's tempo slips a call from pass to pass or its drums play at random - so the clock says how long it plays before it repeats; for a tune that fades out and plays on in silence, or stops the C64 at its end, when it has gone quiet. Against HVSC's own list of song lengths, it agrees for more than four songs in five; a song it finds no length for gets HVSC's, and you can set any song's length yourself: right-click it in a playlist and choose <b>Set length...</b>.</p></div>
+    <div class="card"><div class="i">🕹️</div><h3>Amiga modules</h3><p>ProTracker modules - <code>.mod</code> and <code>mod.</code> files, 4 to 32 channels, and the old 15-sample Soundtracker ones - play as an Amiga 500 plays them: ProTracker's effects and timing, Paula's stereo and the A500's filter. You see the module's own patterns as ProTracker shows them, its samples lit as they play, with a scope per channel, the meters and the piano; they sit in playlists beside your <code>.sid</code> tunes.</p></div>
     <div class="card"><div class="i">📜</div><h3>Rows that scroll</h3><p>Each voice's rows - note, instrument, effects - go past as they sound. Click a voice to see its instrument: envelope, hard restart, and the wave, pulse and filter programs, the step sounding lit.</p></div>
     <div class="card"><div class="i">🎹</div><h3>A piano</h3><p>Eight octaves along the bottom, each voice's key lit in its colour as loud as its envelope - an arpeggio, a slide or a drum shows as it plays.</p></div>
     <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice.</p></div>
@@ -67,7 +68,7 @@
   <ol class="steps">
     <li>Download the package for your system from the <a href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">latest release</a>. .NET is inside - there is nothing else to install.</li>
     <li><b>Windows:</b> unzip it anywhere and run <code>MagPlaySID.exe</code>. <b>Linux:</b> unpack it and run <code>./MagPlaySID</code>. <b>Mac:</b> unzip it and move MagPlaySID to Applications.</li>
-    <li>Drop a <code>.sid</code> on the window, or choose <b>Open .sid...</b> - or drop a whole folder to play it as a playlist, or choose <b>Open folder as playlist</b> in the menu. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
+    <li>Drop a <code>.sid</code> on the window, or choose <b>Open tune...</b> - or drop a whole folder to play it as a playlist, or choose <b>Open folder as playlist</b> in the menu. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
     <li>Click a scope to mute its voice; click a voice's rows to see its instrument; click the meter to change it.</li>
     <li>Keep the tunes you like: <b>♥ Add to playlist</b> while one plays - and their notes: <b>Export notes</b> in the menu, as sheet music or text - or their sound: <b>Export sound</b>, as WAV, FLAC or MP3. Keys: Space pauses, ← and → change tune in a playlist, 1-9 pick a song, and F held fast-forwards.</li>
   </ol>
@@ -99,7 +100,8 @@
     <p>The amazing 3D models of the two dancers in the <b>Dire Guys</b> meter are by <b>Grasstust/Hoaxers</b> - thank you!</p>
     <p>It is free software under the <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/LICENSE">GNU General Public License, version 2 or later</a>,
       and comes with no warranty. Its SID emulation is a C# translation of <b>reSID</b> by Dag Lem; sound goes through
-      <b>PortAudio</b>, and the window is <b>Avalonia</b>. See <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/THIRD-PARTY-NOTICES.md">third-party notices</a>.
+      <b>PortAudio</b>, and the window is <b>Avalonia</b>. Tunes written in BASIC run on Microsoft's open-source 6502 BASIC (MIT
+      license), and songs it cannot measure take their length from HVSC's song-length list. See <a href="https://github.com/MagnarHarestad/MagPlaySID/blob/main/THIRD-PARTY-NOTICES.md">third-party notices</a>.
       The tunes belong to their composers - MagPlaySID only plays and reads them.</p>
   </section>
 
@@ -116,7 +118,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.35 stands until
+// The version, the release date and the downloads follow the latest release; v1.36 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
