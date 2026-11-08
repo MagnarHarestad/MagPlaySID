@@ -8,6 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using MagPlay.Amiga;
 using MagPlay.C64;
 using MagPlaySid.Export;
 using MagPlaySid.Player;
@@ -87,7 +88,7 @@ internal sealed class PlayerWindow : Window
     private readonly PianoSynth _pianoSynth = new();
     private IAudioOutput? _pianoOutput;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
-    private readonly bool[] _muted = new bool[9];
+    private readonly bool[] _muted = new bool[32];
     private readonly Settings _settings = Settings.Load();
     private readonly MenuItem _checkForUpdates = new();
     private readonly MenuItem _smallFont = new();
@@ -111,7 +112,15 @@ internal sealed class PlayerWindow : Window
     private readonly PlaylistStrip _strip;
 
     private SidFile? _file;
-    private C64PlaybackEngine? _engine;
+    private ITunePlayback? _engine;
+
+    /// <summary>The Amiga module playing, when it is one rather than a .sid.</summary>
+    private ModFile? _module;
+
+    private readonly ModuleView _moduleView = new();
+
+    /// <summary>A tune is loaded - a .sid or a module.</summary>
+    private bool HasTune => _file is not null || _module is not null;
     private IAudioOutput? _output;
     private SidSongLength.Result? _length;
     private int _song;
@@ -126,6 +135,15 @@ internal sealed class PlayerWindow : Window
     /// <summary>What the tune playing is known by in <see cref="TuneHistory"/>, and whether this
     /// playing of it has been counted.</summary>
     private string? _tuneKey;
+
+    /// <summary>The key HVSC knows the tune by in its lengths - see <see cref="SongLengths"/>.</summary>
+    private string? _hvscKey;
+
+    /// <summary>The song's length as measured, before any the user set or HVSC lists.</summary>
+    private SidSongLength.Result? _measured;
+
+    /// <summary>Measuring the song is over, and its length chosen from what is known.</summary>
+    private bool _lengthsChosen;
     private bool _playCounted;
 
     /// <summary>Seconds of a tune that count as playing it: skipping past one is not.</summary>
@@ -158,6 +176,11 @@ internal sealed class PlayerWindow : Window
 
         _strip = new PlaylistStrip(this) { PlaylistsHeight = _settings.PlaylistsHeight };
         _strip.Play += PlayFromList;
+        _strip.LengthSet += path =>
+        {
+            if (_path is { } playing && Playlist.SamePath(playing, path))
+                ChooseLength();
+        };
         _strip.PlaylistsResized += height =>
         {
             _settings.PlaylistsHeight = height;
@@ -268,7 +291,7 @@ internal sealed class PlayerWindow : Window
         _details.Margin = new Thickness(0, 2, 0, 0);
 
         // Under the tune's name and details, in the player's own colours rather than the theme's.
-        _open.Content = "Open .sid...";
+        _open.Content = "Open tune...";
         _open.Click += (_, _) => _ = OpenAsync();
         _open.HorizontalAlignment = HorizontalAlignment.Left;
         _open.Margin = new Thickness(0, 10, 0, 0);
@@ -336,7 +359,7 @@ internal sealed class PlayerWindow : Window
             Children = { _previous, _elapsed, _playPause, _fastForward, _repeat, _next },
         };
 
-        _empty.Text = "Open a .sid file - or drop one here";
+        _empty.Text = "Open a .sid or an Amiga module - or drop one here";
         _empty.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _empty.HorizontalAlignment = HorizontalAlignment.Center;
         _empty.VerticalAlignment = VerticalAlignment.Center;
@@ -371,7 +394,9 @@ internal sealed class PlayerWindow : Window
         var retro = new DockPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(18, 4, 18, 8) };
         DockPanel.SetDock(_retroStatus, Dock.Top);
         retro.Children.Add(_retroStatus);
-        retro.Children.Add(_view);
+        _moduleView.Width = _moduleView.ContentWidth;
+        _moduleView.IsVisible = false;
+        retro.Children.Add(new Panel { Children = { _view, _moduleView } });
 
         var root = new DockPanel();
         DockPanel.SetDock(_strip, Dock.Left);
@@ -618,6 +643,7 @@ internal sealed class PlayerWindow : Window
         _empty.FontSize = 14 * scale;
         _retroStatus.FontSize = 12 * scale;
         _view.TextScale = scale;
+        _moduleView.TextScale = scale;
         _piano.TextScale = scale;
         foreach (var scope in _scopes)
         {
@@ -667,7 +693,8 @@ internal sealed class PlayerWindow : Window
             _scopes = new VoiceScopeView[voices];
             for (int i = 0; i < voices; i++)
             {
-                var scope = new VoiceScopeView(i, voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null) { TextScale = TextScale };
+                string? name = _module is not null ? $"CH {i + 1}" : voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null;
+                var scope = new VoiceScopeView(i, name) { TextScale = TextScale };
                 scope.MuteToggled += (voice, muted) =>
                 {
                     _muted[voice] = muted;
@@ -694,17 +721,17 @@ internal sealed class PlayerWindow : Window
 
     private void ShowEmpty()
     {
-        bool loaded = _file is not null;
+        bool loaded = HasTune;
         _empty.IsVisible = !loaded;
         _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = _repeat.IsEnabled = loaded;
         // Only with a tune to add: an empty window offers Open alone, not a button that cannot be used.
         _favourite.IsVisible = loaded;
         ShowNextTune();
-        _songRow.IsVisible = loaded && _file!.Songs > 1;
+        _songRow.IsVisible = _file is { Songs: > 1 };
         if (!loaded)
         {
             _title.Text = UpdateCheck.Product;
-            _details.Text = "Plays a .sid and shows it as tracker rows";
+            _details.Text = "Plays a .sid or an Amiga module and shows it as tracker rows";
             _retroStatus.Text = "";
         }
     }
@@ -855,9 +882,9 @@ internal sealed class PlayerWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Open a .sid",
+            Title = "Open a tune",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("SID tunes") { Patterns = ["*.sid"] }, FilePickerFileTypes.All],
+            FileTypeFilter = [new FilePickerFileType("SID tunes and Amiga modules") { Patterns = ["*.sid", "*.mod", "mod.*"] }, FilePickerFileTypes.All],
         });
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
@@ -949,13 +976,13 @@ internal sealed class PlayerWindow : Window
             engine.Paused = true;
             _playPause.Glyph = TransportGlyph.Play;
         }
-        if (_file is not null)
+        if (HasTune)
             ShowEmpty();
     }
 
     /// <summary>Whether the playlist's tune has played: its whole length once - to where it would
     /// start again - or the tune stopped.</summary>
-    private bool TuneEnded(C64PlaybackEngine engine, long at)
+    private bool TuneEnded(ITunePlayback engine, long at)
     {
         if (engine.Failure is not null)
             return true;
@@ -974,6 +1001,8 @@ internal sealed class PlayerWindow : Window
         try
         {
             bytes = File.ReadAllBytes(path);
+            if (IsModule(bytes))
+                return LoadModule(path, bytes, quiet);
             file = SidFile.Parse(bytes);
             if (SidTune.Unsupported(file) is { } reason)
                 throw new SidPlaybackException(reason);
@@ -986,14 +1015,54 @@ internal sealed class PlayerWindow : Window
         }
 
         _file = file;
+        _module = null;
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
+        _hvscKey = SongLengths.KeyOf(bytes);
         _playCounted = false;
         _played = 0;
         _everyFrom = ChosenFirstSong(file, path) ?? 1;
         _song = firstSong ?? (everySong ? _everyFrom : ChosenFirstSong(file, path) ?? OwnFirstSong(file));
         Title = $"{(string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileName(path) : file.Name)} - {UpdateCheck.Product}";
         _title.Text = string.IsNullOrWhiteSpace(file.Name) ? Path.GetFileNameWithoutExtension(path) : file.Name;
+        BuildSongPills();
+        ShowEmpty();
+        Restart();
+        ShowRepeat();
+        return true;
+    }
+
+    /// <summary>Whether a file is an Amiga module: not a .sid, and with a module's tag or shape.</summary>
+    private static bool IsModule(byte[] bytes) =>
+        !(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && ModFile.Looks(bytes);
+
+    /// <summary>An Amiga module, played as a tune of one song: false, and nothing changed, when it
+    /// cannot be read.</summary>
+    private bool LoadModule(string path, byte[] bytes, bool quiet)
+    {
+        ModFile module;
+        try
+        {
+            module = ModFile.Parse(bytes);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IndexOutOfRangeException or ArgumentException)
+        {
+            if (!quiet)
+                _ = MessageWindow.ShowAsync(this, "Cannot play this module", ex.Message);
+            return false;
+        }
+
+        _file = null;
+        _module = module;
+        _path = path;
+        _tuneKey = TuneHistory.KeyOf(bytes);
+        _hvscKey = SongLengths.KeyOf(bytes);
+        _playCounted = false;
+        _played = 0;
+        _everyFrom = _song = 1;
+        string title = string.IsNullOrWhiteSpace(module.Title) ? Path.GetFileNameWithoutExtension(path) : module.Title;
+        Title = $"{title} - {UpdateCheck.Product}";
+        _title.Text = title;
         BuildSongPills();
         ShowEmpty();
         Restart();
@@ -1025,6 +1094,12 @@ internal sealed class PlayerWindow : Window
 
     private string DescribeFile()
     {
+        if (_module is { } module)
+        {
+            int samples = module.Samples.Count(s => s.Data.Length > 2);
+            return string.Join("   ·   ", "Amiga module", module.Format, $"{module.Channels} channels", $"{samples} samples",
+                               $"{module.Patterns.Count} patterns");
+        }
         var file = _file!;
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(file.Author))
@@ -1096,7 +1171,10 @@ internal sealed class PlayerWindow : Window
             scope.Clear();
         _piano.Clear();
         Start(_song);
-        Transcribe(_song);
+        if (_module is { } module)
+            ShowModule(module);
+        else
+            Transcribe(_song);
         RememberPlace();
     }
 
@@ -1104,13 +1182,14 @@ internal sealed class PlayerWindow : Window
     {
         StopPlayback();
         StopPiano();
-        if (_file is not { } file)
+        if (!HasTune)
             return;
 
         try
         {
-            _engine = new C64PlaybackEngine(file, song) { Volume = _volumeKnob.Gain };
-            BuildScopes(3 * _engine.Chips);
+            _engine = _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song));
+            _engine.Volume = _volumeKnob.Gain;
+            BuildScopes(_engine.Voices);
             for (int voice = 0; voice < _scopes.Length; voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
             _output = AudioOutput.Start(_engine, latencyMs: 100);
@@ -1144,8 +1223,32 @@ internal sealed class PlayerWindow : Window
     /// tune can read the same notes otherwise: its rows come in below what is on screen. On a
     /// thread of its own below the others' priority: it is the background's work, and the sound and
     /// the window come first - on the thread pool it held the sound thread back by up to 40 ms.</summary>
+    /// <summary>A module shown as itself - its patterns are its score - and its length, found by
+    /// playing it through to where it comes round, at once; the user's own, when they set one.</summary>
+    private void ShowModule(ModFile module)
+    {
+        _transcribing?.Cancel();
+        _transcription = null;
+        _wholeTranscribed = false;
+        _exportNotes.IsEnabled = _exportSound.IsEnabled = false;
+        _view.IsVisible = false;
+        _moduleView.IsVisible = true;
+        _moduleView.SetModule(module);
+        var measured = ModPlayer.Measure(module);
+        int frames = measured is { } length ? (int)Math.Round(length.TotalSeconds * 50) : 0;
+        _measured = frames > 0 ? new SidSongLength.Result(frames, frames) : null;
+        _length = null;
+        _lengthUnknown = false;
+        _retroStatus.Text = $"The module's own patterns, as ProTracker plays them - {module.Order.Count} position{(module.Order.Count == 1 ? "" : "s")} in its song";
+        _lengthsChosen = true;
+        ChooseLength();
+    }
+
     private void Transcribe(int song)
     {
+        _view.IsVisible = true;
+        _moduleView.IsVisible = false;
+        _moduleView.SetModule(null);
         _transcribing?.Cancel();
         var cancel = new CancellationTokenSource();
         _transcribing = cancel;
@@ -1153,8 +1256,8 @@ internal sealed class PlayerWindow : Window
         _wholeTranscribed = false;
         _exportNotes.IsEnabled = false;
         _exportSound.IsEnabled = false;
-        _length = null;
-        _lengthUnknown = false;
+        _length = _measured = null;
+        _lengthUnknown = _lengthsChosen = false;
         _view.SetScore(null, null);
         _retroStatus.Text = "Transcribing...";
         var file = _file!;
@@ -1185,20 +1288,16 @@ internal sealed class PlayerWindow : Window
                 var (whole, length) = Transcription.Whole(file, song, opening.Rows, cancel.Token);
                 Show(() =>
                 {
-                    (_transcription, _length) = (whole, length);
+                    (_transcription, _measured) = (whole, length);
                     _wholeTranscribed = true;
                     _exportNotes.IsEnabled = true;
                     _exportSound.IsEnabled = true;
-                    _lengthUnknown = length is null;
-                    if (length is not null && _tuneKey is { } key)
-                    {
-                        TuneHistory.Measured(key, song, length.Total);
-                        _strip.Measured(key);
-                    }
                     _view.ContinueWith(whole.Score, whole.Timeline);
                     _view.ShowSamples(whole.Samples);
                     // With no player, the opening knows what the whole run keeps none of: whether it is a digi.
                     _retroStatus.Text = whole.NoPlayer && opening.NoPlayer ? opening.Describe() : whole.Describe();
+                    _lengthsChosen = true;
+                    ChooseLength();
                 });
             }
             catch (OperationCanceledException)
@@ -1206,7 +1305,11 @@ internal sealed class PlayerWindow : Window
             }
             catch (Exception ex)
             {
-                Show(() => _exportSound.IsEnabled = _lengthUnknown = true);
+                Show(() =>
+                {
+                    _exportSound.IsEnabled = _lengthsChosen = true;
+                    ChooseLength();
+                });
                 Show(() => _retroStatus.Text = _transcription is null
                     ? $"No rows to show: {ex.Message}"
                     : $"Only the first {OpeningSeconds} seconds: {ex.Message}");
@@ -1218,6 +1321,38 @@ internal sealed class PlayerWindow : Window
             Name = "Transcription",
         };
         thread.Start();
+    }
+
+    /// <summary>The song's length: the user's own, then the one measured, then HVSC's for a song the
+    /// app cannot measure - kept for the playlist, and said in the status where it was not measured.</summary>
+    private void ChooseLength()
+    {
+        if (!_lengthsChosen || _path is not { } path || _hvscKey is not { } hvsc)
+            return;
+        static SidSongLength.Result Given(TimeSpan length)
+        {
+            int frames = (int)Math.Round(length.TotalSeconds * 50);
+            return new SidSongLength.Result(frames, frames);
+        }
+        string? from = null;
+        if (SongLengths.User(hvsc, path, _song) is { } own)
+            (_length, from) = (Given(own), "the length is the one you set");
+        else if (_measured is not null)
+            _length = _measured;
+        else if (SongLengths.Hvsc(hvsc, _song) is { } listed)
+            (_length, from) = (Given(listed), "the length is HVSC's - it could not be measured");
+        else
+            _length = null;
+        _lengthUnknown = _length is null;
+        if (_length is not null && _tuneKey is { } key)
+        {
+            TuneHistory.Measured(key, _song, _length.Total);
+            _strip.Measured(key);
+        }
+        const string Said = " - the length is ";
+        int said = _retroStatus.Text?.IndexOf(Said, StringComparison.Ordinal) ?? -1;
+        string status = said >= 0 ? _retroStatus.Text![..said] : _retroStatus.Text ?? "";
+        _retroStatus.Text = from is null ? status : $"{status} - {from}";
     }
 
     private void TogglePause()
@@ -1242,7 +1377,7 @@ internal sealed class PlayerWindow : Window
     /// <summary>Next tune on only where there is one: off on the playlist's last - wherever a drag
     /// has put it - and with no playlist.</summary>
     private void ShowNextTune() =>
-        _next.IsEnabled = _file is not null && !_finished
+        _next.IsEnabled = HasTune && !_finished
                           && _queue is { } playlist && _queueTune is { } tune && playlist.After(tune) is not null;
 
     /// <summary>On a tune in the playlist - whatever song of this one plays.</summary>
@@ -1266,7 +1401,7 @@ internal sealed class PlayerWindow : Window
     private void FastForward(bool on)
     {
         bool was = _fastForwarding;
-        _fastForwarding = on && _file is not null;
+        _fastForwarding = on && HasTune;
         if (_fastForwarding && !was)
             _fastForwardHeld.Restart();
         if (_engine is { } engine)
@@ -1388,7 +1523,7 @@ internal sealed class PlayerWindow : Window
         long at = engine.TuneSampleAt(output.SamplesPlayed);
         ShowNextTune();
         if (engine.PlaysDigi)
-            BuildScopes(3 * engine.Chips, digi: true);
+            BuildScopes(engine.Voices, digi: true);
         if (_fastForwarding)
         {
             engine.Speed = FastForwardingSpeed();
@@ -1429,8 +1564,10 @@ internal sealed class PlayerWindow : Window
         _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
         if (_songPills.Children.ElementAtOrDefault(_song - 1) is SongPill playing)
             playing.Progress = _length is { Total.TotalSeconds: > 0 } measured ? position / measured.Total : 0;
-        if (_transcription is not null)
-            _view.SetCycle(engine.CycleAt(position.TotalSeconds * C64PlaybackEngine.SampleRate));
+        if (engine is C64Tune c64 && _transcription is not null)
+            _view.SetCycle(c64.Engine.CycleAt(position.TotalSeconds * C64PlaybackEngine.SampleRate));
+        else if (engine is ModuleTune module)
+            _moduleView.Show(module, at);
         if (engine.Failure is { } failure && !_details.Text!.StartsWith("The tune stopped", StringComparison.Ordinal))
             _details.Text = $"The tune stopped: {failure}";
     }

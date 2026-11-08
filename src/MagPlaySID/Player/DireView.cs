@@ -31,9 +31,9 @@ internal sealed class DireView : Control
 
     /// <summary>The dance brought to the tune's sample <paramref name="at"/>: every note started
     /// since the last update, a move or a beat.</summary>
-    public void Update(C64PlaybackEngine engine, long at)
+    public void Update(ITunePlayback engine, long at)
     {
-        int voices = Math.Min(9, 3 * engine.Chips);
+        int voices = Math.Min(9, engine.Voices);
         Span<(int Voice, int Envelope)> started = stackalloc (int, int)[9];
         int count = 0;
         int low = -1, high = -1;

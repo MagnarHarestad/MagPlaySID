@@ -22,10 +22,12 @@
     <EmbeddedResource Include="MagPlaySID.ico" />
     <!-- The Dire Guys meter's two dancers, exported from 3d-objects/DireGuys_new.blend. -->
     <EmbeddedResource Include="Player\DireGuys.bin" LogicalName="DireGuys.bin" />
+    <EmbeddedResource Include="HvscLengths.json" LogicalName="HvscLengths.json" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\MagSid.Playback\MagSid.Playback.csproj" />
+    <ProjectReference Include="..\MagPlay.Amiga\MagPlay.Amiga.csproj" />
     <ProjectReference Include="..\MagPlay.Transcribe\MagPlay.Transcribe.csproj" />
     <ProjectReference Include="..\MagSid.Audio.PortAudio\MagSid.Audio.PortAudio.csproj" />
     <PackageReference Include="Avalonia" Version="11.3.20" />

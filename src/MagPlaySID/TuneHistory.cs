@@ -45,6 +45,13 @@ internal static class TuneHistory
         Save();
     }
 
+    /// <summary>A song's length let go, to be measured again when it plays.</summary>
+    public static void Forget(string key, int song)
+    {
+        if (Tunes.TryGetValue(key, out var record) && record.Lengths.Remove(song))
+            Save();
+    }
+
     /// <summary>The tune has played long enough to count.</summary>
     public static void Played(string key)
     {

@@ -14,6 +14,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MagPlaySid.Player;
+using MagSid.Playback;
 
 namespace MagPlaySid;
 
@@ -609,7 +610,7 @@ internal sealed class PlaylistStrip : Border
             var add = new MenuItem { Header = "Add to playlist" };
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
-            var items = new List<Control> { add };
+            var items = new List<Control> { add, Item("Set length...", () => _ = SetLengthAsync(tune)) };
             if (Shown is { } playlist)
                 items.Add(Item("Remove from playlist", () => Remove(playlist, tune)));
             OpenMenu(row, items);
@@ -867,6 +868,44 @@ internal sealed class PlaylistStrip : Border
     {
         Favourites.SetRepeat(path, times);
         Favourites.Save(_favourites);
+    }
+
+    /// <summary>A song's length set by hand, from a tune's right-click: kept in songlengths.json, and
+    /// shown and played to at once - its tune's path.</summary>
+    public event Action<string>? LengthSet;
+
+    private async Task SetLengthAsync(PlaylistTune tune)
+    {
+        byte[] bytes;
+        SidFile? file;
+        try
+        {
+            bytes = await File.ReadAllBytesAsync(tune.Path);
+            file = bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D' ? SidFile.Parse(bytes) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SidPlaybackException)
+        {
+            return;
+        }
+        if (TopLevel.GetTopLevel(this) is not Window owner)
+            return;
+        string key = SongLengths.KeyOf(bytes), history = TuneHistory.KeyOf(bytes);
+        string name = string.IsNullOrWhiteSpace(file?.Author) ? tune.Title : $"{tune.Title} by {file.Author.Trim()}";
+        (TimeSpan? Length, bool Own) LengthOf(int song) =>
+            SongLengths.User(key, tune.Path, song) is { } own ? (own, true)
+            : (TuneHistory.Of(history)?.Lengths.TryGetValue(song, out double seconds) == true ? TimeSpan.FromSeconds(seconds)
+               : SongLengths.Hvsc(key, song), false);
+
+        int first = Favourites.FirstSong(tune.Path) ?? file?.StartSong ?? 1;
+        if (await LengthWindow.AskAsync(owner, name, Math.Max(1, file?.Songs ?? 1), first, LengthOf) is not { } chosen)
+            return;
+        SongLengths.SetUser(key, tune.Path, name, chosen.Song, chosen.Length);
+        if (chosen.Length is { } length)
+            TuneHistory.Measured(history, chosen.Song, length);
+        else
+            TuneHistory.Forget(history, chosen.Song);
+        Measured(history);
+        LengthSet?.Invoke(tune.Path);
     }
 
     /// <summary>A tune's length measured: shown wherever the tune is listed.</summary>

@@ -173,10 +173,10 @@ internal sealed class PianoView : Control
     }
 
     /// <summary>The keys the voices are on at sample <paramref name="at"/>; a muted voice lights none.</summary>
-    public void Update(C64PlaybackEngine engine, long at, IReadOnlyList<bool> muted)
+    public void Update(ITunePlayback engine, long at, IReadOnlyList<bool> muted)
     {
         Array.Clear(_next);
-        for (int voice = 0; voice < 3 * engine.Chips; voice++)
+        for (int voice = 0; voice < Math.Min(engine.Voices, muted.Count); voice++)
         {
             if (muted[voice])
                 continue;

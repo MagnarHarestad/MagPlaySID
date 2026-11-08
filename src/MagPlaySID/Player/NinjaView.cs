@@ -38,9 +38,9 @@ internal sealed class NinjaView : Control
 
     /// <summary>The fight brought to the tune's sample <paramref name="at"/>: the move of the loudest
     /// note started since the last update.</summary>
-    public void Update(C64PlaybackEngine engine, long at)
+    public void Update(ITunePlayback engine, long at)
     {
-        int voices = Math.Min(9, 3 * engine.Chips);
+        int voices = Math.Min(9, engine.Voices);
         int chosen = -1, loudest = -1;
         int low = -1, high = -1;
         for (int v = 0; v < voices; v++)

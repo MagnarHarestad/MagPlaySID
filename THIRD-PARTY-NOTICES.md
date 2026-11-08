@@ -64,3 +64,43 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+## Microsoft BASIC for 6502
+
+`src/MagPlay.C64/Basic/m6502.asm` is Microsoft's source of its 6502 BASIC, version 1.1 (1978), as
+Microsoft published it at https://github.com/microsoft/BASIC-M6502. MagPlaySID builds it, with
+changes of its own (`patches.py`, `tail.mac`, `glue.mac`), into the BASIC ROM its emulated C64 runs
+BASIC tunes with (`Basic.bin`, `BasicKernal.bin`). The KERNAL routines beside it (`kernal.mac`) are
+MagPlaySID's own.
+
+```
+MIT License 
+
+    Copyright (c) Microsoft Corporation.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE
+```
+
+## High Voltage SID Collection song lengths
+
+`src/MagPlaySID/HvscLengths.json` holds lengths from the High Voltage SID Collection's own list of
+song lengths (`Songlengths.md5`, https://www.hvsc.c64.org/), for the songs whose length
+MagPlaySID cannot measure itself - music played at random, or timed by the clock - by HVSC's key
+for each tune. MagPlaySID measures every song first, and uses these only when measuring finds no
+length. Thanks to the HVSC crew for the collection and its lengths.

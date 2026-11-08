@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Amiga music: ProTracker modules - and the Soundtracker and multichannel ones before and
+       beside them - read and played as an Amiga's Paula plays them. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MagPlay.Amiga</RootNamespace>
+  </PropertyGroup>
+
+</Project>

@@ -101,12 +101,18 @@ internal sealed class PlaylistTune : Observable
         try
         {
             byte[] bytes = File.ReadAllBytes(Path);
+            if (!(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && MagPlay.Amiga.ModFile.Looks(bytes))
+            {
+                var module = MagPlay.Amiga.ModFile.Parse(bytes);
+                string name = string.IsNullOrWhiteSpace(module.Title) ? System.IO.Path.GetFileNameWithoutExtension(Path) : module.Title.Trim();
+                return new TuneHeader(name, "", 1, "", TuneHistory.KeyOf(bytes), File.GetLastWriteTimeUtc(Path));
+            }
             var file = SidFile.Parse(bytes);
             string title = string.IsNullOrWhiteSpace(file.Name) ? System.IO.Path.GetFileNameWithoutExtension(Path) : file.Name.Trim();
             return new TuneHeader(title, file.Author?.Trim() ?? "", Math.Max(1, file.Songs), file.Released?.Trim() ?? "",
                                   TuneHistory.KeyOf(bytes), File.GetLastWriteTimeUtc(Path));
         }
-        catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is SidPlaybackException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
             return null;
         }
@@ -278,8 +284,18 @@ internal sealed class Playlist : Observable
             Tunes[i].Number = i + 1;
     }
 
-    /// <summary>Every .sid under the folders and the files dropped, folders searched to the bottom:
-    /// a folder's own tunes by name, then its folders' the same way - an album before its extras.</summary>
+    /// <summary>Whether a file is a tune by its name: a .sid, or an Amiga module - name.mod, or
+    /// mod.name as the Amiga named them.</summary>
+    public static bool IsTuneName(string path)
+    {
+        string name = Path.GetFileName(path);
+        return name.EndsWith(".sid", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".mod", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("mod.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Every tune under the folders and the files dropped - .sid files and Amiga modules -
+    /// folders searched to the bottom: a folder's own tunes by name, then its folders' the same way -
+    /// an album before its extras.</summary>
     public static List<string> FindTunes(IEnumerable<string> dropped)
     {
         var options = new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive, IgnoreInaccessible = true };
@@ -287,7 +303,7 @@ internal sealed class Playlist : Observable
 
         void Walk(string folder)
         {
-            found.AddRange(Directory.EnumerateFiles(folder, "*.sid", options).Order(StringComparer.OrdinalIgnoreCase));
+            found.AddRange(Directory.EnumerateFiles(folder, "*", options).Where(IsTuneName).Order(StringComparer.OrdinalIgnoreCase));
             foreach (var sub in Directory.EnumerateDirectories(folder, "*", options).Order(StringComparer.OrdinalIgnoreCase))
                 Walk(sub);
         }
@@ -296,7 +312,7 @@ internal sealed class Playlist : Observable
         {
             if (Directory.Exists(path))
                 Walk(path);
-            else if (File.Exists(path) && path.EndsWith(".sid", StringComparison.OrdinalIgnoreCase))
+            else if (File.Exists(path) && IsTuneName(path))
                 found.Add(path);
         }
         return found.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
