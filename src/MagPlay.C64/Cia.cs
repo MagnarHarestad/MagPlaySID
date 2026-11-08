@@ -41,7 +41,14 @@ public sealed class Cia
     private bool RunningB => (_controlB & 0x01) != 0;
 
     /// <summary>Timer B counts timer A's underflows rather than cycles.</summary>
-    private bool BCountsA => (_controlB & 0x60) is 0x40 or 0x60;
+    private bool BCountsA => BCountsAIn(_controlB);
+
+    private static bool BCountsAIn(int control) => (control & 0x60) is 0x40 or 0x60;
+
+    /// <summary>The cycles a timer started, or loaded while it runs, takes before it counts: as VICE
+    /// has it, a counter read just after is this much higher - which a tune sees only against the
+    /// raster, through the VIC's stolen cycles.</summary>
+    public static int StartDelay { get; set; } = 3;
 
     /// <summary>The first cycle after the one the timers have run to that an underflow they report
     /// can come on - timer A's, or B's counting cycles or A's underflows - or long.MaxValue when none
@@ -211,11 +218,15 @@ public sealed class Cia
             case 0x0E:
                 if ((value & 0x10) != 0)
                     _counterA = _latchA;
+                if ((value & 0x01) != 0 && (!RunningA || (value & 0x10) != 0))
+                    _counterA += StartDelay;
                 _controlA = value & ~0x10;
                 break;
             case 0x0F:
                 if ((value & 0x10) != 0)
                     _counterB = _latchB;
+                if ((value & 0x01) != 0 && (!RunningB || (value & 0x10) != 0) && !BCountsAIn(value))
+                    _counterB += StartDelay;
                 _controlB = value & ~0x10;
                 break;
         }

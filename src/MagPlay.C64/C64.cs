@@ -233,7 +233,7 @@ public sealed class C64 : IMemoryBus
                 _nmiEdge = Cia2.InterruptSince;
                 Enter(nmi: true);
                 _stepAt = -1;
-                Cpu.Interrupt(nmi: true);
+                TakeInterrupt(nmi: true);
                 continue;
             }
 
@@ -242,7 +242,7 @@ public sealed class C64 : IMemoryBus
             {
                 Enter(nmi: false);
                 _stepAt = -1;
-                Cpu.Interrupt(nmi: false);
+                TakeInterrupt(nmi: false);
                 _maskedBefore = true;
                 continue;
             }
@@ -258,9 +258,21 @@ public sealed class C64 : IMemoryBus
                 _stepContext = Context();
             }
             long started = Cpu.Cycles;
+            _instructionStart = started;
             Cpu.Step();
-            if (Vic.StealsCycles)
-                Cpu.Idle(Vic.Stolen(started, Cpu.Cycles, WritesLast[Cpu.Opcode]));
+            if (Vic.MayStall)
+            {
+                // JSR pushes its return in its 4th and 5th cycles, BRK its return and status in
+                // the 3rd to 5th; anything else writes last, if at all.
+                int length = (int)(Cpu.Cycles - started);
+                var (writesFrom, writesTo) = Cpu.Opcode switch
+                {
+                    0x20 => (3, 5),
+                    0x00 => (2, 5),
+                    _ => (length - WritesLast[Cpu.Opcode], length),
+                };
+                Cpu.Idle(Vic.Stolen(started, Cpu.Cycles, writesFrom, writesTo));
+            }
             if (Cpu.Opcode == 0x40)
                 Unwind();
         }
@@ -307,19 +319,34 @@ public sealed class C64 : IMemoryBus
         };
     }
 
-    /// <summary>How many of each instruction's last cycles are writes, which a bad line does not stop:
-    /// a store's one, a read-modify-write's two, a push's one.</summary>
+    /// <summary>How many of each instruction's last cycles are writes, which the VIC does not stop:
+    /// a store's one, a read-modify-write's two, a push's one - the undocumented ones' too.</summary>
     private static readonly int[] WritesLast = BuildWritesLast();
 
     private static int[] BuildWritesLast()
     {
         var w = new int[256];
-        foreach (int op in new[] { 0x81, 0x84, 0x85, 0x86, 0x8C, 0x8D, 0x8E, 0x91, 0x94, 0x95, 0x96, 0x99, 0x9D, 0x48, 0x08 })
+        foreach (int op in new[] { 0x81, 0x84, 0x85, 0x86, 0x8C, 0x8D, 0x8E, 0x91, 0x94, 0x95, 0x96, 0x99, 0x9D, 0x48, 0x08,
+                                   0x83, 0x87, 0x8F, 0x97, 0x93, 0x9B, 0x9C, 0x9E, 0x9F })
             w[op] = 1;
         foreach (int op in new[] { 0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x36, 0x3E, 0x46, 0x4E, 0x56, 0x5E, 0x66, 0x6E, 0x76, 0x7E,
-                                   0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE })
+                                   0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE,
+                                   0x03, 0x07, 0x0F, 0x13, 0x17, 0x1B, 0x1F, 0x23, 0x27, 0x2F, 0x33, 0x37, 0x3B, 0x3F,
+                                   0x43, 0x47, 0x4F, 0x53, 0x57, 0x5B, 0x5F, 0x63, 0x67, 0x6F, 0x73, 0x77, 0x7B, 0x7F,
+                                   0xC3, 0xC7, 0xCF, 0xD3, 0xD7, 0xDB, 0xDF, 0xE3, 0xE7, 0xEF, 0xF3, 0xF7, 0xFB, 0xFF })
             w[op] = 2;
         return w;
+    }
+
+    /// <summary>The CPU takes an interrupt: two reads, its return and status pushed, the vector read -
+    /// the reads waiting for the VIC as an instruction's do.</summary>
+    private void TakeInterrupt(bool nmi)
+    {
+        long started = Cpu.Cycles;
+        _instructionStart = -1;
+        Cpu.Interrupt(nmi);
+        if (Vic.MayStall)
+            Cpu.Idle(Vic.Stolen(started, Cpu.Cycles, 2, 5));
     }
 
     /// <summary>An interrupt about to be taken: a call when it is an IRQ and none is being run.</summary>
@@ -442,9 +469,29 @@ public sealed class C64 : IMemoryBus
         _writtenPages[address >> 8] = true;
     }
 
+    /// <summary>Where the instruction being run started, for the cycle its I/O lands on.</summary>
+    private long _instructionStart = -1;
+
+    /// <summary>The cycle the I/O access being made lands on: the CPU's, plus what the VIC has kept it
+    /// waiting so far in the instruction - a read waits out a bad line or a sprite's fetch, and the
+    /// register is read when it is over, not before.</summary>
+    private long _io;
+
+    private long IoCycle(bool write)
+    {
+        long at = Cpu.AccessCycle;
+        if (!Vic.MayStall || _instructionStart < 0 || at < _instructionStart)
+            return at;
+        int index = (int)(at - _instructionStart);
+        // A write is the access itself - and a read-modify-write's write follows a write too.
+        int writesFrom = write ? index - (WritesLast[Cpu.Opcode] == 2 ? 1 : 0) : index + 1;
+        return at + Vic.Stolen(_instructionStart, at + 1, writesFrom, index + 1);
+    }
+
     private byte ReadIo(int address)
     {
-        Sync(Cpu.AccessCycle);
+        _io = IoCycle(write: false);
+        Sync(_io);
         _nextEvent = 0;
         return address switch
         {
@@ -460,7 +507,8 @@ public sealed class C64 : IMemoryBus
 
     private void WriteIo(int address, int value)
     {
-        Sync(Cpu.AccessCycle);
+        _io = IoCycle(write: true);
+        Sync(_io);
         _nextEvent = 0;
         switch (address)
         {
@@ -468,11 +516,11 @@ public sealed class C64 : IMemoryBus
             case var _ when ExtraSid(address) is >= 0 and var chip:
                 if ((address & 0x1F) > 0x18)
                     break;
-                _chip?.Write(Cpu.AccessCycle, chip + 1, address & 0x1F, value);
-                _quiet[chip + 1].Write(Cpu.AccessCycle, address & 0x1F, value);
+                _chip?.Write(_io, chip + 1, address & 0x1F, value);
+                _quiet[chip + 1].Write(_io, address & 0x1F, value);
                 if (_record && Context() is var extra && Keep?.Invoke(extra) != false)
                 {
-                    _extraSidWrites[chip].Add(new TimedWrite(Cpu.AccessCycle, address & 0x1F, value));
+                    _extraSidWrites[chip].Add(new TimedWrite(_io, address & 0x1F, value));
                     _extraSidWriteContexts[chip].Add(extra);
                 }
                 break;
@@ -501,14 +549,14 @@ public sealed class C64 : IMemoryBus
             return;
 
         _sidRegisters[register] = (byte)value;
-        _chip?.Write(Cpu.AccessCycle, 0, register, value);
-        _quiet[0].Write(Cpu.AccessCycle, register, value);
+        _chip?.Write(_io, 0, register, value);
+        _quiet[0].Write(_io, register, value);
         if (!_record)
             return;
 
         if (_sid is not null)
         {
-            ClockSidTo(Cpu.AccessCycle);
+            ClockSidTo(_io);
             _sid.Write(register, value);
         }
 
@@ -518,7 +566,7 @@ public sealed class C64 : IMemoryBus
             VolumeWritesOutsideCalls++;
         if (Keep?.Invoke(context) == false)
             return;
-        _sidWrites.Add(new TimedWrite(Cpu.AccessCycle, register, value));
+        _sidWrites.Add(new TimedWrite(_io, register, value));
         _sidWriteContexts.Add(context);
     }
 
@@ -532,11 +580,11 @@ public sealed class C64 : IMemoryBus
             case 0x1B:
             case 0x1C:
                 if (_chip is not null)
-                    return _chip.Read(Cpu.AccessCycle, chip, register);
+                    return _chip.Read(_io, chip, register);
                 if (chip > 0)
                     return 0;
                 EnsureSid();
-                ClockSidTo(Cpu.AccessCycle);
+                ClockSidTo(_io);
                 return (byte)_sid!.Read(register);
             default:
                 return 0;
