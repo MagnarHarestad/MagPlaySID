@@ -15,14 +15,29 @@ namespace MagSid.Audio.PortAudio;
 /// PortAudio asks for samples from its own thread, the way waveOut does: the callback reads the
 /// provider for exactly what the device wants. Paused, it hands the device silence without reading,
 /// so the engine stands still - the same as pausing waveOut.
+///
+/// It follows the system's own output: when the default device changes - headphones chosen in
+/// place of the speakers, or the speakers unplugged - every stream is closed, PortAudio started
+/// again so it knows the devices as they are now, and the streams opened on the new default, each
+/// going on from where it was. See <see cref="DefaultDeviceWatcher"/>.
 /// </summary>
 public sealed class PortAudioOutput : IAudioOutput
 {
     private static readonly object InitLock = new();
     private static bool _initialized;
 
+    /// <summary>The outputs open now: all of them closed and opened again when the device changes,
+    /// as PortAudio can only learn of new devices with no stream open.</summary>
+    private static readonly List<PortAudioOutput> Outputs = [];
+
     private readonly IWaveProvider _source;
-    private readonly PortAudioSharp.Stream _stream;
+    private readonly int _latencyMs;
+    private PortAudioSharp.Stream _stream;
+
+    /// <summary>Set while the stream is closed to move to another device: its end is not the
+    /// output stopping.</summary>
+    private volatile bool _moving;
+    private bool _disposed;
 
     // Held for the stream's lifetime: PortAudio keeps only a native pointer to it, and a collected
     // delegate is a crash on the audio thread.
@@ -53,8 +68,24 @@ public sealed class PortAudioOutput : IAudioOutput
         if (format.Encoding != WaveFormatEncoding.Pcm || format.BitsPerSample != 16)
             throw new ArgumentException("PortAudioOutput plays 16-bit PCM.", nameof(source));
 
-        EnsureInitialized();
+        _source = source;
+        _latencyMs = latencyMs;
+        _blockAlign = format.BlockAlign;
+        _sampleRate = format.SampleRate;
+        _callback = Render;
+        lock (InitLock)
+        {
+            EnsureInitialized();
+            _stream = OpenStream();
+            Outputs.Add(this);
+        }
+    }
 
+    public static IAudioOutput Open(IWaveProvider source, int latencyMs) => new PortAudioOutput(source, latencyMs);
+
+    /// <summary>A stream on the default output device as PortAudio knows it now.</summary>
+    private PortAudioSharp.Stream OpenStream()
+    {
         int device = Pa.DefaultOutputDevice;
         if (device == Pa.NoDevice)
             throw new InvalidOperationException("There is no audio output device.");
@@ -63,22 +94,20 @@ public sealed class PortAudioOutput : IAudioOutput
         var parameters = new StreamParameters
         {
             device = device,
-            channelCount = format.Channels,
+            channelCount = _source.WaveFormat.Channels,
             sampleFormat = SampleFormat.Int16,
-            suggestedLatency = Math.Max(info.defaultLowOutputLatency, latencyMs / 1000.0),
+            suggestedLatency = Math.Max(info.defaultLowOutputLatency, _latencyMs / 1000.0),
             hostApiSpecificStreamInfo = IntPtr.Zero,
         };
-
-        _source = source;
-        _blockAlign = format.BlockAlign;
-        _sampleRate = format.SampleRate;
-        _callback = Render;
-        _stream = new PortAudioSharp.Stream(null, parameters, format.SampleRate,
+        var stream = new PortAudioSharp.Stream(null, parameters, _sampleRate,
             Pa.FramesPerBufferUnspecified, StreamFlags.ClipOff, _callback, null!);
-        _stream.SetFinishedCallback(_ => Stopped?.Invoke(_failure));
+        stream.SetFinishedCallback(_ =>
+        {
+            if (!_moving)
+                Stopped?.Invoke(_failure);
+        });
+        return stream;
     }
-
-    public static IAudioOutput Open(IWaveProvider source, int latencyMs) => new PortAudioOutput(source, latencyMs);
 
     private static void EnsureInitialized()
     {
@@ -88,31 +117,101 @@ public sealed class PortAudioOutput : IAudioOutput
                 return;
 
             Pa.Initialize();
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => Pa.Terminate();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+            {
+                lock (InitLock)
+                    Pa.Terminate();
+            };
             _initialized = true;
+            DefaultDeviceWatcher.Start(MoveToDefaultDevice);
         }
     }
 
+    /// <summary>Called when the system's default output changes: every stream closed, PortAudio
+    /// started again to know the devices as they are now, and every stream opened on the new
+    /// default and started again if it was playing. One that cannot be opened there stays closed
+    /// until the device changes again.</summary>
+    public static void MoveToDefaultDevice()
+    {
+        lock (InitLock)
+        {
+            if (!_initialized)
+                return;
+            var outputs = Outputs.ToArray();
+            var playing = new bool[outputs.Length];
+            for (int i = 0; i < outputs.Length; i++)
+            {
+                var output = outputs[i];
+                output._moving = true;
+                playing[i] = output._started;
+                try
+                {
+                    if (output._started)
+                        output._stream.Stop();
+                }
+                catch (PortAudioException)
+                {
+                }
+                output._stream.Dispose();
+                output._started = false;
+            }
+
+            Pa.Terminate();
+            Pa.Initialize();
+
+            for (int i = 0; i < outputs.Length; i++)
+            {
+                var output = outputs[i];
+                try
+                {
+                    output._stream = output.OpenStream();
+                    if (playing[i])
+                    {
+                        output._stream.Start();
+                        output._started = true;
+                    }
+                }
+                catch (Exception ex) when (ex is PortAudioException or InvalidOperationException)
+                {
+                    // No device to play on: it waits, closed, for the next change.
+                    output._stream = null!;
+                    Trace.WriteLine($"MagPlaySID: cannot open the new output device: {ex.Message}");
+                }
+                output._moving = false;
+            }
+            Moved?.Invoke();
+        }
+    }
+
+    /// <summary>The streams have moved to another device - for tests, and anyone who wants to know.</summary>
+    public static event Action? Moved;
+
     public void Play()
     {
-        _paused = false;
-        if (_started)
-            return;
+        lock (InitLock)
+        {
+            _paused = false;
+            if (_started || _stream is null)
+                return;
 
-        _stream.Start();
-        _started = true;
+            _stream.Start();
+            _started = true;
+        }
     }
 
     public void Pause() => _paused = true;
 
     public void Stop()
     {
-        _paused = true;
-        if (!_started)
-            return;
+        lock (InitLock)
+        {
+            _paused = true;
+            if (!_started || _stream is null)
+                return;
 
-        _stream.Stop();
-        _started = false;
+            _stream.Stop();
+            _started = false;
+        }
     }
 
     public bool IsPlaying => _started && !_paused;
@@ -196,15 +295,24 @@ public sealed class PortAudioOutput : IAudioOutput
 
     public void Dispose()
     {
-        try
+        lock (InitLock)
         {
-            if (_started)
-                _stream.Stop();
-        }
-        catch (PortAudioException)
-        {
-        }
+            if (_disposed)
+                return;
+            _disposed = true;
+            Outputs.Remove(this);
+            if (_stream is null)
+                return;
+            try
+            {
+                if (_started)
+                    _stream.Stop();
+            }
+            catch (PortAudioException)
+            {
+            }
 
-        _stream.Dispose();
+            _stream.Dispose();
+        }
     }
 }
