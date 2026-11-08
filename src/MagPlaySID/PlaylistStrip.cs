@@ -35,6 +35,8 @@ internal sealed class PlaylistStrip : Border
     private static readonly Geometry PlayIcon = Geometry.Parse("M0,0 L10,6 L0,12 Z");
     private static readonly Geometry BarsIcon = Geometry.Parse("M0,6 H3 V14 H0 Z M5,0 H8 V14 H5 Z M10,4 H13 V14 H10 Z");
     private static readonly Geometry SortIcon = Geometry.Parse("M0,0 H14 V2 H0 Z M0,5 H10 V7 H0 Z M0,10 H6 V12 H0 Z");
+    private static readonly Geometry InfoIcon = Geometry.Parse(
+        "F0 M8,0 A8,8 0 1 1 7.99,0 Z M8,1.4 A6.6,6.6 0 1 0 8.01,1.4 Z M7.05,3.4 H8.95 V5.3 H7.05 Z M7.05,6.6 H8.95 V12.6 H7.05 Z");
 
     /// <summary>The sorts as the menu offers them, the groups apart; the note says what a sort can
     /// only know of tunes that have been played.</summary>
@@ -580,6 +582,23 @@ internal sealed class PlaylistStrip : Border
         length.Bind(IsVisibleProperty, new Binding(nameof(PlaylistTune.Length)) { Converter = ObjectConverters.IsNotNull });
         var ending = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Children = { length, songs } };
 
+        // What is known about it, in a window of its own - a tap here is not a tap to play it.
+        var info = new Button
+        {
+            Content = Icon(InfoIcon, 14 * _scale, 14 * _scale),
+            Padding = new Thickness(5),
+            Margin = new Thickness(6, 0, -4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTip.SetTip(info, "Info about the file and its songs");
+        Quiet(info);
+        info.Tapped += (_, e) => e.Handled = true;
+        info.Click += (_, _) =>
+        {
+            if (info.DataContext is PlaylistTune tune)
+                _ = ShowInfoAsync(tune);
+        };
+
         var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, author } };
         var grid = new Grid
         {
@@ -590,11 +609,13 @@ internal sealed class PlaylistStrip : Border
                 new ColumnDefinition(30 * _scale, GridUnitType.Pixel),
                 new ColumnDefinition(1, GridUnitType.Star),
                 new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Auto),
             },
-            Children = { number, bars, names, ending },
+            Children = { number, bars, names, ending, info },
         };
         Grid.SetColumn(names, 1);
         Grid.SetColumn(ending, 2);
+        Grid.SetColumn(info, 3);
         var row = new Border { Padding = new Thickness(6, 6, 10, 6), Background = Brushes.Transparent, Child = grid };
 
         row.Tapped += (_, _) =>
@@ -610,7 +631,7 @@ internal sealed class PlaylistStrip : Border
             var add = new MenuItem { Header = "Add to playlist" };
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
-            var items = new List<Control> { add, Item("Set length...", () => _ = SetLengthAsync(tune)) };
+            var items = new List<Control> { Item("Info...", () => _ = ShowInfoAsync(tune)), add, Item("Set length...", () => _ = SetLengthAsync(tune)) };
             if (Shown is { } playlist)
                 items.Add(Item("Remove from playlist", () => Remove(playlist, tune)));
             OpenMenu(row, items);
@@ -868,6 +889,12 @@ internal sealed class PlaylistStrip : Border
     {
         Favourites.SetRepeat(path, times);
         Favourites.Save(_favourites);
+    }
+
+    private async Task ShowInfoAsync(PlaylistTune tune)
+    {
+        if (TopLevel.GetTopLevel(this) is Window owner)
+            await InfoWindow.ShowAsync(owner, tune.Path);
     }
 
     /// <summary>A song's length set by hand, from a tune's right-click: kept in songlengths.json, and
