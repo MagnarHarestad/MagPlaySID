@@ -15,7 +15,7 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.37</span></h1>
+    <h1>MagPlaySID <span id="version">v1.38</span></h1>
     <p class="released">Release date: <time id="released" datetime="2026-11-08">2026-11-08</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
@@ -25,9 +25,9 @@
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also">Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.37/MagPlaySID-1.37-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.37/MagPlaySID-1.37-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.37/MagPlaySID-1.37-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.38/MagPlaySID-1.38-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.38/MagPlaySID-1.38-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.38/MagPlaySID-1.38-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -52,7 +52,7 @@
     <div class="card"><div class="i">📝</div><h3>Sheet music and text</h3><p><b>Export notes</b> saves the song as the rows read it: as <b>sheet music</b>, a PDF with a staff for each voice in bars of 4/4, or as <b>text</b>, each voice's notes and effects with their timing.</p></div>
     <div class="card"><div class="i">💿</div><h3>Save the sound</h3><p><b>Export sound</b> saves the song as <b>WAV</b>, <b>FLAC</b> or <b>MP3</b>, made many times faster than it plays, fading out when it loops and leaving out muted voices. Modules are saved in stereo.</p></div>
     <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code>, a module or a recording onto the window, open one, or name it on the command line. MagPlaySID opens where you left it; Space pauses, and the arrow keys change tune.</p></div>
-    <div class="card"><div class="i">🎶</div><h3>Playlists</h3><p>Drop a folder on the window and it becomes a playlist. Make your own with <b>♥ Add to playlist</b>, drag tunes and playlists to reorder them, and give each playlist's heart its own colour.</p></div>
+    <div class="card"><div class="i">🎶</div><h3>Playlists</h3><p>Drop a folder on the window and it becomes a playlist. Make your own with <b>♥ Add to playlist</b>, drag tunes to reorder them, and click a tune's ⓘ to see all about it - HVSC's notes too.</p></div>
     <div class="card"><div class="i">↕️</div><h3>Sort a playlist</h3><p>Sort by year, title, composer, group, file date, songs, length, recently or most played - or shuffle. Your own order is always there to go back to, and nothing needs measuring first.</p></div>
     <div class="card"><div class="i">🌄</div><h3>Five meters</h3><p>Spectrum bars, a wireframe landscape, neon waves, <b>Last Ninja</b> fighting on a hilltop, or <b>Dire Guys</b> dancing on a mirror ball - every move on the music. Click the meter for the next.</p></div>
     <div class="card"><div class="i">🔢</div><h3>Every song</h3><p>A tune's songs are round buttons: click one or press 1-9. Choose which song plays first, repeat a tune up to ten times or forever, or play every song of it before the next tune.</p></div>
@@ -119,7 +119,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.37 stands until
+// The version, the release date and the downloads follow the latest release; v1.38 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
