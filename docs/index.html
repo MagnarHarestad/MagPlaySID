@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MagPlaySID - plays any C64 .sid and shows how it is built</title>
+<title>MagPlaySID - plays C64 .sid tunes, Amiga modules and recordings, and shows how they are built</title>
 <meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text or sheet music, or its sound as WAV, FLAC or MP3. Plays Amiga ProTracker modules too, and WAV, FLAC and MP3 recordings with their notes heard as they play.">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css?v=2">
@@ -35,7 +35,7 @@
 
   <figure class="shot">
     <img src="screenshots/player.png" width="1180" height="900" alt="MagPlaySID playing MSI-Lost Souls from a favourites playlist: the playlist down the left, the tune's eight songs beside Add to playlist with the third playing, the sound as a wireframe landscape to fly into, a scope per voice, the tune's rows with the selected voice's instrument beside them, and a piano along the bottom">
-    <figcaption>Your favourites as a playlist down the left; a tune's songs as buttons, a ring showing how far the one playing has got; the sound as a landscape to fly into - one of three meters - and a scope per voice; the tracker rows scrolling beside the instrument sounding and its wave, pulse and filter programs; and a piano lighting each voice's key.</figcaption>
+    <figcaption>Your favourites as a playlist down the left; a tune's songs as buttons, a ring showing how far the one playing has got; the sound as a landscape to fly into - one of five meters - and a scope per voice; the tracker rows scrolling beside the instrument sounding and its wave, pulse and filter programs; and a piano lighting each voice's key.</figcaption>
   </figure>
 
   <h2 id="features">What it does</h2>
@@ -69,9 +69,9 @@
   <ol class="steps">
     <li>Download the package for your system from the <a href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">latest release</a>. .NET is inside - there is nothing else to install.</li>
     <li><b>Windows:</b> unzip it anywhere and run <code>MagPlaySID.exe</code>. <b>Linux:</b> unpack it and run <code>./MagPlaySID</code>. <b>Mac:</b> unzip it and move MagPlaySID to Applications.</li>
-    <li>Drop a <code>.sid</code> on the window, or choose <b>Open tune...</b> - or drop a whole folder to play it as a playlist, or choose <b>Open folder as playlist</b> in the menu. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of them.</li>
-    <li>Click a scope to mute its voice; click a voice's rows to see its instrument; click the meter to change it.</li>
-    <li>Keep the tunes you like: <b>♥ Add to playlist</b> while one plays - and their notes: <b>Export notes</b> in the menu, as sheet music or text - or their sound: <b>Export sound</b>, as WAV, FLAC or MP3. Keys: Space pauses, ← and → change tune in a playlist, 1-9 pick a song, and F held fast-forwards. Change your speakers while it plays and the sound follows them.</li>
+    <li>Drop a <code>.sid</code>, an Amiga module or a WAV, FLAC or MP3 on the window, or choose <b>Open tune...</b> - or drop a whole folder to play it as a playlist, or choose <b>Open folder as playlist</b> in the menu. The <a href="https://www.hvsc.c64.org">High Voltage SID Collection</a> has tens of thousands of <code>.sid</code> tunes.</li>
+    <li>Click a scope to mute its voice; click a voice's rows to see its instrument; click the meter to change it; click a tune's ⓘ in a playlist to read all about it.</li>
+    <li>Keep the tunes you like: <b>♥ Add to playlist</b> while one plays - and their notes: <b>Export notes</b> in the menu, as sheet music or text - or their sound: <b>Export sound</b>, as WAV, FLAC or MP3. Keys: Space pauses, ← and → change tune in a playlist, 1-9, + and - pick a song, and F held fast-forwards. Change your speakers while it plays and the sound follows them.</li>
   </ol>
   <div class="note">The Windows exe is not code-signed, so Windows SmartScreen may say it comes from an unknown publisher. Choose <b>More info → Run anyway</b>.</div>
   <div class="note mac" id="mac">
@@ -88,9 +88,10 @@
   <h2 id="how">How it works</h2>
   <p class="lead">The sound is the tune's own; the score is a reading of it, checked against it.</p>
   <div class="grid">
-    <div class="card"><h3>C64 timers and IRQs</h3><p>CIA timers, the raster interrupt, NMIs, banked memory, and a 6510 that makes each memory access on the cycle the real chip does - its throw-away reads included, which some digi players depend on.</p></div>
-    <div class="card"><h3>A score that plays back exactly</h3><p>The transcription is played as it is made, and every register it gets wrong is written as the tune wrote it - so the score always makes the tune's own writes.</p></div>
-    <div class="card"><h3>How much is understood</h3><p>The measure is how much of a tune the score's notes and instruments make, rather than raw register writes: 96.5% of the tunes' register changes, on average.</p></div>
+    <div class="card"><h3>A C64, cycle by cycle</h3><p>CIA timers, the raster interrupt, NMIs, banked memory and the cycles the VIC takes for sprites and the screen, with a 6510 that makes each memory access on the cycle the real chip does.</p></div>
+    <div class="card"><h3>A score that plays back</h3><p>The transcription is played as it is made, and every register it gets wrong is written as the tune wrote it. On average its notes and instruments make 96.5% of a tune's register changes.</p></div>
+    <div class="card"><h3>An Amiga 500</h3><p>ProTracker 2's effects, the CIA's tick timing, Paula's stereo and the A500's filter. Checked against libopenmpt, the lengths agree to the hundredth of a second for 12 of 13 modules tried.</p></div>
+    <div class="card"><h3>A recording's notes</h3><p>Each moment's sound is searched for the harmonics of every key, the strongest notes taken out one by one. On test pieces it scores 62% for notes and their starts, and 80% on piano.</p></div>
   </div>
 
   <section class="legal">
