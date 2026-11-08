@@ -489,18 +489,19 @@ internal sealed class ScoreView : Control
         {
             double y = Y(i);
             var played = rows[i];
-            if (played.Row == 0 && y > HeaderHeight)
-            {
-                var pen = SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(colour, 70));
-                context.DrawLine(pen, new Point(left, y - 1), new Point(left + VoiceWidth, y - 1));
-            }
-
+            // Too close to the row before to be written, it is marked - and gets no pattern's line,
+            // which would cross that row's text: Pirates Blade's first P01.
             if (y - last < RowHeight * TooClose)
             {
                 context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(colour, 120)), new Rect(left - 5, y, 3, 2));
                 continue;
             }
             last = y;
+            if (played.Row == 0 && y > HeaderHeight)
+            {
+                var pen = SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(colour, 70));
+                context.DrawLine(pen, new Point(left, y - 1), new Point(left + VoiceWidth, y - 1));
+            }
 
             bool before = i < _firstOwn[v];
             var row = (before ? _before! : score).PatternNumber(played.Pattern)?.Rows.ElementAtOrDefault(played.Row) ?? Row.Hold;
