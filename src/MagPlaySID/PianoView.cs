@@ -176,7 +176,20 @@ internal sealed class PianoView : Control
     public void Update(ITunePlayback engine, long at, IReadOnlyList<bool> muted)
     {
         Array.Clear(_next);
-        for (int voice = 0; voice < Math.Min(engine.Voices, muted.Count); voice++)
+        if (engine is IPolyphonicTune polyphonic)
+        {
+            // Every note heard at once, coloured by where it lies: the bass, the middle, the top.
+            Span<(int Key, float Strength)> keys = stackalloc (int, float)[32];
+            int count = polyphonic.KeysAt(at, keys);
+            for (int i = 0; i < count; i++)
+            {
+                int key = keys[i].Key;
+                int colour = key < 36 ? 2 : key < 60 ? 1 : 0;
+                if (key is >= 0 and < Keys)
+                    _next[key, colour] = Math.Max(_next[key, colour], Math.Sqrt(keys[i].Strength));
+            }
+        }
+        for (int voice = 0; voice < Math.Min(engine is IPolyphonicTune ? 0 : engine.Voices, muted.Count); voice++)
         {
             if (muted[voice])
                 continue;

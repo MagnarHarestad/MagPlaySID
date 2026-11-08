@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using MagPlay.Amiga;
 using MagPlay.C64;
 using MagSid.Playback;
 
@@ -13,10 +14,10 @@ internal enum SoundFormat
 }
 
 /// <summary>
-/// A song's sound saved to a file: played on its own C64, apart from the one heard, as fast as
-/// this computer goes - for the song's length, faded out over a few seconds after it when it loops
-/// on, with the voices muted that are muted now - and written as WAV, FLAC or MP3, its title,
-/// composer and year in the file's tags.
+/// A song's sound saved to a file: played on its own C64 - or an Amiga module on its own player, in
+/// stereo as wide as it is heard - apart from the one heard, as fast as this computer goes, for the
+/// song's length, faded out over a few seconds after it when it loops on, with the voices muted that
+/// are muted now - and written as WAV, FLAC or MP3, its title, composer and year in the file's tags.
 /// </summary>
 internal static class SoundExport
 {
@@ -48,6 +49,58 @@ internal static class SoundExport
             name = "Tune";
         return file.Songs > 1 ? $"{name} - song {song}" : name;
     }
+
+    /// <summary>What a file of a module is called by default: its title, or else its file's name.</summary>
+    public static string FileName(ModFile module, string path)
+    {
+        string title = string.IsNullOrWhiteSpace(module.Title) ? Path.GetFileNameWithoutExtension(path) : module.Title;
+        string name = string.Concat(title.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)).Trim();
+        return name.Length == 0 ? "Module" : name;
+    }
+
+    /// <summary>A module's samples, 16-bit stereo - left and right in turn - at
+    /// <see cref="ModuleRate"/>, as loud as it plays in the window; <paramref name="progress"/> told
+    /// how far, 0-1, as it goes.</summary>
+    public static short[] Render(ModFile module, TimeSpan length, bool fadeOut, IReadOnlyList<bool> muted, double stereoWidth,
+                                 IProgress<double>? progress = null, CancellationToken cancel = default)
+    {
+        var player = new ModPlayer(module, ModuleRate) { StereoSeparation = stereoWidth };
+        for (int channel = 0; channel < muted.Count; channel++)
+            player.SetMuted(channel, muted[channel]);
+
+        int rate = ModuleRate;
+        int heard = (int)Math.Max(rate, length.TotalSeconds * rate);
+        int fade = fadeOut ? (int)(FadeSeconds * rate) : 0;
+        var samples = new short[(heard + fade) * 2];
+        var left = new float[rate / 10];
+        var right = new float[left.Length];
+        for (int at = 0; at < heard + fade;)
+        {
+            cancel.ThrowIfCancellationRequested();
+            int count = Math.Min(left.Length, heard + fade - at);
+            player.Render(left.AsSpan(0, count), right.AsSpan(0, count));
+            for (int i = 0; i < count; i++)
+            {
+                double gain = 1;
+                if (at + i >= heard)
+                {
+                    double remaining = 1 - ((at + i - heard + 1) / (double)fade);
+                    gain = remaining * remaining;
+                }
+                samples[(at + i) * 2] = (short)Math.Clamp(left[i] * ModuleLoudness * gain, short.MinValue, short.MaxValue);
+                samples[((at + i) * 2) + 1] = (short)Math.Clamp(right[i] * ModuleLoudness * gain, short.MinValue, short.MaxValue);
+            }
+            at += count;
+            progress?.Report((double)at / (heard + fade));
+        }
+        return samples;
+    }
+
+    /// <summary>A module's rate: the window's, so the file sounds as it played.</summary>
+    public const int ModuleRate = 44100;
+
+    /// <summary>What a module's sound, -1 to 1, is multiplied by into 16 bits: as the window plays it.</summary>
+    private const float ModuleLoudness = 30000;
 
     /// <summary>The song's samples, 16-bit mono at the engine's rate; <paramref name="progress"/>
     /// told how far, 0-1, as it goes.</summary>
@@ -82,20 +135,32 @@ internal static class SoundExport
         return samples;
     }
 
-    public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, SidFile file, int song)
+    public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, SidFile file, int song) =>
+        Write(output, format, samples, C64PlaybackEngine.SampleRate, 1, Tags(file, song));
+
+    /// <summary>A module's stereo samples from <see cref="Render(ModFile, TimeSpan, bool, IReadOnlyList{bool}, double, IProgress{double}?, CancellationToken)"/>,
+    /// its title as the file's.</summary>
+    public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, ModFile module, string path)
     {
-        var tags = Tags(file, song);
-        int rate = C64PlaybackEngine.SampleRate;
+        var tags = new List<Tag>();
+        string title = string.IsNullOrWhiteSpace(module.Title) ? Path.GetFileNameWithoutExtension(path) : module.Title.Trim();
+        tags.Add(new Tag("TITLE", "TIT2", "INAM", title));
+        tags.Add(new Tag("ENCODER", "TSSE", "ISFT", UpdateCheck.Product));
+        Write(output, format, samples, ModuleRate, 2, tags);
+    }
+
+    private static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, int rate, int channels, List<Tag> tags)
+    {
         switch (format)
         {
             case SoundFormat.Wav:
-                WriteWav(output, samples, rate, tags);
+                WriteWav(output, samples, rate, channels, tags);
                 break;
             case SoundFormat.Flac:
-                FlacEncoder.Write(output, samples, rate, [.. tags.Select(t => (t.Vorbis, t.Value))]);
+                FlacEncoder.Write(output, samples, rate, [.. tags.Select(t => (t.Vorbis, t.Value))], channels);
                 break;
             default:
-                WriteMp3(output, samples, rate, tags);
+                WriteMp3(output, samples, rate, channels, tags);
                 break;
         }
     }
@@ -120,7 +185,7 @@ internal static class SoundExport
         return tags;
     }
 
-    private static void WriteWav(Stream output, ReadOnlySpan<short> samples, int rate, List<Tag> tags)
+    private static void WriteWav(Stream output, ReadOnlySpan<short> samples, int rate, int channels, List<Tag> tags)
     {
         var info = new MemoryStream();
         info.Write("INFO"u8);
@@ -142,10 +207,10 @@ internal static class SoundExport
         writer.Write("fmt "u8);
         writer.Write(16);
         writer.Write((short)1);
-        writer.Write((short)1);
+        writer.Write((short)channels);
         writer.Write(rate);
-        writer.Write(rate * 2);
-        writer.Write((short)2);
+        writer.Write(rate * 2 * channels);
+        writer.Write((short)(2 * channels));
         writer.Write((short)16);
         writer.Write("LIST"u8);
         writer.Write((int)info.Length);
@@ -156,7 +221,7 @@ internal static class SoundExport
         output.Write(MemoryMarshal.AsBytes(samples));
     }
 
-    private static void WriteMp3(Stream output, ReadOnlySpan<short> samples, int rate, List<Tag> tags)
+    private static void WriteMp3(Stream output, ReadOnlySpan<short> samples, int rate, int channels, List<Tag> tags)
     {
         // An ID3v2.3 tag first, its text in UTF-16 with a byte order mark.
         var frames = new MemoryStream();
@@ -174,8 +239,8 @@ internal static class SoundExport
         frames.Position = 0;
         frames.CopyTo(output);
 
-        var encoder = new Mp3Encoder(output, rate, Mp3BitRate);
-        var frame = new short[Mp3Encoder.SamplesPerFrame];
+        var encoder = new Mp3Encoder(output, rate, Mp3BitRate, channels);
+        var frame = new short[Mp3Encoder.SamplesPerFrame * channels];
         for (int at = 0; at < samples.Length; at += frame.Length)
         {
             var part = samples.Slice(at, Math.Min(frame.Length, samples.Length - at));

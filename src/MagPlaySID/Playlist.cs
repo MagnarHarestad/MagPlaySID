@@ -100,6 +100,13 @@ internal sealed class PlaylistTune : Observable
     {
         try
         {
+            // A recording: its tags, and its key from its start - it may be an hour long.
+            if (MagPlay.Audio.AudioFile.IsAudioName(Path))
+            {
+                var tags = MagPlay.Audio.AudioFile.ReadTags(Path);
+                return new TuneHeader(tags.Title ?? System.IO.Path.GetFileNameWithoutExtension(Path), tags.Artist ?? "", 1, tags.Year ?? "",
+                                      TuneHistory.KeyOf(Playlist.RecordingKey(Path)), File.GetLastWriteTimeUtc(Path));
+            }
             byte[] bytes = File.ReadAllBytes(Path);
             if (!(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && MagPlay.Amiga.ModFile.Looks(bytes))
             {
@@ -284,13 +291,31 @@ internal sealed class Playlist : Observable
             Tunes[i].Number = i + 1;
     }
 
-    /// <summary>Whether a file is a tune by its name: a .sid, or an Amiga module - name.mod, or
-    /// mod.name as the Amiga named them.</summary>
+    /// <summary>Whether a file is a tune by its name: a .sid, an Amiga module - name.mod, or
+    /// mod.name as the Amiga named them - or a recording: .wav, .flac or .mp3.</summary>
     public static bool IsTuneName(string path)
     {
         string name = Path.GetFileName(path);
         return name.EndsWith(".sid", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".mod", StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("mod.", StringComparison.OrdinalIgnoreCase);
+            || name.StartsWith("mod.", StringComparison.OrdinalIgnoreCase) || MagPlay.Audio.AudioFile.IsAudioName(path);
+    }
+
+    /// <summary>What a recording is known by: its first megabyte and its length in bytes - the same
+    /// file wherever it lies, without reading all of it.</summary>
+    public static byte[] RecordingKey(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var key = new byte[(int)Math.Min(stream.Length, 1 << 20) + 8];
+        int got = 0;
+        while (got < key.Length - 8)
+        {
+            int read = stream.Read(key, got, key.Length - 8 - got);
+            if (read == 0)
+                break;
+            got += read;
+        }
+        BitConverter.GetBytes(stream.Length).CopyTo(key, key.Length - 8);
+        return key;
     }
 
     /// <summary>Every tune under the folders and the files dropped - .sid files and Amiga modules -

@@ -5,7 +5,7 @@ namespace MagPlaySid.Export;
 internal sealed record Huffman(int XLen, int YLen, int LinBits, int LinMax, ushort[] Codes, byte[] Lengths);
 
 /// <summary>
-/// An MP3 encoder - MPEG-1 Layer III, mono, at a constant bitrate - in fixed point: a C# translation
+/// An MP3 encoder - MPEG-1 Layer III, mono or stereo, at a constant bitrate - in fixed point: a C# translation
 /// of Shine (github.com/toots/shine; LGPL 2), the fixed-point encoder for chips without floating
 /// point. Like Shine it has no psychoacoustic model: the polyphase filter bank,
 /// the MDCT with its alias reduction, a step size found for the bits each granule has, long blocks
@@ -17,12 +17,12 @@ internal sealed record Huffman(int XLen, int YLen, int LinBits, int LinMax, usho
 /// </summary>
 internal sealed class Mp3Encoder
 {
-    /// <summary>The samples each <see cref="Encode"/> takes: one frame, two granules.</summary>
+    /// <summary>The samples a channel each <see cref="Encode"/> takes: one frame, two granules.</summary>
     public const int SamplesPerFrame = 2 * Granule;
 
     private const int Granule = 576;
-    private const int SideInfoBits = 8 * (4 + 17);
     private const int Mono = 3;
+    private const int Stereo = 0;
 
     private const double Pi = 3.14159265358979;
     private const double Pi36 = 0.087266462599717;
@@ -81,6 +81,10 @@ internal sealed class Mp3Encoder
     }
 
     private readonly Stream _output;
+    private readonly int _channels;
+
+    /// <summary>The header and side information: 17 bytes of it for mono, 32 for stereo.</summary>
+    private readonly int _sideInfoBits;
     private readonly int[] _bands;
     private readonly int _rateIndex;
     private readonly int _bitRateIndex;
@@ -95,19 +99,23 @@ internal sealed class Mp3Encoder
     /// two granules may say they have - written after them as ancillary data, which decoders skip.</summary>
     private int _ancillary;
 
-    private readonly int[] _history = new int[512];
-    private int _offset;
+    // Each channel's own: its filter bank's history, and the frame's spectrum and its quantising.
+    private readonly int[][] _history;
+    private readonly int[] _offset;
     private readonly int[] _windowed = new int[64];
 
-    /// <summary>The filter bank's output, [granule 0-2][18 slots][32 bands]: the last granule of the
-    /// frame before, then this frame's two.</summary>
-    private readonly int[] _subbands = new int[3 * 18 * 32];
+    /// <summary>A channel's filter bank output, [granule 0-2][18 slots][32 bands]: the last granule
+    /// of the frame before, then this frame's two.</summary>
+    private readonly int[][] _subbands;
     private readonly int[] _mdctIn = new int[36];
-    private readonly int[] _spectrum = new int[2 * Granule];
+    private readonly int[][] _spectrum;
     private readonly int[] _magnitudes = new int[Granule];
     private int _loudest;
-    private readonly int[] _quantised = new int[2 * Granule];
-    private readonly GranuleInfo[] _granules = [new(), new()];
+    private readonly int[][] _quantised;
+
+    /// <summary>[granule, channel].</summary>
+    private readonly GranuleInfo[,] _granules;
+    private readonly short[] _channelSamples = new short[SamplesPerFrame];
 
     private ulong _bits;
     private int _bitCount;
@@ -131,9 +139,29 @@ internal sealed class Mp3Encoder
     }
 
     /// <param name="bitRate">In kilobits a second: one of MPEG-1's, 32-320.</param>
-    public Mp3Encoder(Stream output, int sampleRate, int bitRate)
+    /// <param name="channels">1 mono, 2 stereo - each channel coded on its own.</param>
+    public Mp3Encoder(Stream output, int sampleRate, int bitRate, int channels = 1)
     {
+        if (channels is not (1 or 2))
+            throw new ArgumentException("MP3 is mono or stereo.", nameof(channels));
         _output = output;
+        _channels = channels;
+        _sideInfoBits = 8 * (4 + (channels == 1 ? 17 : 32));
+        _history = new int[channels][];
+        _offset = new int[channels];
+        _subbands = new int[channels][];
+        _spectrum = new int[channels][];
+        _quantised = new int[channels][];
+        _granules = new GranuleInfo[2, channels];
+        for (int ch = 0; ch < channels; ch++)
+        {
+            _history[ch] = new int[512];
+            _subbands[ch] = new int[3 * 18 * 32];
+            _spectrum[ch] = new int[2 * Granule];
+            _quantised[ch] = new int[2 * Granule];
+            _granules[0, ch] = new GranuleInfo();
+            _granules[1, ch] = new GranuleInfo();
+        }
         _rateIndex = Array.IndexOf(SampleRates, sampleRate);
         _bitRateIndex = Array.IndexOf(BitRates, bitRate);
         if (_rateIndex < 0 || _bitRateIndex <= 0)
@@ -146,11 +174,12 @@ internal sealed class Mp3Encoder
         _slotLag = -_fractionSlots;
     }
 
-    /// <summary>One frame: <see cref="SamplesPerFrame"/> samples, written out as soon as encoded.</summary>
+    /// <summary>One frame: <see cref="SamplesPerFrame"/> samples a channel - left and right in
+    /// turn for stereo - written out as soon as encoded.</summary>
     public void Encode(ReadOnlySpan<short> samples)
     {
-        if (samples.Length != SamplesPerFrame)
-            throw new ArgumentException($"A frame is {SamplesPerFrame} samples.", nameof(samples));
+        if (samples.Length != SamplesPerFrame * _channels)
+            throw new ArgumentException($"A frame is {SamplesPerFrame} samples a channel.", nameof(samples));
 
         if (_fractionSlots != 0)
         {
@@ -158,9 +187,14 @@ internal sealed class Mp3Encoder
             _slotLag += _padding - _fractionSlots;
         }
         int frameBits = 8 * (_wholeSlots + _padding);
-        _meanBits = (frameBits - SideInfoBits) / 2;
+        _meanBits = (frameBits - _sideInfoBits) / (2 * _channels);
 
-        Transform(samples);
+        for (int ch = 0; ch < _channels; ch++)
+        {
+            for (int i = 0; i < SamplesPerFrame; i++)
+                _channelSamples[i] = samples[(i * _channels) + ch];
+            Transform(ch, _channelSamples);
+        }
         Quantise();
         WriteFrame();
         _output.Write(_frame, 0, _frameLength);
@@ -198,19 +232,22 @@ internal sealed class Mp3Encoder
     }
 
     /// <summary>32 samples into the window, filtered into 32 subbands at <paramref name="to"/>.</summary>
-    private void FilterSubbands(ReadOnlySpan<short> samples, ref int at, int to)
+    private void FilterSubbands(int ch, ReadOnlySpan<short> samples, ref int at, int to)
     {
+        var history = _history[ch];
+        int offset = _offset[ch];
         for (int i = 31; i >= 0; i--)
-            _history[i + _offset] = samples[at++] * InputScale;
+            history[i + offset] = samples[at++] * InputScale;
 
         for (int i = 0; i < 64; i++)
         {
             int sum = 0;
             for (int j = 0; j < 8; j++)
-                sum += Mul(_history[(_offset + i + (j << 6)) & 511], Window[i + (j << 6)]);
+                sum += Mul(history[(offset + i + (j << 6)) & 511], Window[i + (j << 6)]);
             _windowed[i] = sum;
         }
-        _offset = (_offset + 480) & 511;
+        _offset[ch] = (offset + 480) & 511;
+        var subbands = _subbands[ch];
 
         for (int i = 0; i < 32; i++)
         {
@@ -218,34 +255,35 @@ internal sealed class Mp3Encoder
             int row = i * 64;
             for (int j = 0; j < 64; j++)
                 sum += Mul(Filter[row + j], _windowed[j]);
-            _subbands[to + i] = sum;
+            subbands[to + i] = sum;
         }
     }
 
     private static int Slot(int granule, int slot) => ((granule * 18) + slot) * 32;
 
-    private void Transform(ReadOnlySpan<short> samples)
+    private void Transform(int ch, ReadOnlySpan<short> samples)
     {
         int at = 0;
+        var subbands = _subbands[ch];
         for (int gr = 0; gr < 2; gr++)
         {
             for (int k = 0; k < 18; k += 2)
             {
-                FilterSubbands(samples, ref at, Slot(gr + 1, k));
-                FilterSubbands(samples, ref at, Slot(gr + 1, k + 1));
+                FilterSubbands(ch, samples, ref at, Slot(gr + 1, k));
+                FilterSubbands(ch, samples, ref at, Slot(gr + 1, k + 1));
                 // The filter bank inverts every odd band in every odd slot.
                 int odd = Slot(gr + 1, k + 1);
                 for (int band = 1; band < 32; band += 2)
-                    _subbands[odd + band] = -_subbands[odd + band];
+                    subbands[odd + band] = -subbands[odd + band];
             }
 
-            var spectrum = _spectrum.AsSpan(gr * Granule, Granule);
+            var spectrum = _spectrum[ch].AsSpan(gr * Granule, Granule);
             for (int band = 0; band < 32; band++)
             {
                 for (int k = 0; k < 18; k++)
                 {
-                    _mdctIn[k] = _subbands[Slot(gr, k) + band];
-                    _mdctIn[k + 18] = _subbands[Slot(gr + 1, k) + band];
+                    _mdctIn[k] = subbands[Slot(gr, k) + band];
+                    _mdctIn[k + 18] = subbands[Slot(gr + 1, k) + band];
                 }
                 for (int k = 0; k < 18; k++)
                 {
@@ -267,7 +305,7 @@ internal sealed class Mp3Encoder
             }
         }
         // The frame's last granule is the next one's first half.
-        Array.Copy(_subbands, Slot(2, 0), _subbands, 0, 18 * 32);
+        Array.Copy(subbands, Slot(2, 0), subbands, 0, 18 * 32);
     }
 
     // ------------------------------------------------------------------ quantising
@@ -275,9 +313,10 @@ internal sealed class Mp3Encoder
     private void Quantise()
     {
         for (int gr = 0; gr < 2; gr++)
+        for (int ch = 0; ch < _channels; ch++)
         {
-            var spectrum = _spectrum.AsSpan(gr * Granule, Granule);
-            var quantised = _quantised.AsSpan(gr * Granule, Granule);
+            var spectrum = _spectrum[ch].AsSpan(gr * Granule, Granule);
+            var quantised = _quantised[ch].AsSpan(gr * Granule, Granule);
             _loudest = 0;
             for (int i = 0; i < Granule; i++)
             {
@@ -286,7 +325,7 @@ internal sealed class Mp3Encoder
                 _loudest = Math.Max(_loudest, _magnitudes[i]);
             }
 
-            var info = _granules[gr];
+            var info = _granules[gr, ch];
             int most = Math.Min(4095, _meanBits);
             info.Part23Length = 0;
             info.BigValues = info.Count1 = info.Region0Count = info.Region1Count = info.Count1Table = 0;
@@ -556,11 +595,12 @@ internal sealed class Mp3Encoder
 
     private void WriteFrame()
     {
-        for (int i = 0; i < 2 * Granule; i++)
-            if (_spectrum[i] < 0 && _quantised[i] > 0)
-                _quantised[i] = -_quantised[i];
+        for (int ch = 0; ch < _channels; ch++)
+            for (int i = 0; i < 2 * Granule; i++)
+                if (_spectrum[ch][i] < 0 && _quantised[ch][i] > 0)
+                    _quantised[ch][i] = -_quantised[ch][i];
 
-        // The header: sync, MPEG-1, Layer III, no CRC; mono, not copyright, original.
+        // The header: sync, MPEG-1, Layer III, no CRC; mono or stereo, not copyright, original.
         Put(0x7ff, 11);
         Put(3, 2);
         Put(1, 2);
@@ -569,7 +609,7 @@ internal sealed class Mp3Encoder
         Put((uint)_rateIndex, 2);
         Put((uint)_padding, 1);
         Put(0, 1);
-        Put(Mono, 2);
+        Put((uint)(_channels == 1 ? Mono : Stereo), 2);
         Put(0, 2);
         Put(0, 1);
         Put(1, 1);
@@ -577,8 +617,8 @@ internal sealed class Mp3Encoder
 
         // Side information: main data begins here, no private bits, no scalefactors shared.
         Put(0, 9);
-        Put(0, 5);
-        Put(0, 4);
+        Put(0, _channels == 1 ? 5 : 3);
+        Put(0, 4 * _channels);
         foreach (var info in _granules)
         {
             Put((uint)info.Part23Length, 12);
@@ -596,7 +636,8 @@ internal sealed class Mp3Encoder
         }
 
         for (int gr = 0; gr < 2; gr++)
-            WriteGranule(_quantised.AsSpan(gr * Granule, Granule), _granules[gr]);
+            for (int ch = 0; ch < _channels; ch++)
+                WriteGranule(_quantised[ch].AsSpan(gr * Granule, Granule), _granules[gr, ch]);
         for (; _ancillary > 0; _ancillary -= Math.Min(_ancillary, 32))
             Put(0, Math.Min(_ancillary, 32));
     }

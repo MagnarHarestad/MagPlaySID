@@ -4,9 +4,10 @@ using System.Text;
 namespace MagPlaySid.Export;
 
 /// <summary>
-/// A FLAC encoder for 16-bit mono: blocks of 4096 samples, each a constant where it is one -
-/// silence - or else the best of the fixed predictors of order 0-4, its residual Rice coded in as
-/// many partitions as pay. Lossless: the decoder gets back every sample, and the MD5 of them all is
+/// A FLAC encoder for 16-bit mono or stereo: blocks of 4096 samples, each channel a constant where
+/// it is one - silence - or else the best of the fixed predictors of order 0-4, its residual Rice
+/// coded in as many partitions as pay; stereo as left and right, or with their difference, whichever
+/// is smallest. Lossless: the decoder gets back every sample, and the MD5 of them all is
 /// in the stream info to check by.
 /// </summary>
 internal static class FlacEncoder
@@ -15,39 +16,44 @@ internal static class FlacEncoder
     private const int MostPartitionOrder = 8;
     private const int MostRiceParameter = 14;
 
-    /// <summary>The whole of <paramref name="samples"/> written as a FLAC stream, with its tags as
-    /// Vorbis comments.</summary>
-    public static void Write(Stream output, ReadOnlySpan<short> samples, int sampleRate, IReadOnlyList<(string Key, string Value)> tags)
+    /// <summary>The whole of <paramref name="samples"/> - left and right in turn for stereo - written
+    /// as a FLAC stream, with its tags as Vorbis comments.</summary>
+    public static void Write(Stream output, ReadOnlySpan<short> samples, int sampleRate, IReadOnlyList<(string Key, string Value)> tags,
+                             int channels = 1)
     {
+        if (channels is not (1 or 2))
+            throw new ArgumentException("Mono or stereo.", nameof(channels));
         var frames = new MemoryStream();
         int smallest = int.MaxValue, largest = 0;
         var bits = new BitWriter();
-        for (int start = 0, number = 0; start < samples.Length; start += BlockSize, number++)
+        int length = samples.Length / channels;
+        var work = new Channels();
+        for (int start = 0, number = 0; start < length; start += BlockSize, number++)
         {
-            var block = samples.Slice(start, Math.Min(BlockSize, samples.Length - start));
+            int count = Math.Min(BlockSize, length - start);
             bits.Clear();
-            WriteFrame(bits, block, number, sampleRate);
+            WriteFrame(bits, samples.Slice(start * channels, count * channels), channels, number, sampleRate, work);
             frames.Write(bits.Bytes);
             smallest = Math.Min(smallest, bits.Bytes.Length);
             largest = Math.Max(largest, bits.Bytes.Length);
         }
-        if (samples.Length == 0)
+        if (length == 0)
             smallest = 0;
+        var info = new BitWriter();
+        int blocks = length < BlockSize ? Math.Max(16, length) : BlockSize;
 
         output.Write("fLaC"u8);
 
         // STREAMINFO.
-        var info = new BitWriter();
-        int blocks = samples.Length < BlockSize ? Math.Max(16, samples.Length) : BlockSize;
         info.Put(blocks, 16);
         info.Put(blocks, 16);
         info.Put(smallest, 24);
         info.Put(largest, 24);
         info.Put(sampleRate, 20);
-        info.Put(0, 3);
+        info.Put(channels - 1, 3);
         info.Put(15, 5);
-        info.Put(samples.Length >> 18, 18);
-        info.Put(samples.Length & 0x3FFFF, 18);
+        info.Put(length >> 18, 18);
+        info.Put(length & 0x3FFFF, 18);
         WriteBlockHeader(output, last: false, type: 0, info.Bytes.Length + 16);
         output.Write(info.Bytes);
         output.Write(MD5.HashData(System.Runtime.InteropServices.MemoryMarshal.AsBytes(samples)));
@@ -80,23 +86,73 @@ internal static class FlacEncoder
         output.WriteByte((byte)length);
     }
 
-    private static void WriteFrame(BitWriter bits, ReadOnlySpan<short> block, int number, int sampleRate)
+    /// <summary>A block's channels as numbers to code, and the stereo forms: mid and side.</summary>
+    private sealed class Channels
     {
-        bool whole = block.Length == BlockSize;
+        public readonly int[] Left = new int[BlockSize], Right = new int[BlockSize], Mid = new int[BlockSize], Side = new int[BlockSize];
+        public readonly int[] Residual = new int[BlockSize];
+    }
+
+    private static void WriteFrame(BitWriter bits, ReadOnlySpan<short> interleaved, int channels, int number, int sampleRate, Channels work)
+    {
+        int count = interleaved.Length / channels;
+        var left = work.Left.AsSpan(0, count);
+        var right = work.Right.AsSpan(0, count);
+        var mid = work.Mid.AsSpan(0, count);
+        var side = work.Side.AsSpan(0, count);
+        int assignment = 0;
+        if (channels == 1)
+            for (int i = 0; i < count; i++)
+                left[i] = interleaved[i];
+        else
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int l = interleaved[2 * i], r = interleaved[(2 * i) + 1];
+                (left[i], right[i], mid[i], side[i]) = (l, r, (l + r) >> 1, l - r);
+            }
+            // Of left and right, left and side, side and right, and mid and side: the pair whose
+            // residuals are smallest.
+            long l0 = Cost(left), r0 = Cost(right), m0 = Cost(mid), s0 = Cost(side);
+            assignment = new[] { (1, l0 + r0), (8, l0 + s0), (9, s0 + r0), (10, m0 + s0) }.MinBy(c => c.Item2).Item1;
+        }
+
+        bool whole = count == BlockSize;
         bits.Put(0b11111111111110, 14);
         bits.Put(0, 1);
         bits.Put(0, 1);
         bits.Put(whole ? 12 : 7, 4);
         bits.Put(sampleRate switch { 44100 => 9, 48000 => 10, 32000 => 8, _ => 0 }, 4);
-        bits.Put(0, 4);
+        bits.Put(assignment, 4);
         bits.Put(4, 3);
         bits.Put(0, 1);
         WriteUtf8Number(bits, number);
         if (!whole)
-            bits.Put(block.Length - 1, 16);
+            bits.Put(count - 1, 16);
         bits.Put(Crc8(bits.Bytes), 8);
 
-        WriteSubframe(bits, block);
+        switch (assignment)
+        {
+            case 0:
+                WriteSubframe(bits, left, 16, work.Residual);
+                break;
+            case 1:
+                WriteSubframe(bits, left, 16, work.Residual);
+                WriteSubframe(bits, right, 16, work.Residual);
+                break;
+            case 8:
+                WriteSubframe(bits, left, 16, work.Residual);
+                WriteSubframe(bits, side, 17, work.Residual);
+                break;
+            case 9:
+                WriteSubframe(bits, side, 17, work.Residual);
+                WriteSubframe(bits, right, 16, work.Residual);
+                break;
+            default:
+                WriteSubframe(bits, mid, 16, work.Residual);
+                WriteSubframe(bits, side, 17, work.Residual);
+                break;
+        }
         bits.Align();
         bits.Put(Crc16(bits.Bytes), 16);
     }
@@ -116,15 +172,31 @@ internal static class FlacEncoder
             bits.Put(0x80 | ((number >> (6 * i)) & 0x3F), 8);
     }
 
-    private static void WriteSubframe(BitWriter bits, ReadOnlySpan<short> block)
+    /// <summary>The smallest sum of a fixed predictor's residuals over a channel: how well it codes.</summary>
+    private static long Cost(ReadOnlySpan<int> block)
     {
+        long best = long.MaxValue;
+        for (int order = 0; order <= 4 && order < block.Length; order++)
+        {
+            long sum = 0;
+            for (int i = order; i < block.Length; i++)
+                sum += Math.Abs(Residual(block, i, order));
+            best = Math.Min(best, sum);
+        }
+        return best;
+    }
+
+    /// <param name="depth">Bits a sample: 16, or 17 for the side channel - the difference of two.</param>
+    private static void WriteSubframe(BitWriter bits, ReadOnlySpan<int> block, int depth, int[] residual)
+    {
+        int mask = (1 << depth) - 1;
         bool constant = true;
         for (int i = 1; i < block.Length && constant; i++)
             constant = block[i] == block[0];
         if (constant)
         {
             bits.Put(0, 8);
-            bits.Put(block[0] & 0xFFFF, 16);
+            bits.Put(block[0] & mask, depth);
             return;
         }
 
@@ -140,23 +212,23 @@ internal static class FlacEncoder
                 (best, bestSum) = (order, sum);
         }
 
-        var residual = new int[block.Length];
+        Array.Clear(residual);
         for (int i = best; i < block.Length; i++)
             residual[i] = Residual(block, i, best);
 
-        int verbatimBits = 16 * block.Length;
+        int verbatimBits = depth * block.Length;
         var (partitionOrder, cost) = BestPartitions(residual, block.Length, best);
-        if (cost + (16 * best) >= verbatimBits)
+        if (cost + (depth * best) >= verbatimBits)
         {
             bits.Put(0b00000010, 8);
-            foreach (short sample in block)
-                bits.Put(sample & 0xFFFF, 16);
+            foreach (int sample in block)
+                bits.Put(sample & mask, depth);
             return;
         }
 
         bits.Put(0b00010000 | (best << 1), 8);
         for (int i = 0; i < best; i++)
-            bits.Put(block[i] & 0xFFFF, 16);
+            bits.Put(block[i] & mask, depth);
         bits.Put(0, 2);
         bits.Put(partitionOrder, 4);
         int partitions = 1 << partitionOrder;
@@ -183,7 +255,7 @@ internal static class FlacEncoder
         }
     }
 
-    private static int Residual(ReadOnlySpan<short> s, int i, int order) => order switch
+    private static int Residual(ReadOnlySpan<int> s, int i, int order) => order switch
     {
         0 => s[i],
         1 => s[i] - s[i - 1],

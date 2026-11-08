@@ -143,17 +143,48 @@ internal sealed class VoiceScopeView : Control
         double scale = (bounds.Height / 2) - 6;
         double step = (bounds.Width - 10) / (VisibleSamples - 1);
 
+        // Where the samples are closer than a pixel apart, only each pixel column's lowest and
+        // highest, in the order they come: the same picture, with fewer lines to stroke - a module's
+        // spiky samples cost three times a smooth wave's.
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())
         {
-            for (int i = 0; i < VisibleSamples; i++)
+            bool begun = false;
+            void To(int i)
             {
                 double value = Math.Clamp(_samples[start + i], -1f, 1f);
                 var point = new Point(6 + (i * step), midY - (value * scale));
-                if (i == 0)
-                    path.BeginFigure(point, false);
-                else
+                if (begun)
                     path.LineTo(point);
+                else
+                {
+                    path.BeginFigure(point, false);
+                    begun = true;
+                }
+            }
+
+            int column = int.MinValue, low = 0, high = 0;
+            for (int i = 0; i < VisibleSamples; i++)
+            {
+                int at = (int)(i * step);
+                if (at != column)
+                {
+                    if (column != int.MinValue)
+                        Flush(low, high);
+                    (column, low, high) = (at, i, i);
+                }
+                else if (_samples[start + i] < _samples[start + low])
+                    low = i;
+                else if (_samples[start + i] > _samples[start + high])
+                    high = i;
+            }
+            Flush(low, high);
+
+            void Flush(int a, int b)
+            {
+                To(Math.Min(a, b));
+                if (a != b)
+                    To(Math.Max(a, b));
             }
 
             path.EndFigure(false);

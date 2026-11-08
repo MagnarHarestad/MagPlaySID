@@ -880,7 +880,9 @@ internal sealed class PlaylistStrip : Border
         SidFile? file;
         try
         {
-            bytes = await File.ReadAllBytesAsync(tune.Path);
+            // A recording is known by its start, as the window knows it: it may be an hour long.
+            bytes = MagPlay.Audio.AudioFile.IsAudioName(tune.Path) ? await Task.Run(() => Playlist.RecordingKey(tune.Path))
+                : await File.ReadAllBytesAsync(tune.Path);
             file = bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D' ? SidFile.Parse(bytes) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SidPlaybackException)

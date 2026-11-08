@@ -157,13 +157,28 @@ internal sealed class ModuleTune : ITunePlayback
     /// <summary>The order position and row heard at the tune's sample <paramref name="at"/>.</summary>
     public (int Order, int Row) RowAt(long at)
     {
+        var (order, row, _) = PlaceAt(at);
+        return (order, row);
+    }
+
+    /// <summary>The order position and row heard at the tune's sample <paramref name="at"/>, and
+    /// how far into that row, 0-1.</summary>
+    public (int Order, int Row, double Into) PlaceAt(long at)
+    {
         lock (_lock)
         {
             if (_written == 0)
-                return (0, 0);
-            int packed = _rows[(int)(Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1) % RingSamples)];
-            return (packed >> 8, packed & 0xFF);
+                return (0, 0, 0);
+            return ModPlayer.UnpackRow(_rows[(int)(Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1) % RingSamples)]);
         }
+    }
+
+    /// <summary>Left and right apart, 0 mono to 1 as the Amiga plays them - heard from the next
+    /// few milliseconds rendered.</summary>
+    public double StereoWidth
+    {
+        get => _player.StereoSeparation;
+        set => _player.StereoSeparation = Math.Clamp(value, 0, 1);
     }
 
     public int Read(byte[] buffer, int offset, int count)
@@ -237,7 +252,10 @@ internal sealed class ModuleTune : ITunePlayback
     {
         lock (_turns)
         {
-            int at = _turns.FindLastIndex(t => t.Device <= device);
+            // Searched by hand: a lambda would capture the device and be made anew each frame.
+            int at = _turns.Count - 1;
+            while (at > 0 && _turns[at].Device > device)
+                at--;
             var (from, tune, rate) = _turns[Math.Max(0, at)];
             return tune + Math.Max(0, device - from) * rate;
         }

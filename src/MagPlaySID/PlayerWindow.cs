@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using MagPlay.Amiga;
+using MagPlay.Audio;
 using MagPlay.C64;
 using MagPlaySid.Export;
 using MagPlaySid.Player;
@@ -82,6 +83,10 @@ internal sealed class PlayerWindow : Window
     private readonly ScoreView _view = new();
     private readonly PianoView _piano = new();
     private readonly VolumeKnob _volumeKnob = new();
+    private readonly StereoSlider _stereo = new() { IsVisible = false };
+
+    /// <summary>The seconds the clock shows, played and in all (-1 not known).</summary>
+    private (int Played, int Length) _clockShown = (-1, -2);
 
     // The keys' secret: with no tune playing they are a piano's, and each one struck throws up dust.
     private readonly MagicDust _dust = new();
@@ -119,8 +124,23 @@ internal sealed class PlayerWindow : Window
 
     private readonly ModuleView _moduleView = new();
 
-    /// <summary>A tune is loaded - a .sid or a module.</summary>
-    private bool HasTune => _file is not null || _module is not null;
+    /// <summary>The recording playing, when it is one - WAV, FLAC or MP3 - and what its tags and its
+    /// decoder say of it.</summary>
+    private string? _recording;
+    private AudioTags? _recordingTags;
+    private string _recordingKind = "";
+
+    private readonly AudioView _audioView = new();
+
+    /// <summary>The notes heard in the last few recordings, so one played again is not listened to again.</summary>
+    private readonly Dictionary<string, List<HeardNote>> _heardNotes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _heardOrder = new();
+
+    /// <summary>What the scopes are made for: a .sid's voices, a module's channels, a recording's sides.</summary>
+    private string _scopesFor = "";
+
+    /// <summary>A tune is loaded - a .sid, a module or a recording.</summary>
+    private bool HasTune => _file is not null || _module is not null || _recording is not null;
     private IAudioOutput? _output;
     private SidSongLength.Result? _length;
     private int _song;
@@ -198,6 +218,17 @@ internal sealed class PlayerWindow : Window
         _volumeKnob.Committed += () =>
         {
             _settings.Volume = _volumeKnob.Value;
+            _settings.Save();
+        };
+        _stereo.Value = _settings.StereoWidth;
+        _stereo.Changed += () =>
+        {
+            if (_engine is ModuleTune module)
+                module.StereoWidth = _stereo.Value;
+        };
+        _stereo.Committed += () =>
+        {
+            _settings.StereoWidth = _stereo.Value;
             _settings.Save();
         };
         _strip.ShowRequested += () => ShowPlaylists(true);
@@ -321,14 +352,15 @@ internal sealed class PlayerWindow : Window
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { _open, _favourite, BuildSongControl() } };
         var details = new StackPanel { Children = { _title, _details, buttons } };
-        // The volume and the menu together at the top right, the knob on the menu's left.
+        // The volume and the menu together at the top right, the knob on the menu's left - and while
+        // a module plays, its stereo on the knob's left.
         var corner = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 10,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Children = { _volumeKnob, BuildMenu() },
+            Children = { _stereo, _volumeKnob, BuildMenu() },
         };
         var header = new Grid { Margin = new Thickness(18, 12, 18, 6), Children = { details, corner } };
 
@@ -339,6 +371,7 @@ internal sealed class PlayerWindow : Window
         _elapsed.VerticalAlignment = VerticalAlignment.Center;
         _elapsed.Margin = new Thickness(14, 0);
         _elapsed.Text = "00:00 - --:--";
+        _clockShown = (0, -1);
 
         _previous.Click += PreviousTune;
         _fastForward.Held += () => FastForward(true);
@@ -359,7 +392,7 @@ internal sealed class PlayerWindow : Window
             Children = { _previous, _elapsed, _playPause, _fastForward, _repeat, _next },
         };
 
-        _empty.Text = "Open a .sid or an Amiga module - or drop one here";
+        _empty.Text = "Open a .sid, an Amiga module or a recording - or drop one here";
         _empty.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _empty.HorizontalAlignment = HorizontalAlignment.Center;
         _empty.VerticalAlignment = VerticalAlignment.Center;
@@ -396,7 +429,9 @@ internal sealed class PlayerWindow : Window
         retro.Children.Add(_retroStatus);
         _moduleView.Width = _moduleView.ContentWidth;
         _moduleView.IsVisible = false;
-        retro.Children.Add(new Panel { Children = { _view, _moduleView } });
+        _audioView.Width = _audioView.ContentWidth;
+        _audioView.IsVisible = false;
+        retro.Children.Add(new Panel { Children = { _view, _moduleView, _audioView } });
 
         var root = new DockPanel();
         DockPanel.SetDock(_strip, Dock.Left);
@@ -644,6 +679,7 @@ internal sealed class PlayerWindow : Window
         _retroStatus.FontSize = 12 * scale;
         _view.TextScale = scale;
         _moduleView.TextScale = scale;
+        _audioView.TextScale = scale;
         _piano.TextScale = scale;
         foreach (var scope in _scopes)
         {
@@ -683,17 +719,20 @@ internal sealed class PlayerWindow : Window
     private void BuildScopes(int voices, bool digi = false)
     {
         int count = voices + (digi ? 1 : 0);
-        if (_scopes.Length == count)
+        string kind = _recording is not null ? "recording" : _module is not null ? "module" : "sid";
+        if (_scopes.Length == count && kind == _scopesFor)
             return;
 
-        if (_scopes.Length != voices)
+        if (_scopes.Length != voices || kind != _scopesFor)
         {
+            _scopesFor = kind;
             Array.Clear(_muted);
             _scopeRow.Children.Clear();
             _scopes = new VoiceScopeView[voices];
             for (int i = 0; i < voices; i++)
             {
-                string? name = _module is not null ? $"CH {i + 1}" : voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null;
+                string? name = _recording is not null ? (i == 0 ? "LEFT" : "RIGHT")
+                    : _module is not null ? $"CH {i + 1}" : voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null;
                 var scope = new VoiceScopeView(i, name) { TextScale = TextScale };
                 scope.MuteToggled += (voice, muted) =>
                 {
@@ -726,12 +765,13 @@ internal sealed class PlayerWindow : Window
         _previous.IsEnabled = _playPause.IsEnabled = _fastForward.IsEnabled = _repeat.IsEnabled = loaded;
         // Only with a tune to add: an empty window offers Open alone, not a button that cannot be used.
         _favourite.IsVisible = loaded;
+        _stereo.IsVisible = _module is not null;
         ShowNextTune();
         _songRow.IsVisible = _file is { Songs: > 1 };
         if (!loaded)
         {
             _title.Text = UpdateCheck.Product;
-            _details.Text = "Plays a .sid or an Amiga module and shows it as tracker rows";
+            _details.Text = "Plays a .sid, an Amiga module or a recording, and shows its notes as they play";
             _retroStatus.Text = "";
         }
     }
@@ -809,17 +849,33 @@ internal sealed class PlayerWindow : Window
     /// apart from what is heard, as fast as it goes, a window showing how far with a Cancel.</summary>
     private async Task ExportSoundAsync(SoundFormat format)
     {
-        if (_file is not { } file || !(_wholeTranscribed || _lengthUnknown))
-            return;
         int song = _song;
         var length = _length?.Total ?? UnmeasuredLength;
         bool fadeOut = _length is not { EndsQuiet: true };
         var muted = _muted.ToArray();
+        string title;
+        Func<IProgress<double>, CancellationToken, short[]> render;
+        Action<Stream, short[]> write;
+        if (_module is { } module && _path is { } modulePath)
+        {
+            title = SoundExport.FileName(module, modulePath);
+            double width = _stereo.Value;
+            render = (progress, cancel) => SoundExport.Render(module, length, fadeOut, muted, width, progress, cancel);
+            write = (stream, samples) => SoundExport.Write(stream, format, samples, module, modulePath);
+        }
+        else if (_file is { } file && (_wholeTranscribed || _lengthUnknown))
+        {
+            title = SoundExport.FileName(file, song);
+            render = (progress, cancel) => SoundExport.Render(file, song, length, fadeOut, muted, progress, cancel);
+            write = (stream, samples) => SoundExport.Write(stream, format, samples, file, song);
+        }
+        else
+            return;
         string name = SoundExport.Name(format), extension = SoundExport.Extension(format);
         var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = $"Export the sound as {name}",
-            SuggestedFileName = SoundExport.FileName(file, song),
+            SuggestedFileName = title,
             DefaultExtension = extension,
             FileTypeChoices = [new FilePickerFileType(name) { Patterns = [$"*.{extension}"] }],
             ShowOverwritePrompt = true,
@@ -829,7 +885,7 @@ internal sealed class PlayerWindow : Window
 
         using var cancel = new CancellationTokenSource();
         var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6 };
-        var status = new TextBlock { Text = $"Playing {Clock(length)} of {SoundExport.FileName(file, song)}...", TextWrapping = TextWrapping.Wrap };
+        var status = new TextBlock { Text = $"Playing {Clock(length)} of {title}...", TextWrapping = TextWrapping.Wrap };
         var stop = new Button { Content = "Cancel", MinWidth = 80, IsCancel = true, HorizontalAlignment = HorizontalAlignment.Right };
         bool done = false;
         var dialog = new Window
@@ -853,14 +909,14 @@ internal sealed class PlayerWindow : Window
         try
         {
             var progress = new Progress<double>(part => bar.Value = part);
-            var samples = await Task.Run(() => SoundExport.Render(file, song, length, fadeOut, muted, progress, cancel.Token));
+            var samples = await Task.Run(() => render(progress, cancel.Token));
             status.Text = $"Writing the {name} file...";
             bar.IsIndeterminate = true;
             stop.IsEnabled = false;
             await using var stream = await target.OpenWriteAsync();
             if (stream.CanSeek)
                 stream.SetLength(0);
-            await Task.Run(() => SoundExport.Write(stream, format, samples, file, song));
+            await Task.Run(() => write(stream, samples));
         }
         catch (OperationCanceledException)
         {
@@ -884,7 +940,7 @@ internal sealed class PlayerWindow : Window
         {
             Title = "Open a tune",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("SID tunes and Amiga modules") { Patterns = ["*.sid", "*.mod", "mod.*"] }, FilePickerFileTypes.All],
+            FileTypeFilter = [new FilePickerFileType("SID tunes, Amiga modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.wav", "*.flac", "*.mp3"] }, FilePickerFileTypes.All],
         });
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
@@ -1000,6 +1056,9 @@ internal sealed class PlayerWindow : Window
         byte[] bytes;
         try
         {
+            // A recording is read as it plays, not all at once: it may be an hour long.
+            if (IsRecording(path))
+                return LoadRecording(path, quiet);
             bytes = File.ReadAllBytes(path);
             if (IsModule(bytes))
                 return LoadModule(path, bytes, quiet);
@@ -1016,6 +1075,7 @@ internal sealed class PlayerWindow : Window
 
         _file = file;
         _module = null;
+        _recording = null;
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
         _hvscKey = SongLengths.KeyOf(bytes);
@@ -1031,6 +1091,70 @@ internal sealed class PlayerWindow : Window
         ShowRepeat();
         return true;
     }
+
+    /// <summary>Whether a file is a recording: named as one, or starting as one does - not a .sid.</summary>
+    private static bool IsRecording(string path)
+    {
+        try
+        {
+            Span<byte> head = stackalloc byte[12];
+            using (var stream = File.OpenRead(path))
+                head = head[..stream.Read(head)];
+            bool sid = head.Length >= 4 && head[1] == 'S' && head[2] == 'I' && head[3] == 'D';
+            return !sid && (AudioFile.Looks(head) || AudioFile.IsAudioName(path) && !path.EndsWith(".sid", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>A recording, played as a tune of one song and listened to for its notes: false, and
+    /// nothing changed, when it cannot be read.</summary>
+    private bool LoadRecording(string path, bool quiet)
+    {
+        string kind;
+        TimeSpan? length;
+        try
+        {
+            using var decoder = AudioFile.Open(path);
+            string channels = decoder.Channels switch { 1 => "mono", 2 => "stereo", var n => $"{n} channels" };
+            kind = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{decoder.Description}   ·   {decoder.SampleRate / 1000.0:0.#} kHz {channels}");
+            length = decoder.Duration;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException
+                                       or ArgumentException or NotSupportedException or IndexOutOfRangeException)
+        {
+            if (!quiet)
+                _ = MessageWindow.ShowAsync(this, "Cannot play this recording", ex.Message);
+            return false;
+        }
+
+        var tags = AudioFile.ReadTags(path);
+        _file = null;
+        _module = null;
+        _recording = path;
+        _recordingTags = tags;
+        _recordingKind = kind;
+        _recordingLength = length;
+        _path = path;
+        byte[] key = Playlist.RecordingKey(path);
+        _tuneKey = TuneHistory.KeyOf(key);
+        _hvscKey = SongLengths.KeyOf(key);
+        _playCounted = false;
+        _played = 0;
+        _everyFrom = _song = 1;
+        string title = tags.Title ?? Path.GetFileNameWithoutExtension(path);
+        Title = $"{title} - {UpdateCheck.Product}";
+        _title.Text = title;
+        BuildSongPills();
+        ShowEmpty();
+        Restart();
+        ShowRepeat();
+        return true;
+    }
+
+    private TimeSpan? _recordingLength;
 
     /// <summary>Whether a file is an Amiga module: not a .sid, and with a module's tag or shape.</summary>
     private static bool IsModule(byte[] bytes) =>
@@ -1054,6 +1178,7 @@ internal sealed class PlayerWindow : Window
 
         _file = null;
         _module = module;
+        _recording = null;
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
         _hvscKey = SongLengths.KeyOf(bytes);
@@ -1094,6 +1219,18 @@ internal sealed class PlayerWindow : Window
 
     private string DescribeFile()
     {
+        if (_recording is not null)
+        {
+            var said = new List<string>();
+            if (_recordingTags?.Artist is { } artist)
+                said.Add(artist);
+            if (_recordingTags?.Album is { } album)
+                said.Add(album);
+            if (_recordingTags?.Year is { } year)
+                said.Add(year);
+            said.Add(_recordingKind);
+            return string.Join("   ·   ", said);
+        }
         if (_module is { } module)
         {
             int samples = module.Samples.Count(s => s.Data.Length > 2);
@@ -1173,6 +1310,8 @@ internal sealed class PlayerWindow : Window
         Start(_song);
         if (_module is { } module)
             ShowModule(module);
+        else if (_recording is { } recording)
+            ShowRecording(recording);
         else
             Transcribe(_song);
         RememberPlace();
@@ -1187,17 +1326,23 @@ internal sealed class PlayerWindow : Window
 
         try
         {
-            _engine = _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song));
+            _engine = _recording is { } recording ? new AudioTune(recording, AudioFile.Open(recording))
+                : _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song));
+            if (_engine is AudioTune audio && _recording is { } heard && _heardNotes.TryGetValue(heard, out var notes))
+                audio.SetNotes(notes);
             _engine.Volume = _volumeKnob.Gain;
+            if (_engine is ModuleTune moduleTune)
+                moduleTune.StereoWidth = _stereo.Value;
             BuildScopes(_engine.Voices);
             for (int voice = 0; voice < _scopes.Length; voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
             _output = AudioOutput.Start(_engine, latencyMs: 100);
         }
-        catch (Exception ex) when (ex is SidPlaybackException or InvalidOperationException or PortAudioSharp.PortAudioException)
+        catch (Exception ex) when (ex is SidPlaybackException or InvalidOperationException or PortAudioSharp.PortAudioException
+                                       or IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException)
         {
             StopPlayback();
-            _ = MessageWindow.ShowAsync(this, "Cannot play this .sid", ex.Message);
+            _ = MessageWindow.ShowAsync(this, _recording is not null ? "Cannot play this recording" : "Cannot play this .sid", ex.Message);
             return;
         }
 
@@ -1211,10 +1356,13 @@ internal sealed class PlayerWindow : Window
     private void StopPlayback()
     {
         var output = _output;
+        var engine = _engine;
         _output = null;
         _engine = null;
         output?.Stop();
         output?.Dispose();
+        // A recording's reader lets go of its file.
+        (engine as IDisposable)?.Dispose();
     }
 
     /// <summary>Transcribes the tune off the UI thread while it already plays: its first half
@@ -1225,20 +1373,128 @@ internal sealed class PlayerWindow : Window
     /// the window come first - on the thread pool it held the sound thread back by up to 40 ms.</summary>
     /// <summary>A module shown as itself - its patterns are its score - and its length, found by
     /// playing it through to where it comes round, at once; the user's own, when they set one.</summary>
-    private void ShowModule(ModFile module)
+    /// <summary>A recording: its notes listened for on a thread of its own as it plays, shown as
+    /// they are heard - or at once, when it was listened to a little while ago.</summary>
+    private void ShowRecording(string path)
     {
         _transcribing?.Cancel();
         _transcription = null;
         _wholeTranscribed = false;
+        // A recording is its own sound: there is nothing to export but what it is.
         _exportNotes.IsEnabled = _exportSound.IsEnabled = false;
+        _view.IsVisible = false;
+        _moduleView.IsVisible = false;
+        _moduleView.SetModule(null);
+        _audioView.IsVisible = true;
+        _audioView.Reset();
+        int frames = _recordingLength is { } length ? (int)Math.Round(length.TotalSeconds * 50) : 0;
+        _measured = frames > 0 ? new SidSongLength.Result(frames, frames, EndsQuiet: true) : null;
+        _length = null;
+        _lengthUnknown = frames == 0;
+        _lengthsChosen = true;
+        _retroStatus.Text = "Listening for its notes...";
+        ChooseLength();
+
+        if (_heardNotes.TryGetValue(path, out var known))
+        {
+            Heard(known, frames / 50.0, complete: true);
+            return;
+        }
+
+        var cancel = new CancellationTokenSource();
+        _transcribing = cancel;
+        void Show(IReadOnlyList<HeardNote> notes, double seconds, bool complete) => Dispatcher.UIThread.Post(() =>
+        {
+            if (!cancel.IsCancellationRequested && _recording == path)
+                Heard(notes, seconds, complete);
+        });
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var decoder = AudioFile.Open(path);
+                var notes = NoteTranscriber.Transcribe(decoder, (so, far) => Show(so, far, complete: false), cancel.Token);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (cancel.IsCancellationRequested)
+                        return;
+                    _heardNotes[path] = notes;
+                    _heardOrder.Enqueue(path);
+                    while (_heardOrder.Count > 8)
+                        _heardNotes.Remove(_heardOrder.Dequeue());
+                });
+                Show(notes, (decoder.Duration ?? TimeSpan.Zero).TotalSeconds, complete: true);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException
+                                           or ArgumentException or NotSupportedException or IndexOutOfRangeException)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!cancel.IsCancellationRequested && _recording == path)
+                        SayStatus($"Its notes could not be listened for: {ex.Message}");
+                });
+            }
+        })
+        { IsBackground = true, Name = "Listening for notes", Priority = ThreadPriority.BelowNormal };
+        thread.Start();
+    }
+
+    /// <summary>The notes heard so far, shown and given to the tune for the piano and the meters.</summary>
+    private void Heard(IReadOnlyList<HeardNote> notes, double seconds, bool complete)
+    {
+        _audioView.SetNotes(notes, seconds, complete);
+        if (_engine is AudioTune audio)
+            audio.SetNotes(notes);
+        int most = MostAtOnce(notes);
+        SayStatus(complete
+            ? $"The notes heard in the recording - {notes.Count} of them, as many as {most} at once"
+            : $"Listening for its notes... {Clock(TimeSpan.FromSeconds(seconds))} heard");
+    }
+
+    /// <summary>The most notes sounding at one time.</summary>
+    private static int MostAtOnce(IReadOnlyList<HeardNote> notes)
+    {
+        var ends = new PriorityQueue<double, double>();
+        int most = 0;
+        foreach (var note in notes)
+        {
+            while (ends.Count > 0 && ends.Peek() <= note.Start)
+                ends.Dequeue();
+            ends.Enqueue(note.End, note.End);
+            most = Math.Max(most, ends.Count);
+        }
+        return most;
+    }
+
+    /// <summary>The status above the rows, keeping what it says of the length.</summary>
+    private void SayStatus(string text)
+    {
+        const string Said = " - the length is ";
+        int said = _retroStatus.Text?.IndexOf(Said, StringComparison.Ordinal) ?? -1;
+        _retroStatus.Text = said >= 0 ? text + _retroStatus.Text![said..] : text;
+    }
+
+    private void ShowModule(ModFile module)
+    {
+        _audioView.IsVisible = false;
+        _transcribing?.Cancel();
+        _transcription = null;
+        _wholeTranscribed = false;
+        // Its sound can be saved - in stereo, as wide as it is heard - but there are no notes to save:
+        // the patterns are the module's own.
+        _exportNotes.IsEnabled = false;
+        _exportSound.IsEnabled = true;
         _view.IsVisible = false;
         _moduleView.IsVisible = true;
         _moduleView.SetModule(module);
-        var measured = ModPlayer.Measure(module);
-        int frames = measured is { } length ? (int)Math.Round(length.TotalSeconds * 50) : 0;
-        _measured = frames > 0 ? new SidSongLength.Result(frames, frames) : null;
+        var measured = ModPlayer.MeasureEnd(module);
+        int frames = measured is { } end ? (int)Math.Round(end.Length.TotalSeconds * 50) : 0;
+        _measured = frames > 0 ? new SidSongLength.Result(frames, frames, EndsQuiet: measured!.Value.Stops) : null;
         _length = null;
-        _lengthUnknown = false;
+        _lengthUnknown = frames == 0;
         _retroStatus.Text = $"The module's own patterns, as ProTracker plays them - {module.Order.Count} position{(module.Order.Count == 1 ? "" : "s")} in its song";
         _lengthsChosen = true;
         ChooseLength();
@@ -1246,6 +1502,7 @@ internal sealed class PlayerWindow : Window
 
     private void Transcribe(int song)
     {
+        _audioView.IsVisible = false;
         _view.IsVisible = true;
         _moduleView.IsVisible = false;
         _moduleView.SetModule(null);
@@ -1561,13 +1818,21 @@ internal sealed class PlayerWindow : Window
             _playCounted = true;
             TuneHistory.Played(tuneKey);
         }
-        _elapsed.Text = $"{Clock(position)} - {(_length is { } length ? Clock(length.Total) : "--:--")}";
+        // Written again only when a second shown changes: not sixty new strings a second.
+        var clock = ((int)Math.Floor(position.TotalSeconds), _length is { } length ? (int)Math.Floor(length.Total.TotalSeconds) : -1);
+        if (clock != _clockShown)
+        {
+            _clockShown = clock;
+            _elapsed.Text = $"{Clock(position)} - {(_length is { } total ? Clock(total.Total) : "--:--")}";
+        }
         if (_songPills.Children.ElementAtOrDefault(_song - 1) is SongPill playing)
             playing.Progress = _length is { Total.TotalSeconds: > 0 } measured ? position / measured.Total : 0;
         if (engine is C64Tune c64 && _transcription is not null)
             _view.SetCycle(c64.Engine.CycleAt(position.TotalSeconds * C64PlaybackEngine.SampleRate));
         else if (engine is ModuleTune module)
             _moduleView.Show(module, at);
+        else if (engine is AudioTune audio)
+            _audioView.Show(audio, at);
         if (engine.Failure is { } failure && !_details.Text!.StartsWith("The tune stopped", StringComparison.Ordinal))
             _details.Text = $"The tune stopped: {failure}";
     }

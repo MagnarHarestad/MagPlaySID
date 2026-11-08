@@ -8,9 +8,10 @@ using MagPlaySid.Player;
 namespace MagPlaySid;
 
 /// <summary>
-/// An Amiga module as ProTracker shows it: the pattern playing, a row a line, its row heard on the
-/// middle line - each channel's note, sample and effect - with where the song is in its order, and
-/// beside it the samples, each lit while a channel plays it. The module is its own score: nothing
+/// An Amiga module as ProTracker shows it: the pattern playing, a row a line, scrolling smoothly
+/// through the middle line as it is heard - each channel's note, sample and effect, the patterns
+/// before and after it in the order dimmed beyond its ends - with where the song is in its order,
+/// and beside it the samples, each lit while a channel plays it. The module is its own score: nothing
 /// here is worked out, all of it is read from the file.
 /// </summary>
 internal sealed class ModuleView : Control
@@ -40,6 +41,9 @@ internal sealed class ModuleView : Control
     private string[][] _cells = [];
     private string[] _sampleLines = [];
     private int _order = -1, _row = -1;
+
+    /// <summary>How far into the row heard, in pixels: the rows are drawn again when it moves.</summary>
+    private double _into;
     private readonly HashSet<int> _playing = [];
 
     public ModuleView() => _charWidth = Measure("0").WidthIncludingTrailingWhitespace;
@@ -79,6 +83,7 @@ internal sealed class ModuleView : Control
         _module = module;
         Forget();
         _order = _row = -1;
+        _into = 0;
         _playing.Clear();
         if (module is null)
         {
@@ -101,11 +106,13 @@ internal sealed class ModuleView : Control
     }
 
     /// <summary>Where the song is heard, and the samples its channels play there - drawn again only
-    /// when that changes.</summary>
+    /// when that changes: playing, as often as the rows move a pixel; paused, not at all.</summary>
     public void Show(ModuleTune tune, long at)
     {
-        var (order, row) = tune.RowAt(at);
-        bool changed = order != _order || row != _row;
+        var (order, row, into) = tune.PlaceAt(at);
+        double pixels = Math.Round(into * RowHeight * 2) / 2;
+        bool changed = order != _order || row != _row || pixels != _into;
+        _into = pixels;
         if (changed && _module is { } module)
         {
             (_order, _row) = (order, row);
@@ -147,8 +154,9 @@ internal sealed class ModuleView : Control
             return;
 
         int order = Math.Clamp(_order, 0, module.Order.Count - 1), row = Math.Max(0, _row);
-        int pattern = module.Order[order];
         double line = Math.Round((bounds.Height + HeaderHeight - RowHeight) / 2);
+        // The row heard starts above the line by as far as it has played.
+        double top = line - _into;
 
         for (int c = 0; c < module.Channels; c++)
         {
@@ -161,31 +169,50 @@ internal sealed class ModuleView : Control
         {
             context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 18)),
                                   new Rect(0, line, TrackerWidth, RowHeight));
-            if (pattern < _cells.Length)
+            // The rows on screen, counted from the heard one: those past its pattern's ends are the
+            // patterns before and after it in the order, as the song goes on if nothing jumps.
+            int above = (int)Math.Ceiling((top - HeaderHeight) / RowHeight);
+            int below = (int)Math.Ceiling((bounds.Height - top) / RowHeight);
+            for (int i = -above; i < below; i++)
             {
-                var cells = _cells[pattern];
-                int first = Math.Max(0, row - (int)Math.Ceiling((line - HeaderHeight) / RowHeight));
-                for (int r = first; r < ModFile.Rows; r++)
+                int place = order, r = row + i;
+                while (r < 0 && place > 0)
+                    (place, r) = (place - 1, r + ModFile.Rows);
+                while (r >= ModFile.Rows && place + 1 < module.Order.Count)
+                    (place, r) = (place + 1, r - ModFile.Rows);
+                if (r < 0 || r >= ModFile.Rows || module.Order[place] >= _cells.Length)
+                    continue;
+                double y = top + i * RowHeight;
+                if (r == 0 && place > 0)
+                    context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder), new Rect(0, y - 1, TrackerWidth, 1));
+                if (place == order)
+                    DrawRow(context, module, _cells[module.Order[place]], r, y, heard: i == 0);
+                else
                 {
-                    double y = line + (r - row) * RowHeight;
-                    if (y > bounds.Height)
-                        break;
-                    bool heard = r == row;
-                    Text(context, RowNumbers[r], 0, y + 1, heard ? SidPlayerPalette.Title : SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, r % 4 == 0 ? 200 : 110));
-                    for (int c = 0; c < module.Channels; c++)
-                    {
-                        string text = cells[r * module.Channels + c];
-                        bool empty = text[0] == '-' && text[4] == '.' && text[7] == '.';
-                        var colour = SidPlayerPalette.VoiceColour(c % 3);
-                        var ink = heard ? SidPlayerPalette.Title : empty ? SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 110)
-                            : SidPlayerPalette.WithAlpha(colour, 220);
-                        Text(context, text, RowNumberWidth + Gap + c * (ChannelWidth + Gap), y + 1, ink, bold: heard);
-                    }
+                    // Faded as a whole, so its text is the same laid out text as when it plays.
+                    using (context.PushOpacity(0.4))
+                        DrawRow(context, module, _cells[module.Order[place]], r, y, heard: false);
                 }
             }
         }
 
         DrawPanel(context, module, TrackerWidth + Gap, bounds.Height);
+    }
+
+    /// <summary>One row: its number and each channel's cell, the heard one bright.</summary>
+    private void DrawRow(DrawingContext context, ModFile module, string[] cells, int r, double y, bool heard)
+    {
+        Text(context, RowNumbers[r], 0, y + 1, heard ? SidPlayerPalette.Title
+            : SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, r % 4 == 0 ? 200 : 110));
+        for (int c = 0; c < module.Channels; c++)
+        {
+            string text = cells[r * module.Channels + c];
+            bool empty = text[0] == '-' && text[4] == '.' && text[7] == '.';
+            var ink = heard ? SidPlayerPalette.Title
+                : empty ? SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 110)
+                : SidPlayerPalette.WithAlpha(SidPlayerPalette.VoiceColour(c % 3), 220);
+            Text(context, text, RowNumberWidth + Gap + c * (ChannelWidth + Gap), y + 1, ink, bold: heard);
+        }
     }
 
     private void DrawPanel(DrawingContext context, ModFile module, double left, double height)

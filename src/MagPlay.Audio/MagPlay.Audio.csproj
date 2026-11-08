@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Recorded music: WAV, FLAC and MP3 read into samples on every system, and its notes heard -
+       transcribed, many at once, from the sound alone. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MagPlay.Audio</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- MP3 frames decoded in managed code (MIT): no system codec, the same on Windows, macOS and Linux. -->
+    <PackageReference Include="NLayer" Version="3.0.1" />
+  </ItemGroup>
+
+</Project>

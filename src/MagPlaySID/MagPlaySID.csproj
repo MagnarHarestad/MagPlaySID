@@ -38,4 +38,8 @@
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\MagPlay.Audio\MagPlay.Audio.csproj" />
+  </ItemGroup>
+
 </Project>

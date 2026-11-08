@@ -49,7 +49,11 @@ public sealed class ModPlayer
     private bool _jump;
     private int _jumpOrder, _jumpRow;
     private bool _loopJump;
-    private double _tickSamplesLeft;
+    private double _tickSamplesLeft, _tickSamples = 1;
+
+    // The row heard - read on its first tick - and how far into it the song is, in ticks: the row
+    // playing changes at the end of its last tick, before the next is heard.
+    private int _heardOrder, _heardRow, _rowTick, _rowTicks = 6;
     private readonly HashSet<int> _visited = [];
 
     // The A500's filter: one pole near 4.4 kHz, on each side.
@@ -107,7 +111,11 @@ public sealed class ModPlayer
 
     /// <summary>How long the song plays before it comes round to a row played before - or stops -
     /// played through with no sound made; null when it does neither within an hour.</summary>
-    public static TimeSpan? Measure(ModFile mod)
+    public static TimeSpan? Measure(ModFile mod) => MeasureEnd(mod)?.Length;
+
+    /// <summary>As <see cref="Measure"/>, and whether the song stops there (F00) rather than
+    /// coming round again.</summary>
+    public static (TimeSpan Length, bool Stops)? MeasureEnd(ModFile mod)
     {
         var player = new ModPlayer(mod, 1000, a500Filter: false);
         double seconds = 0;
@@ -116,13 +124,14 @@ public sealed class ModPlayer
             player.NextTick();
             seconds += TickSeconds(player._tempo);
         }
-        return player.Looped || player.Stopped ? TimeSpan.FromSeconds(seconds) : null;
+        return player.Looped || player.Stopped ? (TimeSpan.FromSeconds(seconds), player.Stopped && !player.Looped) : null;
     }
 
     /// <summary>Renders stereo frames into <paramref name="left"/> and <paramref name="right"/>, from
     /// -1 to 1 - after F00, silence. Given <paramref name="channels"/>, each channel's own sound goes
     /// to its array from <paramref name="at"/> on, as its scope shows it; given <paramref name="states"/>,
-    /// what it plays - see <see cref="Pack"/>; given <paramref name="rows"/>, the order and row.</summary>
+    /// what it plays - see <see cref="Pack"/>; given <paramref name="rows"/>, the order and row heard
+    /// and how far into it - see <see cref="UnpackRow"/>.</summary>
     public void Render(Span<float> left, Span<float> right, float[][]? channels = null, int[][]? states = null,
                        int[]? rows = null, int at = 0)
     {
@@ -136,7 +145,8 @@ public sealed class ModPlayer
             {
                 if (!Stopped)
                     NextTick();
-                _tickSamplesLeft += _rate * TickSeconds(_tempo);
+                _tickSamples = _rate * TickSeconds(_tempo);
+                _tickSamplesLeft += _tickSamples;
             }
             _tickSamplesLeft--;
 
@@ -159,7 +169,10 @@ public sealed class ModPlayer
                     (l, r) = (l + value * far, r + value * near);
             }
             if (rows is not null)
-                rows[at + f] = (_order << 8) | _row;
+            {
+                double into = (_rowTick + 1 - Math.Max(0, _tickSamplesLeft) / _tickSamples) / _rowTicks;
+                rows[at + f] = PackRow(_heardOrder, _heardRow, into);
+            }
             _filterLeft += (l * scale - _filterLeft) * _filterCoefficient;
             _filterRight += (r * scale - _filterRight) * _filterCoefficient;
             left[f] = (float)_filterLeft;
@@ -189,6 +202,16 @@ public sealed class ModPlayer
         return new ChannelState((state >> 20) & 0xFF, period, period > 0 ? PaulaClock / period : 0, (state >> 12) & 0x7F, (state >> 19 & 1) != 0);
     }
 
+    /// <summary>The place heard as one number: the row in bits 0-7, the order position in 8-15, and
+    /// how far into the row, 0-1, in 16-25 - for rows that scroll smoothly.</summary>
+    private static int PackRow(int order, int row, double into) =>
+        (int)(Math.Clamp(into, 0, 1) * 1023) << 16 | (order & 0xFF) << 8 | (row & 0xFF);
+
+    /// <summary>A place packed by <see cref="Render"/>: the order position, the row, and how far
+    /// into the row.</summary>
+    public static (int Order, int Row, double Into) UnpackRow(int packed) =>
+        ((packed >> 8) & 0xFF, packed & 0xFF, (packed >> 16 & 0x3FF) / 1023.0);
+
     /// <summary>Whether a packed state is a note's first tick.</summary>
     public static bool Struck(int state) => (state >> 28 & 1) != 0;
 
@@ -199,10 +222,17 @@ public sealed class ModPlayer
         foreach (var c in _channels)
             c.Struck = false;
         if (_tick == 0 && _delayLeft == 0)
+        {
+            (_heardOrder, _heardRow, _rowTick) = (_order, _row, 0);
             ReadRow();
+            _rowTicks = Math.Max(1, _speed * (1 + _patternDelay));
+        }
         else
+        {
+            _rowTick++;
             foreach (var c in _channels)
                 TickEffects(c);
+        }
         foreach (var c in _channels)
             c.Settle();
 
