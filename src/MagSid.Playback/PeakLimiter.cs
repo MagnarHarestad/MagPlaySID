@@ -59,6 +59,17 @@ public sealed class PeakLimiter
     private int _boxAt;
     private double _boxSum;
 
+    /// <summary>The ride: the gain brought down by itself when the limiter keeps taking more than
+    /// <see cref="MaxWorkDb"/> off - a song mixed far louder than its kind - and back up slowly once
+    /// it no longer needs to be. Worked out a block of frames at a time.</summary>
+    private const int RideBlock = 256;
+    private const double WorkSeconds = 1.5, RideDownSeconds = 1.0, RecoverDbPerSecond = 0.3;
+    private readonly double _blockSeconds;
+    private double _blockSum;
+    private int _blockCount;
+    private double _workDb, _rideDb;
+    private float _ride = 1f, _rideStep;
+
     /// <param name="channels">1 or 2, interleaved; the channels are limited together.</param>
     /// <param name="ceilingDb">The highest true peak let out, in dB below full scale.</param>
     /// <param name="aheadSeconds">How long before a peak the gain starts down.</param>
@@ -87,6 +98,7 @@ public sealed class PeakLimiter
         _box = new float[_ahead];
         Array.Fill(_box, 1f);
         _boxSum = _ahead;
+        _blockSeconds = (double)RideBlock / sampleRate;
     }
 
     /// <summary>Frames the sound comes out late.</summary>
@@ -102,6 +114,13 @@ public sealed class PeakLimiter
         set => _gain = (float)Math.Pow(10, value / 20);
     }
 
+    /// <summary>The most the limiter is to take off, over a second or two, before the gain rides
+    /// down: in dB; infinity, never.</summary>
+    public double MaxWorkDb { get; set; } = double.PositiveInfinity;
+
+    /// <summary>How far the gain has ridden down, in dB: 0 or below.</summary>
+    public double RideDb => _rideDb;
+
     /// <summary>Limits <paramref name="frames"/> in place: interleaved samples, full scale ±1.</summary>
     public void Process(Span<float> frames)
     {
@@ -113,7 +132,7 @@ public sealed class PeakLimiter
             int at = (int)(n & _mask);
             for (int c = 0; c < channels; c++)
             {
-                float x = frames[(f * channels) + c] * gain;
+                float x = frames[(f * channels) + c] * gain * _ride;
                 _history[c][at] = x;
                 _history[c][at + _size] = x;
                 if (Math.Abs(x) > _quiet)
@@ -165,11 +184,34 @@ public sealed class PeakLimiter
             _box[_boxAt] = _held;
             _boxAt = _boxAt + 1 == _ahead ? 0 : _boxAt + 1;
             float applied = (float)(_boxSum / _ahead);
+            _ride += _rideStep;
+            _blockSum += applied;
+            if (++_blockCount == RideBlock)
+                Ride();
 
             int outAt = (int)((n - Delay) & _mask);
             for (int c = 0; c < channels; c++)
                 frames[(f * channels) + c] = n < Delay ? 0 : Math.Clamp(_history[c][outAt] * applied, -ceiling, ceiling);
         }
+    }
+
+    /// <summary>How hard the limiter has been working, smoothed over a second or two, and the ride
+    /// it calls for, glided to over the next block.</summary>
+    private void Ride()
+    {
+        double mean = _blockSum / _blockCount;
+        _blockSum = 0;
+        _blockCount = 0;
+        _workDb += (20 * Math.Log10(Math.Max(mean, 1e-6)) - _workDb) * (_blockSeconds / WorkSeconds);
+        if (double.IsFinite(MaxWorkDb))
+        {
+            double excess = -MaxWorkDb - _workDb;
+            if (excess > 0)
+                _rideDb -= excess * _blockSeconds / RideDownSeconds;
+            else if (_workDb > -MaxWorkDb / 2)
+                _rideDb = Math.Min(0, _rideDb + (RecoverDbPerSecond * _blockSeconds));
+        }
+        _rideStep = ((float)Math.Pow(10, _rideDb / 20) - _ride) / RideBlock;
     }
 
     private static int Wrap(int index, int length) => index >= length ? index - length : index;

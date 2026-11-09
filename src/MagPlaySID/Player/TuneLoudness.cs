@@ -31,6 +31,10 @@ internal static class TuneLoudness
         _ => ModGainDb,
     };
 
+    /// <summary>The most the limiter takes off for long before the gain rides down: a song mixed far
+    /// louder than most of its kind - a tenth of XMs - would otherwise be squashed by 8-14 dB.</summary>
+    public const double MaxLimitingDb = 3;
+
     public static PeakLimiter Limiter(int channels, int sampleRate, double gainDb) =>
-        new(channels, sampleRate, CeilingDb) { GainDb = gainDb };
+        new(channels, sampleRate, CeilingDb) { GainDb = gainDb, MaxWorkDb = MaxLimitingDb };
 }
