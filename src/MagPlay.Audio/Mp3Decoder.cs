@@ -82,14 +82,14 @@ public sealed class Mp3Decoder : AudioDecoder
                 int tag = at + 4 + side;
                 if (tag + 12 <= got && Encoding.ASCII.GetString(window, tag, 4) is "Xing" or "Info" && (window[tag + 7] & 1) != 0)
                 {
-                    long frames = (long)window[tag + 8] << 24 | window[tag + 9] << 16 | window[tag + 10] << 8 | window[tag + 11];
+                    long frames = ((long)window[tag + 8] << 24) | ((long)window[tag + 9] << 16) | ((long)window[tag + 10] << 8) | window[tag + 11];
                     if (frames > 0)
                         return (double)frames * perFrame / sampleRate;
                 }
                 int vbri = at + 4 + 32;
                 if (vbri + 18 <= got && Encoding.ASCII.GetString(window, vbri, 4) == "VBRI")
                 {
-                    long frames = (long)window[vbri + 14] << 24 | window[vbri + 15] << 16 | window[vbri + 16] << 8 | window[vbri + 17];
+                    long frames = ((long)window[vbri + 14] << 24) | ((long)window[vbri + 15] << 16) | ((long)window[vbri + 16] << 8) | window[vbri + 17];
                     if (frames > 0)
                         return (double)frames * perFrame / sampleRate;
                 }
