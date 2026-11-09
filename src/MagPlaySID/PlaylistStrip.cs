@@ -583,9 +583,13 @@ internal sealed class PlaylistStrip : Border
         var ending = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, Children = { length, songs } };
 
         // What is known about it, in a window of its own - a tap here is not a tap to play it.
+        // Grey as the length beside it, bright under the pointer - set on the icon itself, as the
+        // button's own colours never reached it and it showed white.
+        var infoIcon = Icon(InfoIcon, 14 * _scale, 14 * _scale);
+        infoIcon.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         var info = new Button
         {
-            Content = Icon(InfoIcon, 14 * _scale, 14 * _scale),
+            Content = infoIcon,
             Padding = new Thickness(5),
             Margin = new Thickness(6, 0, -4, 0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -593,6 +597,8 @@ internal sealed class PlaylistStrip : Border
         ToolTip.SetTip(info, "Info about the file and its songs");
         Quiet(info);
         info.Tapped += (_, e) => e.Handled = true;
+        info.PointerEntered += (_, _) => infoIcon.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
+        info.PointerExited += (_, _) => infoIcon.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         info.Click += (_, _) =>
         {
             if (info.DataContext is PlaylistTune tune)
