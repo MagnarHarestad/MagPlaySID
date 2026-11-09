@@ -40,6 +40,10 @@ internal sealed class Settings
     /// <summary>How far apart an Amiga module's left and right are, 0 mono to 1 the Amiga's own.</summary>
     public double StereoWidth { get; set; } = StereoSlider.Usual;
 
+    /// <summary>The stereo width chosen for each other kind of module - "S3M", "XM", "IT" - whose
+    /// instruments are panned where their composer put them: as the module has them until changed.</summary>
+    public Dictionary<string, double> StereoWidths { get; set; } = [];
+
     /// <summary>Which meter shows the sound's spectrum - Meter in the menu, or a click on it.</summary>
     public MeterKind Meter { get; set; }
 

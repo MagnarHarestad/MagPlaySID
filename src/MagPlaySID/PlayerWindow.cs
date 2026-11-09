@@ -235,7 +235,12 @@ internal sealed class PlayerWindow : Window
         };
         _stereo.Committed += () =>
         {
-            _settings.StereoWidth = _stereo.Value;
+            if (_module is not { } module)
+                return;
+            if (StereoKind(module) is { } kind)
+                _settings.StereoWidths[kind] = _stereo.Value;
+            else
+                _settings.StereoWidth = _stereo.Value;
             _settings.Save();
         };
         _strip.ShowRequested += () => ShowPlaylists(true);
@@ -778,6 +783,14 @@ internal sealed class PlayerWindow : Window
             Grid.SetColumn(_scopes[i], i);
         }
     }
+
+    /// <summary>The kind a module's stereo width is kept for: null for the Amiga's, whose four
+    /// channels are panned hard left and right; "S3M", "XM" or "IT" for those panned by their
+    /// instruments, which sound as they were made at full width.</summary>
+    private static string? StereoKind(ITrackerModule module) => module.Format is "S3M" or "XM" or "IT" ? module.Format : null;
+
+    private double StereoWidthFor(ITrackerModule module) =>
+        StereoKind(module) is { } kind ? _settings.StereoWidths.GetValueOrDefault(kind, 1) : _settings.StereoWidth;
 
     /// <summary>A voice heard alone: every other muted - or, when it is alone already, all heard again.</summary>
     private void Solo(int voice)
@@ -1438,7 +1451,14 @@ internal sealed class PlayerWindow : Window
                 audio.SetNotes(notes);
             _engine.Volume = _volumeKnob.Gain;
             if (_engine is ModuleTune moduleTune)
+            {
+                _stereo.Value = StereoWidthFor(moduleTune.Module);
+                _stereo.Reset = StereoKind(moduleTune.Module) is null ? StereoSlider.Usual : 1;
+                ToolTip.SetTip(_stereo, StereoKind(moduleTune.Module) is { } kind
+                    ? $"How wide {kind} modules play - kept apart from Amiga modules'"
+                    : "How wide Amiga modules play - kept apart from XM, IT and S3M modules'");
                 moduleTune.StereoWidth = _stereo.Value;
+            }
             BuildScopes(_engine.Voices);
             for (int voice = 0; voice < Math.Min(_scopes.Length, _muted.Length); voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);

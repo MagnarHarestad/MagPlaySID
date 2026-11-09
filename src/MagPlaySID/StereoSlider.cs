@@ -53,6 +53,10 @@ internal sealed class StereoSlider : Control
     /// <summary>The width has come to rest, to be kept: a drag let go, a scroll, a double-click.</summary>
     public event Action? Committed;
 
+    /// <summary>Where a double-click puts it back: <see cref="Usual"/> for an Amiga module, full
+    /// width for one panned by its instruments.</summary>
+    public double Reset { get; set; } = Usual;
+
     /// <summary>Left and right apart: 0 mono, 1 the Amiga's own stereo.</summary>
     public double Value
     {
@@ -100,7 +104,7 @@ internal sealed class StereoSlider : Control
         e.Handled = true;
         if (e.ClickCount == 2)
         {
-            Move(Usual);
+            Move(Reset);
             Committed?.Invoke();
             return;
         }
@@ -160,6 +164,8 @@ internal sealed class StereoSlider : Control
     public override void Render(DrawingContext context)
     {
         double centre = SliderWidth / 2, apart = _value * Half;
+        // Its whole area takes the pointer, not only the thin line and the dots drawn.
+        context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
         context.DrawLine(TrackPen, new Point(Inset, LineY), new Point(SliderWidth - Inset, LineY));
         if (apart > 0.5)
             context.DrawLine(LevelPen, new Point(centre - apart, LineY), new Point(centre + apart, LineY));
