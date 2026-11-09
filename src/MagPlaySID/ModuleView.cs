@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using MagPlay.Amiga;
@@ -45,6 +46,19 @@ internal sealed class ModuleView : Control
     private bool[]?[] _empties = [];
     private int _rowDigits = 2;
     private string[] _sampleLines = [];
+
+    /// <summary>The samples or instruments listed - empty slots left out - and the first shown: a
+    /// module with more than the panel holds scrolls, by the wheel or its bar, and follows the one
+    /// playing when it is out of sight and the list has not been moved for a while.</summary>
+    private int[] _listed = [];
+    private int _listFirst;
+    private long _listMoved = long.MinValue / 2;
+    private const double FollowAfterSeconds = 4;
+
+    /// <summary>Where the list was last drawn: its left, its top, and how many lines it holds.</summary>
+    private double _listLeft = double.MaxValue, _listTop;
+    private int _listShown = int.MaxValue;
+    private bool _draggingBar;
     private int _order = -1, _row = -1;
 
     /// <summary>How far into the row heard, in pixels: the rows are drawn again when it moves.</summary>
@@ -95,6 +109,7 @@ internal sealed class ModuleView : Control
             _cells = [];
             _empties = [];
             _sampleLines = [];
+            _listed = [];
         }
         else
         {
@@ -102,7 +117,12 @@ internal sealed class ModuleView : Control
             _empties = new bool[module.PatternCount][];
             _rowDigits = Enumerable.Range(0, module.PatternCount).Any(p => module.RowsIn(p) > 100) ? 3 : 2;
             _sampleLines = module.Samples.Select((s, i) => SampleLine(i + 1, s)).ToArray();
+            // An empty slot - ProTracker keeps it two bytes long - and no name: nothing to list.
+            _listed = Enumerable.Range(0, module.Samples.Count)
+                .Where(s => module.Samples[s].Bytes > 2 || !string.IsNullOrEmpty(module.Samples[s].Name)).ToArray();
         }
+        _listFirst = 0;
+        _listMoved = long.MinValue / 2;
         Width = ContentWidth;
         InvalidateVisual();
     }
@@ -135,6 +155,7 @@ internal sealed class ModuleView : Control
             foreach (int sample in playing)
                 _playing.Add(sample);
             changed = true;
+            Follow();
         }
         if (changed)
             InvalidateVisual();
@@ -263,17 +284,125 @@ internal sealed class ModuleView : Control
         y += RowHeight;
         Text(context, _placeText, left, y, SidPlayerPalette.Subtitle);
         y += RowHeight * 1.5;
-        for (int s = 0; s < _sampleLines.Length && y < height - RowHeight; s++)
+        _listLeft = left;
+        _listTop = y;
+        _listShown = Math.Max(1, (int)((height - RowHeight - y) / RowHeight) + 1);
+        _listFirst = Math.Clamp(_listFirst, 0, Math.Max(0, _listed.Length - _listShown));
+        for (int i = _listFirst; i < _listed.Length && i < _listFirst + _listShown; i++)
         {
-            // An empty slot - ProTracker keeps it two bytes long - and no name: nothing to list.
-            if (module.Samples[s].Bytes <= 2 && string.IsNullOrEmpty(module.Samples[s].Name))
-                continue;
+            int s = _listed[i];
             bool lit = _playing.Contains(s + 1);
             if (lit)
-                context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 40)), new Rect(left - 4, y, PanelWidth, RowHeight));
+                context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 40)), new Rect(left - 4, y, BarLeft - left + 2, RowHeight));
             Text(context, _sampleLines[s], left, y + 1, lit ? SidPlayerPalette.Title : SidPlayerPalette.Control, bold: lit);
             y += RowHeight;
         }
+
+        // The scroll bar, when there are more than it holds: its track, and the thumb where the list is.
+        if (Scrolls)
+        {
+            double track = _listShown * RowHeight, width = BarWidth;
+            context.FillRectangle(SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 40)), new Rect(BarLeft, _listTop, width, track), (float)(width / 2));
+            double thumb = Thumb;
+            double at = (track - thumb) * _listFirst / (_listed.Length - _listShown);
+            var ink = _draggingBar ? SidPlayerPalette.Title : SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 200);
+            context.FillRectangle(SidPlayerPalette.Brush(ink), new Rect(BarLeft, _listTop + at, width, thumb), (float)(width / 2));
+        }
+    }
+
+    /// <summary>The bar's left edge and width: in the panel's last characters, past the sizes.</summary>
+    private double BarLeft => _listLeft + (28.6 * _charWidth);
+    private double BarWidth => 5 * _scale;
+
+    private double Thumb => Math.Max(RowHeight, _listShown * RowHeight * _listShown / Math.Max(1, _listed.Length));
+
+    private bool Scrolls => _listed.Length > _listShown;
+
+    private bool OverList(Point p) => p.X >= _listLeft - 4 && p.Y >= _listTop - RowHeight;
+
+    private bool OverBar(Point p) => Scrolls && p.X >= BarLeft - (6 * _scale) && p.X <= BarLeft + BarWidth + (6 * _scale)
+        && p.Y >= _listTop && p.Y <= _listTop + (_listShown * RowHeight);
+
+    private void ScrollTo(int first)
+    {
+        first = Math.Clamp(first, 0, Math.Max(0, _listed.Length - _listShown));
+        _listMoved = Environment.TickCount64;
+        if (first == _listFirst)
+            return;
+        _listFirst = first;
+        InvalidateVisual();
+    }
+
+    /// <summary>The list scrolled to a sample or instrument playing, when none playing is in sight -
+    /// unless the listener moved it a moment ago.</summary>
+    private void Follow()
+    {
+        if (!Scrolls || _playing.Count == 0 || Environment.TickCount64 - _listMoved < FollowAfterSeconds * 1000)
+            return;
+        int nearest = -1;
+        for (int i = 0; i < _listed.Length; i++)
+        {
+            if (!_playing.Contains(_listed[i] + 1))
+                continue;
+            if (i >= _listFirst && i < _listFirst + _listShown)
+                return;
+            if (nearest < 0)
+                nearest = i;
+        }
+        if (nearest >= 0)
+            _listFirst = Math.Clamp(nearest - (_listShown / 3), 0, _listed.Length - _listShown);
+    }
+
+    /// <summary>The list moved to where the bar is pressed or dragged: the thumb's middle there.</summary>
+    private void DragBar(double y)
+    {
+        double track = _listShown * RowHeight, thumb = Thumb;
+        double share = Math.Clamp((y - _listTop - (thumb / 2)) / Math.Max(1, track - thumb), 0, 1);
+        ScrollTo((int)Math.Round(share * (_listed.Length - _listShown)));
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        if (Scrolls && OverList(e.GetPosition(this)))
+        {
+            ScrollTo(_listFirst - (int)Math.Round(e.Delta.Y * 3));
+            e.Handled = true;
+        }
+        base.OnPointerWheelChanged(e);
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(this);
+        if (point.Properties.IsLeftButtonPressed && OverBar(point.Position))
+        {
+            _draggingBar = true;
+            e.Pointer.Capture(this);
+            DragBar(point.Position.Y);
+            InvalidateVisual();
+            e.Handled = true;
+        }
+        base.OnPointerPressed(e);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        var p = e.GetPosition(this);
+        if (_draggingBar)
+            DragBar(p.Y);
+        Cursor = _draggingBar || OverBar(p) ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
+        base.OnPointerMoved(e);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        if (_draggingBar)
+        {
+            _draggingBar = false;
+            e.Pointer.Capture(null);
+            InvalidateVisual();
+        }
+        base.OnPointerReleased(e);
     }
 
     private static string SampleLine(int number, ModuleSample sample)
