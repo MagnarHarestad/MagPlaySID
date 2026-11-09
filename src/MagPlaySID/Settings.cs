@@ -16,8 +16,6 @@ internal sealed class Settings
 
     private static readonly string FilePath = Path.Combine(Folder, "settings.json");
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
-
     /// <summary>Whether a newer release is looked for at start. Null until the user has been
     /// asked, which is the first time MagPlaySID starts: off until they say yes.</summary>
     public bool? CheckForUpdates { get; set; }
@@ -78,7 +76,7 @@ internal sealed class Settings
     {
         try
         {
-            return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath), Json) ?? new Settings();
+            return JsonSerializer.Deserialize(File.ReadAllText(FilePath), AppJson.Default.Settings) ?? new Settings();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -91,7 +89,7 @@ internal sealed class Settings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, AppJson.Default.Settings));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

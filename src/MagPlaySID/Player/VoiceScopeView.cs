@@ -178,7 +178,7 @@ internal sealed class VoiceScopeView : Control
                     break;
             }
         }
-        _label.Draw(context, new Point(8, bounds.Height - _label.Height - 4));
+        _label!.Draw(context, new Point(8, bounds.Height - _label.Height - 4));
     }
 
     private void DrawTrace(DrawingContext context, Rect bounds, double midY)

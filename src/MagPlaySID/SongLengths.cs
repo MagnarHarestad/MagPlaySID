@@ -31,8 +31,6 @@ internal static class SongLengths
 {
     private static readonly string FilePath = Path.Combine(Settings.Folder, "songlengths.json");
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
-
     private static Dictionary<string, SongLengthEntry>? _user;
 
     private static Dictionary<string, Dictionary<string, string>>? _hvsc;
@@ -113,7 +111,7 @@ internal static class SongLengths
         try
         {
             Directory.CreateDirectory(Settings.Folder);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(lengths, Json));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(lengths, AppJson.Default.DictionaryStringSongLengthEntry));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -152,7 +150,7 @@ internal static class SongLengths
     {
         try
         {
-            var read = JsonSerializer.Deserialize<Dictionary<string, SongLengthEntry>>(File.ReadAllText(FilePath), Json) ?? [];
+            var read = JsonSerializer.Deserialize(File.ReadAllText(FilePath), AppJson.Default.DictionaryStringSongLengthEntry) ?? [];
             // Keys as written by hand: an MD5 in either case, a file name in any.
             return new Dictionary<string, SongLengthEntry>(read, StringComparer.OrdinalIgnoreCase);
         }
@@ -165,6 +163,6 @@ internal static class SongLengths
     private static Dictionary<string, Dictionary<string, string>> LoadHvsc()
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("HvscLengths.json");
-        return stream is null ? [] : JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(stream) ?? [];
+        return stream is null ? [] : JsonSerializer.Deserialize(stream, AppJson.Default.DictionaryStringDictionaryStringString) ?? [];
     }
 }

@@ -27,8 +27,6 @@ internal static class TuneHistory
 {
     private static readonly string FilePath = Path.Combine(Settings.Folder, "tunes.json");
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
-
     private static Dictionary<string, TuneRecord>? _tunes;
 
     private static Dictionary<string, TuneRecord> Tunes => _tunes ??= Load();
@@ -72,7 +70,7 @@ internal static class TuneHistory
     {
         try
         {
-            return JsonSerializer.Deserialize<Dictionary<string, TuneRecord>>(File.ReadAllText(FilePath), Json) ?? [];
+            return JsonSerializer.Deserialize(File.ReadAllText(FilePath), AppJson.Default.DictionaryStringTuneRecord) ?? [];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -85,7 +83,7 @@ internal static class TuneHistory
         try
         {
             Directory.CreateDirectory(Settings.Folder);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(Tunes, Json));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(Tunes, AppJson.Default.DictionaryStringTuneRecord));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

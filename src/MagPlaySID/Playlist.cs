@@ -355,8 +355,6 @@ internal static class Favourites
 {
     private static readonly string FilePath = Path.Combine(Settings.Folder, "playlists.json");
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
-
     private static readonly StringComparer SamePaths =
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -369,9 +367,9 @@ internal static class Favourites
     /// <summary>A tune repeated until another is chosen.</summary>
     public const int Forever = 0;
 
-    private sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own, string? Heart = null);
+    internal sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own, string? Heart = null);
 
-    private sealed record Kept(List<Stored>? Playlists, Dictionary<string, int>? FirstSongs, Dictionary<string, int>? Repeats = null);
+    internal sealed record Kept(List<Stored>? Playlists, Dictionary<string, int>? FirstSongs, Dictionary<string, int>? Repeats = null);
 
     /// <summary>The song the user chose to play first of the tune at <paramref name="path"/>; null
     /// when they have not chosen one.</summary>
@@ -407,8 +405,8 @@ internal static class Favourites
             // A file from before first songs were kept is the playlists' list alone.
             string text = File.ReadAllText(FilePath);
             var kept = text.TrimStart().StartsWith('[')
-                ? new Kept(JsonSerializer.Deserialize<List<Stored>>(text, Json), null)
-                : JsonSerializer.Deserialize<Kept>(text, Json);
+                ? new Kept(JsonSerializer.Deserialize(text, AppJson.Default.ListStored), null)
+                : JsonSerializer.Deserialize(text, AppJson.Default.Kept);
             _firstSongs = new Dictionary<string, int>(kept?.FirstSongs ?? [], SamePaths);
             _repeats = new Dictionary<string, int>(kept?.Repeats ?? [], SamePaths);
             var playlists = new List<Playlist>();
@@ -432,7 +430,7 @@ internal static class Favourites
         {
             Directory.CreateDirectory(Settings.Folder);
             var stored = playlists.Select(p => new Stored(p.Name, p.OwnOrder.Select(t => t.Path).ToList(), p.Sort, p.Heart)).ToList();
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(new Kept(stored, _firstSongs, _repeats), Json));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(new Kept(stored, _firstSongs, _repeats), AppJson.Default.Kept));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

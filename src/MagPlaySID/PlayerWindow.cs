@@ -52,9 +52,12 @@ internal sealed class PlayerWindow : Window
 
     private readonly SpectrumView _spectrum = new();
     private readonly LandscapeView _landscape = new();
-    private readonly NeonSpectrumView _neon = new();
-    private readonly NinjaView _ninja = new();
-    private readonly DireView _dire = new();
+    /// <summary>The meters made only when first chosen - Last Ninja's and Dire Guys' scenes take a
+    /// while to build, and most starts show another - and the grid they go in.</summary>
+    private NeonSpectrumView? _neon;
+    private NinjaView? _ninja;
+    private DireView? _dire;
+    private Grid _spectrumHost = null!;
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
     private readonly TransportButton _previous = new(TransportGlyph.Previous);
@@ -423,10 +426,8 @@ internal sealed class PlayerWindow : Window
         };
         spectrumHost.Children.Add(_spectrum);
         spectrumHost.Children.Add(_landscape);
-        spectrumHost.Children.Add(_neon);
-        spectrumHost.Children.Add(_ninja);
-        spectrumHost.Children.Add(_dire);
         spectrumHost.Children.Add(_empty);
+        _spectrumHost = spectrumHost;
         spectrumHost.PointerPressed += (_, e) =>
         {
             if (e.GetCurrentPoint(spectrumHost).Properties.IsLeftButtonPressed)
@@ -683,11 +684,31 @@ internal sealed class PlayerWindow : Window
     /// one chosen while the tune plays or stands still shows it as it is.</summary>
     private void ShowMeter()
     {
-        _landscape.IsVisible = _landscapeMeter.IsChecked = _settings.Meter == MeterKind.Landscape;
-        _neon.IsVisible = _neonMeter.IsChecked = _settings.Meter == MeterKind.Neon;
-        _ninja.IsVisible = _ninjaMeter.IsChecked = _settings.Meter == MeterKind.LastNinja;
-        _dire.IsVisible = _direMeter.IsChecked = _settings.Meter == MeterKind.DireGuys;
-        _spectrum.IsVisible = _spectrumMeter.IsChecked = !_landscape.IsVisible && !_neon.IsVisible && !_ninja.IsVisible && !_dire.IsVisible;
+        var meter = _settings.Meter;
+        if (meter == MeterKind.Neon)
+            _neon ??= AddMeter(new NeonSpectrumView());
+        else if (meter == MeterKind.LastNinja)
+            _ninja ??= AddMeter(new NinjaView());
+        else if (meter == MeterKind.DireGuys)
+            _dire ??= AddMeter(new DireView());
+        _landscape.IsVisible = _landscapeMeter.IsChecked = meter == MeterKind.Landscape;
+        _neonMeter.IsChecked = meter == MeterKind.Neon;
+        _ninjaMeter.IsChecked = meter == MeterKind.LastNinja;
+        _direMeter.IsChecked = meter == MeterKind.DireGuys;
+        if (_neon is not null)
+            _neon.IsVisible = _neonMeter.IsChecked;
+        if (_ninja is not null)
+            _ninja.IsVisible = _ninjaMeter.IsChecked;
+        if (_dire is not null)
+            _dire.IsVisible = _direMeter.IsChecked;
+        _spectrum.IsVisible = _spectrumMeter.IsChecked = meter is not (MeterKind.Landscape or MeterKind.Neon or MeterKind.LastNinja or MeterKind.DireGuys);
+    }
+
+    /// <summary>A meter made the first time it is chosen, put under the empty window's text.</summary>
+    private T AddMeter<T>(T meter) where T : Control
+    {
+        _spectrumHost.Children.Insert(_spectrumHost.Children.IndexOf(_empty), meter);
+        return meter;
     }
 
     private void ShowFontSize()
@@ -1419,9 +1440,9 @@ internal sealed class PlayerWindow : Window
         _metersAt = -1;
         _spectrum.Clear();
         _landscape.Clear();
-        _neon.Clear();
-        _ninja.Clear();
-        _dire.Clear();
+        _neon?.Clear();
+        _ninja?.Clear();
+        _dire?.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
         _piano.Clear();
@@ -1969,9 +1990,9 @@ internal sealed class PlayerWindow : Window
             _metersAt = at;
             _spectrum.Update(engine, at);
             _landscape.Update(_spectrum.Relative, at);
-            _neon.Update(_spectrum.Relative, at);
-            _ninja.Update(engine, at);
-            _dire.Update(engine, at);
+            _neon?.Update(_spectrum.Relative, at);
+            _ninja?.Update(engine, at);
+            _dire?.Update(engine, at);
             foreach (var scope in _scopes)
                 scope.Update(engine, at);
             _piano.Update(engine, at, _muted);
@@ -2025,9 +2046,9 @@ internal sealed class PlayerWindow : Window
             _metersAt = -1;
             _spectrum.Clear();
             _landscape.Clear();
-            _neon.Clear();
-            _ninja.Clear();
-            _dire.Clear();
+            _neon?.Clear();
+            _ninja?.Clear();
+            _dire?.Clear();
             foreach (var scope in _scopes)
                 scope.Clear();
             _piano.Clear();
