@@ -25,17 +25,29 @@ internal static class FlacEncoder
             throw new ArgumentException("Mono or stereo.", nameof(channels));
         var frames = new MemoryStream();
         int smallest = int.MaxValue, largest = 0;
-        var bits = new BitWriter();
         int length = samples.Length / channels;
-        var work = new Channels();
-        for (int start = 0, number = 0; start < length; start += BlockSize, number++)
+        // Each block a frame of its own, numbered, with its own checksums: coded on all the cores
+        // but one side by side, and written in order.
+        int count = (length + BlockSize - 1) / BlockSize;
+        var coded = new byte[count][];
+        var all = samples.ToArray();
+        Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) },
+            () => (Bits: new BitWriter(), Work: new Channels()),
+            (number, _, local) =>
+            {
+                int start = number * BlockSize;
+                int size = Math.Min(BlockSize, length - start);
+                local.Bits.Clear();
+                WriteFrame(local.Bits, all.AsSpan(start * channels, size * channels), channels, number, sampleRate, local.Work);
+                coded[number] = local.Bits.Bytes.ToArray();
+                return local;
+            },
+            _ => { });
+        foreach (var frame in coded)
         {
-            int count = Math.Min(BlockSize, length - start);
-            bits.Clear();
-            WriteFrame(bits, samples.Slice(start * channels, count * channels), channels, number, sampleRate, work);
-            frames.Write(bits.Bytes);
-            smallest = Math.Min(smallest, bits.Bytes.Length);
-            largest = Math.Max(largest, bits.Bytes.Length);
+            frames.Write(frame);
+            smallest = Math.Min(smallest, frame.Length);
+            largest = Math.Max(largest, frame.Length);
         }
         if (length == 0)
             smallest = 0;

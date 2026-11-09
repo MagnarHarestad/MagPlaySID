@@ -239,17 +239,7 @@ internal static class SoundExport
         frames.Position = 0;
         frames.CopyTo(output);
 
-        var encoder = new Mp3Encoder(output, rate, Mp3BitRate, channels);
-        var frame = new short[Mp3Encoder.SamplesPerFrame * channels];
-        for (int at = 0; at < samples.Length; at += frame.Length)
-        {
-            var part = samples.Slice(at, Math.Min(frame.Length, samples.Length - at));
-            part.CopyTo(frame);
-            frame.AsSpan(part.Length).Clear();
-            encoder.Encode(frame);
-        }
-        // One frame of silence more: the filter bank and MDCT hold back the last of the sound.
-        Array.Clear(frame);
-        encoder.Encode(frame);
+        // Its frames, and one of silence more: the filter bank and MDCT hold back the last of the sound.
+        Mp3Encoder.EncodeAll(output, samples, rate, Mp3BitRate, channels);
     }
 }

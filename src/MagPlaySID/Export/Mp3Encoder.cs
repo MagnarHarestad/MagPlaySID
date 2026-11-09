@@ -201,6 +201,62 @@ internal sealed class Mp3Encoder
         _frameLength = 0;
     }
 
+    /// <summary>
+    /// The whole of <paramref name="samples"/> - left and right in turn for stereo - written as
+    /// frames, and one frame of silence after, for what the filter bank holds back. Coded in runs of
+    /// frames on all the cores but one side by side: a frame's quantising is its own - no reservoir
+    /// is carried between frames - and its filter bank needs only the frame before, which a run is
+    /// started on and puts aside. The frames are the same as one encoder's, byte for byte.
+    /// </summary>
+    public static void EncodeAll(Stream output, ReadOnlySpan<short> samples, int sampleRate, int bitRate, int channels)
+    {
+        int perFrame = SamplesPerFrame * channels;
+        int count = ((samples.Length + perFrame - 1) / perFrame) + 1;
+        var all = new short[count * perFrame];
+        samples.CopyTo(all);
+        const int Run = 64;
+        int runs = (count + Run - 1) / Run;
+        var coded = new byte[runs][];
+        Parallel.For(0, runs, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) }, run =>
+        {
+            int first = run * Run, end = Math.Min(count, first + Run);
+            var stream = new MemoryStream();
+            var encoder = new Mp3Encoder(stream, sampleRate, bitRate, channels);
+            encoder.SkipFrames(first);
+            if (first > 0)
+                encoder.Prime(all.AsSpan((first - 1) * perFrame, perFrame));
+            for (int frame = first; frame < end; frame++)
+                encoder.Encode(all.AsSpan(frame * perFrame, perFrame));
+            coded[run] = stream.ToArray();
+        });
+        foreach (var bytes in coded)
+            output.Write(bytes);
+    }
+
+    /// <summary>The padding slots as they are after <paramref name="frames"/> frames: they follow
+    /// the bit rate's fraction of a slot a frame, from the first.</summary>
+    private void SkipFrames(int frames)
+    {
+        if (_fractionSlots == 0)
+            return;
+        for (int i = 0; i < frames; i++)
+        {
+            _padding = _slotLag <= _fractionSlots - 1.0 ? 1 : 0;
+            _slotLag += _padding - _fractionSlots;
+        }
+    }
+
+    /// <summary>The filter bank run through the frame before, as it would have been: nothing written.</summary>
+    private void Prime(ReadOnlySpan<short> samples)
+    {
+        for (int ch = 0; ch < _channels; ch++)
+        {
+            for (int i = 0; i < SamplesPerFrame; i++)
+                _channelSamples[i] = samples[(i * _channels) + ch];
+            Transform(ch, _channelSamples);
+        }
+    }
+
     // ------------------------------------------------------------------ fixed point
 
     private static int Mul(int a, int b) => (int)(((long)a * b) >> 32);
@@ -336,6 +392,12 @@ internal sealed class Mp3Encoder
             {
                 info.Step = SearchStep(most, quantised, info);
                 info.Part23Length = InnerLoop(quantised, most, info);
+            }
+            else
+            {
+                // Silence: its gain says nothing - the one a first frame has, not the frame before's,
+                // so a run of frames coded on its own codes it the same.
+                info.Step = 0;
             }
             _reservoir += _meanBits - info.Part23Length;
             info.GlobalGain = info.Step + 210;
