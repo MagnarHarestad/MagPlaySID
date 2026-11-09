@@ -111,18 +111,20 @@ public sealed class Vic(int cyclesPerLine, int lines)
 
         long at = start;
         int length = (int)(end - start);
-        if (_spritesOn == 0 && _registers[0x15] == 0 && SpritesFetched(start / CyclesPerLine - 1) == 0)
+        Locate(start);
+        if (_spritesOn == 0 && _registers[0x15] == 0 && SpritesFetched(_line - 1) == 0)
         {
             // Bad lines alone: a read in one waits to its end - worked out line by line, not cycle
             // by cycle.
-            long lineStart = at - at % CyclesPerLine;
-            bool bad = BadLineStart(at) >= 0;
+            long lineStart = _lineStart;
+            bool bad = _lineBad;
             for (int i = 0; i < length; i++)
             {
                 if (at >= lineStart + CyclesPerLine)
                 {
-                    lineStart += CyclesPerLine;
-                    bad = BadLineStart(at) >= 0;
+                    Locate(at);
+                    lineStart = _lineStart;
+                    bad = _lineBad;
                 }
                 long offset = at - lineStart;
                 if (bad && (i < writesFrom || i >= writesTo) && offset >= BadFrom && offset < BadFrom + 43)
@@ -148,31 +150,70 @@ public sealed class Vic(int cyclesPerLine, int lines)
     /// cycles to his 54, the last of the 40 character fetches.</summary>
     public static int BadFrom { get; set; } = 11;
 
+    /// <summary>The line <see cref="Locate"/> last found, where it starts, and whether it is a bad
+    /// line - kept, as asked for cycle after cycle, until a cycle past it or a register written:
+    /// a 64-bit division per cycle made a tune with sprites on run a quarter as fast.</summary>
+    private long _line, _lineStart;
+    private bool _lineBad;
+    private int _lineFor = -1;
+
+    /// <summary>Bumped by each register written, which may change what a line is.</summary>
+    private int _written;
+
+    /// <summary>The line <paramref name="cycle"/> is in, as <see cref="_line"/>, <see
+    /// cref="_lineStart"/> and <see cref="_lineBad"/>.</summary>
+    private void Locate(long cycle)
+    {
+        long offset = cycle - _lineStart;
+        if (_lineFor == _written && offset >= 0 && offset < CyclesPerLine)
+            return;
+        _line = cycle / CyclesPerLine;
+        _lineStart = _line * CyclesPerLine;
+        _lineBad = BadLineStart(cycle) >= 0;
+        _lineFor = _written;
+    }
+
     /// <summary>Whether a read on <paramref name="cycle"/> must wait for the VIC.</summary>
     private bool Blocked(long cycle)
     {
-        int offset = (int)(cycle % CyclesPerLine);
-        long bad = BadLineStart(cycle);
-        if (bad >= 0 && offset >= BadFrom && offset < BadFrom + 43)
+        Locate(cycle);
+        int offset = (int)(cycle - _lineStart);
+        if (_lineBad && offset >= BadFrom && offset < BadFrom + 43)
             return true;
 
         // A sprite's line asks for the bus three cycles before its fetches, the last three sprites'
         // in the line after - so this line's sprites and the line before's.
-        long line = cycle / CyclesPerLine;
+        long line = _line;
         AdvanceSprites(cycle + 1);
         return SpriteBlocks(SpritesFetched(line), offset) || SpriteBlocks(SpritesFetched(line - 1), offset + CyclesPerLine);
     }
 
     /// <summary>Whether one of the sprites <paramref name="mask"/> keeps the bus <paramref
-    /// name="offset"/> cycles into the line they were found on.</summary>
-    private bool SpriteBlocks(int mask, int offset)
+    /// name="offset"/> cycles into the line they were found on - looked up, as asked for every
+    /// cycle a tune with sprites reads on: <see cref="SpriteBlocksWorkedOut"/> for each mask and
+    /// offset, made once.</summary>
+    private bool SpriteBlocks(int mask, int offset) =>
+        mask != 0 && _spriteBlocks[(mask * 2 * CyclesPerLine) + offset];
+
+    private readonly bool[] _spriteBlocks = SpriteBlockTable(cyclesPerLine);
+
+    private static bool[] SpriteBlockTable(int cyclesPerLine)
+    {
+        var table = new bool[256 * 2 * cyclesPerLine];
+        for (int mask = 0; mask < 256; mask++)
+            for (int offset = 0; offset < 2 * cyclesPerLine; offset++)
+                table[(mask * 2 * cyclesPerLine) + offset] = SpriteBlocksWorkedOut(cyclesPerLine, mask, offset);
+        return table;
+    }
+
+    private static bool SpriteBlocksWorkedOut(int cyclesPerLine, int mask, int offset)
     {
         if (mask == 0)
             return false;
         // Sprite n is fetched in the two cycles from Bauer's cycle 58 + 2n on PAL, the bus asked
         // for 3 before: here, where a line starts at 0, from CyclesPerLine - 9 + 2n - which
         // matches VICE's samples in Comaland's sprite part write for write.
-        int first = offset - (CyclesPerLine - 9);
+        int first = offset - (cyclesPerLine - 9);
         if (first < 0)
             return false;
         for (int sprite = 0; sprite < 8; sprite++)
@@ -207,12 +248,19 @@ public sealed class Vic(int cyclesPerLine, int lines)
     /// <summary>The sprites run on to <paramref name="cycle"/>: what happens on the cycles before it.</summary>
     private void AdvanceSprites(long cycle)
     {
+        // Nothing happens before the next count or check: only the time moves on.
+        if (cycle <= _spriteEvent)
+        {
+            if (_spritesAt < cycle)
+                _spritesAt = cycle;
+            return;
+        }
         while (_spritesAt < cycle)
         {
             if (_spritesOn == 0 && _registers[0x15] == 0)
             {
                 _spritesAt = cycle;
-                return;
+                break;
             }
             long line = _spritesAt / CyclesPerLine;
             int offset = (int)(_spritesAt % CyclesPerLine);
@@ -236,6 +284,18 @@ public sealed class Vic(int cyclesPerLine, int lines)
                 _spritesAt = (line + 1) * CyclesPerLine;
         }
         _spritesAt = Math.Max(_spritesAt, cycle);
+        _spriteEvent = NextSpriteEvent(_spritesAt);
+    }
+
+    /// <summary>The cycle of the first count or check at or after <see cref="_spritesAt"/>, which
+    /// happens once the sprites are run past it; -1 before the sprites have been run at all.</summary>
+    private long _spriteEvent = -1;
+
+    private long NextSpriteEvent(long at)
+    {
+        long line = at / CyclesPerLine;
+        int offset = (int)(at % CyclesPerLine);
+        return line * CyclesPerLine + (offset <= CountAt ? CountAt : offset <= CheckAt ? CheckAt : CyclesPerLine + CountAt);
     }
 
     /// <summary>Cycles 15 and 16: a sprite whose flip-flop is set has had its three bytes for the
@@ -309,6 +369,7 @@ public sealed class Vic(int cyclesPerLine, int lines)
         register &= 0x3F;
         value &= 0xFF;
         _registers[register] = (byte)value;
+        _written++;
         switch (register)
         {
             case 0x11:

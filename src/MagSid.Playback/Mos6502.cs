@@ -335,15 +335,15 @@ public sealed class Mos6502
             case 0xCC: Compare(Y, Read(Absolute())); break;
 
             // --- increment / decrement ---
-            case 0xE6: Modify(ZeroPage(), v => v + 1); break;
-            case 0xF6: Modify(ZeroPageX(), v => v + 1); break;
-            case 0xEE: Modify(Absolute(), v => v + 1); break;
-            case 0xFE: Modify(AbsoluteX(), v => v + 1); break;
+            case 0xE6: Modify(ZeroPage(), Change.Increment); break;
+            case 0xF6: Modify(ZeroPageX(), Change.Increment); break;
+            case 0xEE: Modify(Absolute(), Change.Increment); break;
+            case 0xFE: Modify(AbsoluteX(), Change.Increment); break;
 
-            case 0xC6: Modify(ZeroPage(), v => v - 1); break;
-            case 0xD6: Modify(ZeroPageX(), v => v - 1); break;
-            case 0xCE: Modify(Absolute(), v => v - 1); break;
-            case 0xDE: Modify(AbsoluteX(), v => v - 1); break;
+            case 0xC6: Modify(ZeroPage(), Change.Decrement); break;
+            case 0xD6: Modify(ZeroPageX(), Change.Decrement); break;
+            case 0xCE: Modify(Absolute(), Change.Decrement); break;
+            case 0xDE: Modify(AbsoluteX(), Change.Decrement); break;
 
             case 0xE8: X = (X + 1) & 0xFF; SetZn(X); break;
             case 0xCA: X = (X - 1) & 0xFF; SetZn(X); break;
@@ -352,28 +352,28 @@ public sealed class Mos6502
 
             // --- shifts and rotates ---
             case 0x0A: A = Asl(A); break;
-            case 0x06: Modify(ZeroPage(), Asl); break;
-            case 0x16: Modify(ZeroPageX(), Asl); break;
-            case 0x0E: Modify(Absolute(), Asl); break;
-            case 0x1E: Modify(AbsoluteX(), Asl); break;
+            case 0x06: Modify(ZeroPage(), Change.Asl); break;
+            case 0x16: Modify(ZeroPageX(), Change.Asl); break;
+            case 0x0E: Modify(Absolute(), Change.Asl); break;
+            case 0x1E: Modify(AbsoluteX(), Change.Asl); break;
 
             case 0x4A: A = Lsr(A); break;
-            case 0x46: Modify(ZeroPage(), Lsr); break;
-            case 0x56: Modify(ZeroPageX(), Lsr); break;
-            case 0x4E: Modify(Absolute(), Lsr); break;
-            case 0x5E: Modify(AbsoluteX(), Lsr); break;
+            case 0x46: Modify(ZeroPage(), Change.Lsr); break;
+            case 0x56: Modify(ZeroPageX(), Change.Lsr); break;
+            case 0x4E: Modify(Absolute(), Change.Lsr); break;
+            case 0x5E: Modify(AbsoluteX(), Change.Lsr); break;
 
             case 0x2A: A = Rol(A); break;
-            case 0x26: Modify(ZeroPage(), Rol); break;
-            case 0x36: Modify(ZeroPageX(), Rol); break;
-            case 0x2E: Modify(Absolute(), Rol); break;
-            case 0x3E: Modify(AbsoluteX(), Rol); break;
+            case 0x26: Modify(ZeroPage(), Change.Rol); break;
+            case 0x36: Modify(ZeroPageX(), Change.Rol); break;
+            case 0x2E: Modify(Absolute(), Change.Rol); break;
+            case 0x3E: Modify(AbsoluteX(), Change.Rol); break;
 
             case 0x6A: A = Ror(A); break;
-            case 0x66: Modify(ZeroPage(), Ror); break;
-            case 0x76: Modify(ZeroPageX(), Ror); break;
-            case 0x6E: Modify(Absolute(), Ror); break;
-            case 0x7E: Modify(AbsoluteX(), Ror); break;
+            case 0x66: Modify(ZeroPage(), Change.Ror); break;
+            case 0x76: Modify(ZeroPageX(), Change.Ror); break;
+            case 0x6E: Modify(Absolute(), Change.Ror); break;
+            case 0x7E: Modify(AbsoluteX(), Change.Ror); break;
 
             // --- jumps ---
             // BRK: on a machine, an interrupt through $FFFE with the break flag pushed set; over
@@ -632,9 +632,22 @@ public sealed class Mos6502
         return value;
     }
 
-    private void Modify(int address, Func<int, int> operation)
+    /// <summary>What a read-modify-write instruction does to its byte - named, not a delegate: an
+    /// instance method made a Func allocates each time, and a digi's NMI shifts thousands a second.</summary>
+    private enum Change { Increment, Decrement, Asl, Lsr, Rol, Ror }
+
+    private void Modify(int address, Change change)
     {
-        int result = operation(ReadModify(address)) & 0xFF;
+        int value = ReadModify(address);
+        int result = change switch
+        {
+            Change.Increment => value + 1,
+            Change.Decrement => value - 1,
+            Change.Asl => Asl(value),
+            Change.Lsr => Lsr(value),
+            Change.Rol => Rol(value),
+            _ => Ror(value),
+        } & 0xFF;
         Write(address, result);
         SetZn(result);
     }

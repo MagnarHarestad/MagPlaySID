@@ -156,6 +156,10 @@ public sealed class C64 : IMemoryBus
     /// <summary>The cycle each call started on: an IRQ taken while no other IRQ was being run.</summary>
     public IReadOnlyList<long> Calls => _calls;
 
+    /// <summary>Whether every call is kept in <see cref="Calls"/>; when not, only the first - a tune
+    /// played for listening calls its player thousands of times a second, for hours.</summary>
+    public bool KeepsCalls { get; set; } = true;
+
     /// <summary>The cycle from which no chip has been heard, by its envelopes' own times; null
     /// while any voice sounds.</summary>
     public long? QuietSince()
@@ -353,12 +357,23 @@ public sealed class C64 : IMemoryBus
     private void Enter(bool nmi)
     {
         Unwind();
-        if (!nmi && !_interrupts.Any(i => !i.Nmi))
+        if (!nmi && !InCall())
         {
-            _calls.Add(Cpu.Cycles);
+            if (KeepsCalls || _calls.Count == 0)
+                _calls.Add(Cpu.Cycles);
             CallStarting?.Invoke();
         }
         _interrupts.Add((nmi, Cpu.SP & 0xFF));
+    }
+
+    /// <summary>Whether an IRQ is being run - looked for without LINQ, which would allocate an
+    /// enumerator on every interrupt.</summary>
+    private bool InCall()
+    {
+        foreach (var (nmi, _) in _interrupts)
+            if (!nmi)
+                return true;
+        return false;
     }
 
     /// <summary>The interrupts left - by an RTI, or by a tune that resets the stack - are those whose

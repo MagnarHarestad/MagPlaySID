@@ -97,6 +97,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         }
 
         _tune = SidTune.Load(file, Math.Clamp(song, 1, Math.Max(1, file.Songs)), this, record: false);
+        _tune.Computer.KeepsCalls = false;
         File = file;
         Song = _tune.Song;
         ClockHz = Machines.ClockHz(_tune.Computer.Machine);
