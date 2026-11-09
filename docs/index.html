@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MagPlaySID - plays C64 .sid tunes, Amiga modules and recordings, and shows how they are built</title>
-<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text or sheet music, or its sound as WAV, FLAC or MP3. Plays Amiga ProTracker modules and S3M, XM and IT modules too, and WAV, FLAC and MP3 recordings with their notes heard as they play.">
+<meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text, sheet music or MIDI, or its sound as WAV, FLAC or MP3. Plays Amiga ProTracker modules and S3M, XM and IT modules too, and WAV, FLAC and MP3 recordings with their notes heard as they play.">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="style.css?v=2">
 </head>
@@ -15,7 +15,7 @@
 <main class="wrap">
   <section class="hero">
     <img src="logo.png" alt="MagPlaySID logo">
-    <h1>MagPlaySID <span id="version">v1.41</span></h1>
+    <h1>MagPlaySID <span id="version">v1.42</span></h1>
     <p class="released">Release date: <time id="released" datetime="2026-11-09">2026-11-09</time></p>
     <p>A player for Commodore 64 music that shows how a tune is built. Drop any <code>.sid</code> on it:
       it plays on an emulated C64, and you see it as a tracker would - its notes, instruments and effects
@@ -25,9 +25,9 @@
       <a class="button" id="windows" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">Download for Windows</a>
       <small>Free and open source · Windows 10/11, 64-bit · nothing to install, .NET is inside</small>
       <p class="also">Also for
-        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.41/MagPlaySID-1.41-macos-arm64.zip">macOS · Apple Silicon</a>
-        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.41/MagPlaySID-1.41-macos-x64.zip">macOS · Intel</a>
-        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.41/MagPlaySID-1.41-linux-x64.tar.gz">Linux · x64</a>
+        <a id="macos-arm64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.42/MagPlaySID-1.42-macos-arm64.zip">macOS · Apple Silicon</a>
+        <a id="macos-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.42/MagPlaySID-1.42-macos-x64.zip">macOS · Intel</a>
+        <a id="linux-x64" href="https://github.com/MagnarHarestad/MagPlaySID/releases/download/v1.42/MagPlaySID-1.42-linux-x64.tar.gz">Linux · x64</a>
         <a class="plain" id="notes" href="https://github.com/MagnarHarestad/MagPlaySID/releases/latest">release notes</a>
         <a class="plain" href="#mac">opening it on a Mac</a></p>
     </div>
@@ -49,7 +49,7 @@
     <div class="card"><div class="i">📜</div><h3>Rows that scroll</h3><p>Each voice's rows - note, instrument, effects - go past as they sound. Click a voice to see its instrument: envelope, hard restart, and the wave, pulse and filter programs.</p></div>
     <div class="card"><div class="i">🎹</div><h3>A piano</h3><p>Eight octaves along the bottom, each voice's key lit in its colour as loud as its envelope - an arpeggio, a slide or a drum shows as it plays. For a recording, every note heard is lit.</p></div>
     <div class="card"><div class="i">🎛️</div><h3>2SID and 3SID</h3><p>Tunes for two or three SID chips play on all of them, each the model its header names, with a scope and score columns for every voice - six or nine voices side by side.</p></div>
-    <div class="card"><div class="i">📝</div><h3>Sheet music and text</h3><p><b>Export notes</b> saves the song as the rows read it: as <b>sheet music</b>, a PDF with a staff for each voice in bars of 4/4, or as <b>text</b>, each voice's notes and effects with their timing.</p></div>
+    <div class="card"><div class="i">📝</div><h3>Sheet music, text, MIDI</h3><p><b>Export notes</b> saves the song as the rows read it: as <b>sheet music</b>, a PDF with a staff for each voice, as <b>text</b>, or as <b>MIDI</b>, a track for each voice - for modules too.</p></div>
     <div class="card"><div class="i">💿</div><h3>Save the sound</h3><p><b>Export sound</b> saves the song as <b>WAV</b>, <b>FLAC</b> or <b>MP3</b>, made many times faster than it plays, fading out when it loops and leaving out muted voices. Modules are saved in stereo.</p></div>
     <div class="card"><div class="i">📂</div><h3>Drop and play</h3><p>Drag a <code>.sid</code>, a module or a recording onto the window, open one, or name it on the command line. MagPlaySID opens where you left it; Space pauses, and the arrow keys change tune.</p></div>
     <div class="card"><div class="i">🎶</div><h3>Playlists</h3><p>Drop a folder on the window and it becomes a playlist. Make your own with <b>♥ Add to playlist</b>, drag tunes to reorder them, and click a tune's ⓘ to see all about it - HVSC's notes too.</p></div>
@@ -131,7 +131,7 @@
 
 <footer><div class="wrap"><span>© 2026 Magnar Harestad · Censor Design</span><a href="https://github.com/MagnarHarestad/MagPlaySID">Source on GitHub</a><a href="https://github.com/MagnarHarestad/MagPlaySID/releases">Releases</a><a href="https://github.com/MagnarHarestad/MagPlaySID/issues">Report a problem</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a></div></footer>
 <script>
-// The version, the release date and the downloads follow the latest release; v1.41 stands until
+// The version, the release date and the downloads follow the latest release; v1.42 stands until
 // GitHub answers, or if it does not.
 fetch('https://api.github.com/repos/MagnarHarestad/MagPlaySID/releases/latest')
   .then(response => response.ok ? response.json() : null)
