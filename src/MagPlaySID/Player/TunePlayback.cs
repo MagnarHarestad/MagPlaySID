@@ -69,10 +69,12 @@ internal sealed class C64Tune(C64PlaybackEngine engine) : ITunePlayback
 }
 
 /// <summary>
-/// An Amiga module playing: <see cref="ModPlayer"/>'s sound in stereo, and rings of the last
+/// A tracker module playing - ProTracker's, Scream Tracker's, FastTracker's or Impulse Tracker's:
+/// its player's sound in stereo, and rings of the last
 /// second and a half of each channel's sound and state, and of the order and row, to show what the
 /// listener hears - the device plays a buffer behind what is made. A channel is said as a SID voice
-/// is: its pitch as the frequency register that plays the same note, ProTracker's C-2 as C-4; its
+/// is: its pitch as the frequency register that plays the same note, ProTracker's C-2 and a PC
+/// tracker's middle C as C-4; its
 /// volume as the envelope; sounding as the gate on - and, for a moment after a note is struck, off,
 /// so a note struck again on a note is seen to start.
 /// </summary>
@@ -89,7 +91,7 @@ internal sealed class ModuleTune : ITunePlayback
     /// <summary>The PAL C64's clock, for the frequency register that plays a note.</summary>
     private const double SidClock = 985248;
 
-    private readonly ModPlayer _player;
+    private readonly ITrackerPlayer _player;
     private readonly float[][] _scopes;
     private readonly int[][] _states;
     private readonly int[] _rows = new int[RingSamples];
@@ -106,10 +108,10 @@ internal sealed class ModuleTune : ITunePlayback
 
     private const int ModPlayer_MaxSpeed = 32;
 
-    public ModuleTune(ModFile module)
+    public ModuleTune(ITrackerModule module)
     {
         Module = module;
-        _player = new ModPlayer(module, SampleRate);
+        _player = module.CreatePlayer(SampleRate);
         int channels = module.Channels;
         _scopes = new float[channels][];
         _states = new int[channels][];
@@ -124,7 +126,7 @@ internal sealed class ModuleTune : ITunePlayback
         }
     }
 
-    public ModFile Module { get; }
+    public ITrackerModule Module { get; }
 
     public int Voices => Module.Channels;
     public string? Failure => null;
@@ -169,7 +171,7 @@ internal sealed class ModuleTune : ITunePlayback
         {
             if (_written == 0)
                 return (0, 0, 0);
-            return ModPlayer.UnpackRow(_rows[(int)(Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1) % RingSamples)]);
+            return TrackerModules.UnpackRow(_rows[(int)(Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1) % RingSamples)]);
         }
     }
 
@@ -233,16 +235,20 @@ internal sealed class ModuleTune : ITunePlayback
     {
         lock (_lock)
         {
-            for (int i = 0; i < made; i++)
+            // Into the rings a block at a time - in two where a ring wraps.
+            for (int done = 0; done < made;)
             {
-                int at = (int)((_written + i) % RingSamples);
+                int at = (int)((_written + done) % RingSamples);
+                int n = Math.Min(made - done, RingSamples - at);
                 for (int c = 0; c < _scopes.Length; c++)
                 {
-                    _scopes[c][at] = _chunkScopes[c][i];
-                    _states[c][at] = _chunkStates[c][i];
+                    Array.Copy(_chunkScopes[c], done, _scopes[c], at, n);
+                    Array.Copy(_chunkStates[c], done, _states[c], at, n);
                 }
-                _rows[at] = _chunkRows[i];
-                _mix[at] = (_left[i] + _right[i]) * 0.5f;
+                Array.Copy(_chunkRows, done, _rows, at, n);
+                for (int i = 0; i < n; i++)
+                    _mix[at + i] = (_left[done + i] + _right[done + i]) * 0.5f;
+                done += n;
             }
             _written += made;
         }
@@ -270,13 +276,13 @@ internal sealed class ModuleTune : ITunePlayback
             if (_written == 0 || voice >= _states.Length)
                 return default;
             long sample = Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1);
-            var state = ModPlayer.Unpack(_states[voice][(int)(sample % RingSamples)]);
+            var state = TrackerModules.Unpack(_states[voice][(int)(sample % RingSamples)]);
             bool struck = false;
             for (long s = sample; s > sample - StrikeGap && s >= Math.Max(0, _written - RingSamples) && !struck; s -= 64)
-                struck = ModPlayer.Struck(_states[voice][(int)(s % RingSamples)]);
+                struck = TrackerModules.Struck(_states[voice][(int)(s % RingSamples)]);
             int envelope = state.Sounding ? state.Volume * 255 / 64 : 0;
             int control = 0x40 | (state.Sounding && !struck ? 1 : 0);
-            return (FrequencyOf(state.Period), control, envelope);
+            return (state.Sounding || state.Note > 0 ? FrequencyOf(state.Note) : 0, control, envelope);
         }
     }
 
@@ -287,18 +293,16 @@ internal sealed class ModuleTune : ITunePlayback
         {
             if (_written == 0 || channel >= _states.Length)
                 return 0;
-            var state = ModPlayer.Unpack(_states[channel][(int)(Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1) % RingSamples)]);
+            var state = TrackerModules.Unpack(_states[channel][(int)(Math.Clamp(at, Math.Max(0, _written - RingSamples), _written - 1) % RingSamples)]);
             return state.Sounding ? state.Sample : 0;
         }
     }
 
-    /// <summary>The SID frequency register playing the note a period plays: ProTracker's C-2, period
-    /// 428, as C-4.</summary>
-    private static int FrequencyOf(int period)
+    /// <summary>The SID frequency register playing a note - in semitones, C-4 as 48.</summary>
+    private static int FrequencyOf(double note)
     {
-        if (period <= 0)
+        if (note <= 0)
             return 0;
-        double note = 48 + 12 * Math.Log2(428.0 / period);
         double hertz = 16.3516 * Math.Pow(2, note / 12);
         return (int)Math.Clamp(Math.Round(hertz * 16777216 / SidClock), 1, 65535);
     }

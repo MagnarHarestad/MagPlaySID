@@ -108,9 +108,9 @@ internal sealed class PlaylistTune : Observable
                                       TuneHistory.KeyOf(Playlist.RecordingKey(Path)), File.GetLastWriteTimeUtc(Path));
             }
             byte[] bytes = File.ReadAllBytes(Path);
-            if (!(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && MagPlay.Amiga.ModFile.Looks(bytes))
+            if (!(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && MagPlay.Amiga.TrackerModules.Looks(bytes))
             {
-                var module = MagPlay.Amiga.ModFile.Parse(bytes);
+                var module = MagPlay.Amiga.TrackerModules.Parse(bytes);
                 string name = string.IsNullOrWhiteSpace(module.Title) ? System.IO.Path.GetFileNameWithoutExtension(Path) : module.Title.Trim();
                 return new TuneHeader(name, "", 1, "", TuneHistory.KeyOf(bytes), File.GetLastWriteTimeUtc(Path));
             }
@@ -296,8 +296,8 @@ internal sealed class Playlist : Observable
     public static bool IsTuneName(string path)
     {
         string name = Path.GetFileName(path);
-        return name.EndsWith(".sid", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".mod", StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("mod.", StringComparison.OrdinalIgnoreCase) || MagPlay.Audio.AudioFile.IsAudioName(path);
+        return name.EndsWith(".sid", StringComparison.OrdinalIgnoreCase) || MagPlay.Amiga.TrackerModules.IsModuleName(path)
+            || MagPlay.Audio.AudioFile.IsAudioName(path);
     }
 
     /// <summary>What a recording is known by: its first megabyte and its length in bytes - the same

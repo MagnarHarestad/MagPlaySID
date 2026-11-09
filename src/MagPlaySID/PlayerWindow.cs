@@ -93,7 +93,8 @@ internal sealed class PlayerWindow : Window
     private readonly PianoSynth _pianoSynth = new();
     private IAudioOutput? _pianoOutput;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
-    private readonly bool[] _muted = new bool[32];
+    // Room for an Impulse Tracker module's 64 channels.
+    private readonly bool[] _muted = new bool[64];
     private readonly Settings _settings = Settings.Load();
     private readonly MenuItem _checkForUpdates = new();
     private readonly MenuItem _smallFont = new();
@@ -119,8 +120,9 @@ internal sealed class PlayerWindow : Window
     private SidFile? _file;
     private ITunePlayback? _engine;
 
-    /// <summary>The Amiga module playing, when it is one rather than a .sid.</summary>
-    private ModFile? _module;
+    /// <summary>The tracker module playing - ProTracker's, Scream Tracker's, FastTracker's or
+    /// Impulse Tracker's - when it is one rather than a .sid.</summary>
+    private ITrackerModule? _module;
 
     private readonly ModuleView _moduleView = new();
 
@@ -396,7 +398,7 @@ internal sealed class PlayerWindow : Window
             Children = { _previous, _elapsed, _playPause, _fastForward, _repeat, _next },
         };
 
-        _empty.Text = "Open a .sid, an Amiga module or a recording - or drop one here";
+        _empty.Text = "Open a .sid, a tracker module or a recording - or drop one here";
         _empty.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _empty.HorizontalAlignment = HorizontalAlignment.Center;
         _empty.VerticalAlignment = VerticalAlignment.Center;
@@ -435,7 +437,14 @@ internal sealed class PlayerWindow : Window
         _moduleView.IsVisible = false;
         _audioView.Width = _audioView.ContentWidth;
         _audioView.IsVisible = false;
-        retro.Children.Add(new Panel { Children = { _view, _moduleView, _audioView } });
+        // A module of many channels is wider than the window: it scrolls sideways.
+        var moduleScroller = new ScrollViewer
+        {
+            Content = _moduleView,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+        retro.Children.Add(new Panel { Children = { _view, moduleScroller, _audioView } });
 
         var root = new DockPanel();
         DockPanel.SetDock(_strip, Dock.Left);
@@ -775,7 +784,7 @@ internal sealed class PlayerWindow : Window
         if (!loaded)
         {
             _title.Text = UpdateCheck.Product;
-            _details.Text = "Plays a .sid, an Amiga module or a recording, and shows its notes as they play";
+            _details.Text = "Plays a .sid, a tracker module or a recording, and shows its notes as they play";
             _retroStatus.Text = "";
         }
     }
@@ -974,7 +983,7 @@ internal sealed class PlayerWindow : Window
         {
             Title = "Open a tune",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("SID tunes, Amiga modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.wav", "*.flac", "*.mp3"] }, FilePickerFileTypes.All],
+            FileTypeFilter = [new FilePickerFileType("SID tunes, tracker modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.s3m", "*.xm", "*.it", "*.mptm", "*.wav", "*.flac", "*.mp3"] }, FilePickerFileTypes.All],
         });
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
@@ -1198,20 +1207,20 @@ internal sealed class PlayerWindow : Window
     /// <summary>A recording's decoder opened to read what it is, at its start, for its playing to take.</summary>
     private (string Path, AudioDecoder Decoder)? _openedDecoder;
 
-    /// <summary>Whether a file is an Amiga module: not a .sid, and with a module's tag or shape.</summary>
+    /// <summary>Whether a file is a tracker module: not a .sid, and with a module's signature, tag or shape.</summary>
     private static bool IsModule(byte[] bytes) =>
-        !(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && ModFile.Looks(bytes);
+        !(bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D') && TrackerModules.Looks(bytes);
 
-    /// <summary>An Amiga module, played as a tune of one song: false, and nothing changed, when it
+    /// <summary>A tracker module, played as a tune of one song: false, and nothing changed, when it
     /// cannot be read.</summary>
     private bool LoadModule(string path, byte[] bytes, bool quiet)
     {
-        ModFile module;
+        ITrackerModule module;
         try
         {
-            module = ModFile.Parse(bytes);
+            module = TrackerModules.Parse(bytes);
         }
-        catch (Exception ex) when (ex is InvalidDataException or IndexOutOfRangeException or ArgumentException)
+        catch (Exception ex) when (ex is InvalidDataException or IndexOutOfRangeException or ArgumentException or OverflowException)
         {
             if (!quiet)
                 _ = MessageWindow.ShowAsync(this, "Cannot play this module", ex.Message);
@@ -1275,9 +1284,10 @@ internal sealed class PlayerWindow : Window
         }
         if (_module is { } module)
         {
-            int samples = module.Samples.Count(s => s.Data.Length > 2);
-            return string.Join("   ·   ", "Amiga module", module.Format, $"{module.Channels} channels", $"{samples} samples",
-                               $"{module.Patterns.Count} patterns");
+            int samples = module.Samples.Count(s => s.Bytes > 2);
+            string kind = module.SamplesHeading == "INSTRUMENTS" ? "instruments" : "samples";
+            return string.Join("   ·   ", module.Kind, module.Format, $"{module.Channels} channels", $"{samples} {kind}",
+                               $"{module.PatternCount} patterns");
         }
         var file = _file!;
         var parts = new List<string>();
@@ -1377,7 +1387,7 @@ internal sealed class PlayerWindow : Window
             if (_engine is ModuleTune moduleTune)
                 moduleTune.StereoWidth = _stereo.Value;
             BuildScopes(_engine.Voices);
-            for (int voice = 0; voice < _scopes.Length; voice++)
+            for (int voice = 0; voice < Math.Min(_scopes.Length, _muted.Length); voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
             // On the stream kept open for tunes: a stream opened for each held the window half a second.
             _output = AudioOutput.Share(_engine, latencyMs: 100);
@@ -1543,7 +1553,7 @@ internal sealed class PlayerWindow : Window
         _retroStatus.Text = said >= 0 ? text + _retroStatus.Text![said..] : text;
     }
 
-    private void ShowModule(ModFile module)
+    private void ShowModule(ITrackerModule module)
     {
         _audioView.IsVisible = false;
         _transcribing?.Cancel();
@@ -1556,14 +1566,25 @@ internal sealed class PlayerWindow : Window
         _view.IsVisible = false;
         _moduleView.IsVisible = true;
         _moduleView.SetModule(module);
-        var measured = ModPlayer.MeasureEnd(module);
-        int frames = measured is { } end ? (int)Math.Round(end.Length.TotalSeconds * 50) : 0;
-        _measured = frames > 0 ? new SidSongLength.Result(frames, frames, EndsQuiet: measured!.Value.Stops) : null;
+        int positions = module.Order.Count(p => p < module.PatternCount);
+        _retroStatus.Text = $"The module's own patterns, as {module.TrackerName} plays them - {positions} position{(positions == 1 ? "" : "s")} in its song";
+        _measured = null;
         _length = null;
-        _lengthUnknown = frames == 0;
-        _retroStatus.Text = $"The module's own patterns, as ProTracker plays them - {module.Order.Count} position{(module.Order.Count == 1 ? "" : "s")} in its song";
-        _lengthsChosen = true;
-        ChooseLength();
+        _lengthUnknown = _lengthsChosen = false;
+
+        // Its length, found by playing it through with no sound, off the window's thread: a song of
+        // half an hour took half a second.
+        Task.Run(() => TrackerModules.MeasureEnd(module)).ContinueWith(task => Dispatcher.UIThread.Post(() =>
+        {
+            if (_module != module || task.IsFaulted)
+                return;
+            var measured = task.Result;
+            int frames = measured is { } end ? (int)Math.Round(end.Length.TotalSeconds * 50) : 0;
+            _measured = frames > 0 ? new SidSongLength.Result(frames, frames, EndsQuiet: measured!.Value.Stops) : null;
+            _lengthUnknown = frames == 0;
+            _lengthsChosen = true;
+            ChooseLength();
+        }), TaskScheduler.Default);
     }
 
     private void Transcribe(int song)

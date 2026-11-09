@@ -51,7 +51,7 @@ internal static class SoundExport
     }
 
     /// <summary>What a file of a module is called by default: its title, or else its file's name.</summary>
-    public static string FileName(ModFile module, string path)
+    public static string FileName(ITrackerModule module, string path)
     {
         string title = string.IsNullOrWhiteSpace(module.Title) ? Path.GetFileNameWithoutExtension(path) : module.Title;
         string name = string.Concat(title.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)).Trim();
@@ -61,10 +61,10 @@ internal static class SoundExport
     /// <summary>A module's samples, 16-bit stereo - left and right in turn - at
     /// <see cref="ModuleRate"/>, as loud as it plays in the window; <paramref name="progress"/> told
     /// how far, 0-1, as it goes.</summary>
-    public static short[] Render(ModFile module, TimeSpan length, bool fadeOut, IReadOnlyList<bool> muted, double stereoWidth,
+    public static short[] Render(ITrackerModule module, TimeSpan length, bool fadeOut, IReadOnlyList<bool> muted, double stereoWidth,
                                  IProgress<double>? progress = null, CancellationToken cancel = default)
     {
-        var player = new ModPlayer(module, ModuleRate) { StereoSeparation = stereoWidth };
+        var player = module.CreatePlayer(ModuleRate, stereoWidth);
         for (int channel = 0; channel < muted.Count; channel++)
             player.SetMuted(channel, muted[channel]);
 
@@ -138,9 +138,9 @@ internal static class SoundExport
     public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, SidFile file, int song) =>
         Write(output, format, samples, C64PlaybackEngine.SampleRate, 1, Tags(file, song));
 
-    /// <summary>A module's stereo samples from <see cref="Render(ModFile, TimeSpan, bool, IReadOnlyList{bool}, double, IProgress{double}?, CancellationToken)"/>,
+    /// <summary>A module's stereo samples from <see cref="Render(ITrackerModule, TimeSpan, bool, IReadOnlyList{bool}, double, IProgress{double}?, CancellationToken)"/>,
     /// its title as the file's.</summary>
-    public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, ModFile module, string path)
+    public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, ITrackerModule module, string path)
     {
         var tags = new List<Tag>();
         string title = string.IsNullOrWhiteSpace(module.Title) ? Path.GetFileNameWithoutExtension(path) : module.Title.Trim();

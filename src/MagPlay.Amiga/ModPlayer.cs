@@ -1,9 +1,5 @@
 namespace MagPlay.Amiga;
 
-/// <summary>What a channel is playing at a moment: the sample, its pitch as Paula's period and in
-/// hertz, and its volume - for meters and scopes.</summary>
-public readonly record struct ChannelState(int Sample, int Period, double Hertz, int Volume, bool Sounding);
-
 /// <summary>
 /// A module played as ProTracker 2 plays it on an Amiga: rows of a pattern every so many ticks -
 /// the speed - and ticks at the tempo's rate, 125 beats a minute making 50 a second; the effects
@@ -12,7 +8,7 @@ public readonly record struct ChannelState(int Sample, int Period, double Hertz,
 /// channels to the left and right as an Amiga's are, 1 and 4 left, 2 and 3 right, through the
 /// A500's filter.
 /// </summary>
-public sealed class ModPlayer
+public sealed class ModPlayer : ITrackerPlayer
 {
     /// <summary>Paula's clock on a PAL Amiga: a period of 428 plays a sample at 8287 Hz, C-2.</summary>
     public const double PaulaClock = 3546895;
@@ -102,11 +98,13 @@ public sealed class ModPlayer
             _channels[channel].Muted = muted;
     }
 
-    public ChannelState StateOf(int channel)
+    public ChannelState StateOf(int channel) => TrackerModules.Unpack(Pack(_channels[channel]));
+
+    /// <summary>One tick played with no sound made: how long it lasts.</summary>
+    public double SilentTick()
     {
-        var c = _channels[channel];
-        bool sounding = c.Active && c.OutVolume > 0 && c.OutPeriod > 0;
-        return new ChannelState(c.SampleNumber, c.OutPeriod, c.OutPeriod > 0 ? PaulaClock / c.OutPeriod : 0, c.OutVolume, sounding);
+        NextTick();
+        return TickSeconds(_tempo);
     }
 
     /// <summary>How long the song plays before it comes round to a row played before - or stops -
@@ -115,17 +113,7 @@ public sealed class ModPlayer
 
     /// <summary>As <see cref="Measure"/>, and whether the song stops there (F00) rather than
     /// coming round again.</summary>
-    public static (TimeSpan Length, bool Stops)? MeasureEnd(ModFile mod)
-    {
-        var player = new ModPlayer(mod, 1000, a500Filter: false);
-        double seconds = 0;
-        while (!player.Looped && !player.Stopped && seconds < 3600)
-        {
-            player.NextTick();
-            seconds += TickSeconds(player._tempo);
-        }
-        return player.Looped || player.Stopped ? (TimeSpan.FromSeconds(seconds), player.Stopped && !player.Looped) : null;
-    }
+    public static (TimeSpan Length, bool Stops)? MeasureEnd(ModFile mod) => TrackerModules.MeasureEnd(mod);
 
     /// <summary>Renders stereo frames into <paramref name="left"/> and <paramref name="right"/>, from
     /// -1 to 1 - after F00, silence. Given <paramref name="channels"/>, each channel's own sound goes
@@ -189,31 +177,18 @@ public sealed class ModPlayer
             ? sample.Data[(int)c.Position] / 128.0 * c.OutVolume / 64.0 : 0;
     }
 
-    /// <summary>A channel's state as one number: its period in bits 0-11, volume in 12-18, whether
-    /// it sounds in 19, its sample in 20-27, and in 28 whether a note started on it this tick.</summary>
-    private static int Pack(Channel c) =>
-        Math.Min(c.OutPeriod, 0xFFF) | (c.OutVolume << 12) | ((c.Active && c.OutVolume > 0 && c.OutPeriod > 0 ? 1 : 0) << 19)
-        | (c.SampleNumber << 20) | ((c.Struck ? 1 : 0) << 28);
-
-    /// <summary>A state packed by <see cref="Render"/>, unpacked.</summary>
-    public static ChannelState Unpack(int state)
+    /// <summary>A channel's state as one number - see <see cref="TrackerModules.Pack"/>: its period as
+    /// the note it plays, ProTracker's C-2 at 428 as 48 - worked out when the period changes.</summary>
+    private static int Pack(Channel c)
     {
-        int period = state & 0xFFF;
-        return new ChannelState((state >> 20) & 0xFF, period, period > 0 ? PaulaClock / period : 0, (state >> 12) & 0x7F, (state >> 19 & 1) != 0);
+        if (c.OutPeriod != c.NotePeriod)
+            (c.NotePeriod, c.NoteValue) = (c.OutPeriod, c.OutPeriod > 0 ? 48 + 12 * Math.Log2(428.0 / c.OutPeriod) : 0);
+        return TrackerModules.Pack(c.SampleNumber, c.NoteValue, c.OutVolume, c.Active && c.OutVolume > 0 && c.OutPeriod > 0, c.Struck);
     }
 
-    /// <summary>The place heard as one number: the row in bits 0-7, the order position in 8-15, and
-    /// how far into the row, 0-1, in 16-25 - for rows that scroll smoothly.</summary>
-    private static int PackRow(int order, int row, double into) =>
-        (int)(Math.Clamp(into, 0, 1) * 1023) << 16 | (order & 0xFF) << 8 | (row & 0xFF);
+    private static int PackRow(int order, int row, double into) => TrackerModules.PackRow(order, row, into);
 
-    /// <summary>A place packed by <see cref="Render"/>: the order position, the row, and how far
-    /// into the row.</summary>
-    public static (int Order, int Row, double Into) UnpackRow(int packed) =>
-        ((packed >> 8) & 0xFF, packed & 0xFF, (packed >> 16 & 0x3FF) / 1023.0);
-
-    /// <summary>Whether a packed state is a note's first tick.</summary>
-    public static bool Struck(int state) => (state >> 28 & 1) != 0;
+    public static (int Order, int Row, double Into) UnpackRow(int packed) => TrackerModules.UnpackRow(packed);
 
     // ------------------------------------------------------------------ ticks and rows
 
@@ -239,17 +214,18 @@ public sealed class ModPlayer
         if (++_tick < _speed)
             return;
         _tick = 0;
+        // A pattern delay plays the row as many times again - effects going on, notes not struck
+        // again - and then the next: not the same row read again, which delays it once more.
         if (_delayLeft > 0)
         {
-            _delayLeft--;
-            return;
+            if (--_delayLeft > 0)
+                return;
         }
-        if (_patternDelay > 0)
+        else if (_patternDelay > 0)
         {
             _delayLeft = _patternDelay;
             _patternDelay = 0;
-            if (_delayLeft > 0)
-                return;
+            return;
         }
         NextRow();
     }
@@ -585,6 +561,8 @@ public sealed class ModPlayer
         public int OffsetMemory;
         public int LoopRow, LoopCount;
         public int DelayedPeriod;
+        public int NotePeriod = -1;
+        public double NoteValue;
 
         public void Trigger(int period)
         {

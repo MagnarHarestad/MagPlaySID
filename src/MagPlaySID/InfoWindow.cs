@@ -64,8 +64,8 @@ internal sealed class InfoSheet
             sheet.HistoryKey = TuneHistory.KeyOf(bytes);
             if (bytes.Length >= 4 && bytes[1] == 'S' && bytes[2] == 'I' && bytes[3] == 'D')
                 sheet.ReadSid(bytes);
-            else if (ModFile.Looks(bytes))
-                sheet.ReadModule(ModFile.Parse(bytes));
+            else if (TrackerModules.Looks(bytes))
+                sheet.ReadModule(TrackerModules.Parse(bytes));
             sheet.Sections.Add(new InfoSection("File", FileRows(path, Convert.ToHexString(System.Security.Cryptography.MD5.HashData(bytes)))));
         }
         sheet.ReadHvscNotes(path);
@@ -153,28 +153,46 @@ internal sealed class InfoSheet
         _ => sameAsFirst ? "the same as the first" : "Not said",
     };
 
-    private void ReadModule(ModFile module)
+    private void ReadModule(ITrackerModule module)
     {
         if (!string.IsNullOrWhiteSpace(module.Title))
             Title = module.Title.Trim();
-        var used = module.Samples.Count(s => s.Data.Length > 0);
+        var sounds = module.SoundSamples;
+        var used = sounds.Count(s => s.Bytes > 0);
         var rows = new List<InfoRow>();
         Add(rows, "Title", module.Title);
-        rows.Add(new InfoRow("Format", module.Format == "Soundtracker" ? "Soundtracker, 15 samples" : $"ProTracker \"{module.Format}\""));
+        rows.Add(new InfoRow("Format", module.Format switch
+        {
+            "Soundtracker" => "Soundtracker, 15 samples",
+            "S3M" or "XM" or "IT" => module.TrackerName,
+            _ => $"ProTracker \"{module.Format}\"",
+        }));
+        Add(rows, "Made with", module.MadeWith);
         rows.Add(new InfoRow("Channels", module.Channels.ToString(CultureInfo.InvariantCulture)));
-        rows.Add(new InfoRow("Samples", $"{used} of {module.Samples.Count}, " +
-            $"{module.Samples.Sum(s => s.Data.Length).ToString("N0", CultureInfo.InvariantCulture)} bytes"));
-        rows.Add(new InfoRow("Patterns", module.Patterns.Count.ToString(CultureInfo.InvariantCulture)));
+        if (module.SamplesHeading == "INSTRUMENTS")
+            rows.Add(new InfoRow("Instruments", module.Samples.Count.ToString(CultureInfo.InvariantCulture)));
+        rows.Add(new InfoRow("Samples", $"{used} of {sounds.Count}, " +
+            $"{sounds.Sum(s => (long)s.Bytes).ToString("N0", CultureInfo.InvariantCulture)} bytes"));
+        rows.Add(new InfoRow("Patterns", module.PatternCount.ToString(CultureInfo.InvariantCulture)));
+        int positions = module.Order.Count(p => p < module.PatternCount);
         rows.Add(new InfoRow("Positions", module.Restart > 0 && module.Restart < module.Order.Count
-            ? $"{module.Order.Count}, restarting at {module.Restart}" : module.Order.Count.ToString(CultureInfo.InvariantCulture)));
-        Sections.Add(new InfoSection("Amiga module", rows));
-        FileLength = ModPlayer.Measure(module);
+            ? $"{positions}, restarting at {module.Restart}" : positions.ToString(CultureInfo.InvariantCulture)));
+        Sections.Add(new InfoSection(module.Kind, rows));
+        FileLength = TrackerModules.Measure(module);
 
-        // Composers write to the listener in the sample names - all of them, the empty ones too.
-        var names = module.Samples.Select((s, i) => (Number: i + 1, Name: s.Name.TrimEnd())).ToList();
-        int last = names.FindLastIndex(n => n.Name.Trim().Length > 0);
-        if (last >= 0)
-            Notes.Add(("Sample names", string.Join("\n", names.Take(last + 1).Select(n => $"{n.Number,2}  {n.Name}"))));
+        if (module.Message.Length > 0)
+            Notes.Add(("Song message", module.Message));
+        // Composers write to the listener in the names - all of them, the empty ones too.
+        void Names(string heading, IReadOnlyList<ModuleSample> list)
+        {
+            var names = list.Select((s, i) => (Number: i + 1, Name: s.Name.TrimEnd())).ToList();
+            int last = names.FindLastIndex(n => n.Name.Trim().Length > 0);
+            if (last >= 0)
+                Notes.Add((heading, string.Join("\n", names.Take(last + 1).Select(n => $"{n.Number,2}  {n.Name}"))));
+        }
+        if (module.SamplesHeading == "INSTRUMENTS")
+            Names("Instrument names", module.Samples);
+        Names("Sample names", sounds);
     }
 
     private static List<InfoRow> FileRows(string path, string? md5)

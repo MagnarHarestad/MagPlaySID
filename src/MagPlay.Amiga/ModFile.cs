@@ -27,8 +27,10 @@ public readonly record struct ModCell(int Sample, int Period, int Effect, int Pa
 /// "FLT8", "CD81", "OKTA", "xxCH"), and Soundtracker's 15 samples with no tag. Patterns of 64 rows,
 /// played in the order its list gives.
 /// </summary>
-public sealed class ModFile
+public sealed class ModFile : ITrackerModule
 {
+    private static readonly string[] NoteNames = ["C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"];
+
     public const int Rows = 64;
 
     public string Title { get; private init; } = "";
@@ -52,6 +54,54 @@ public sealed class ModFile
     public IReadOnlyList<ModCell[]> Patterns { get; private init; } = [];
 
     public ModCell Cell(int pattern, int row, int channel) => Patterns[pattern][row * Channels + channel];
+
+    // ------------------------------------------------------------------ as any module
+
+    public string Kind => "Amiga module";
+
+    public string TrackerName => Format == "Soundtracker" ? "Soundtracker" : "ProTracker";
+
+    public string MadeWith => "";
+
+    public int PatternCount => Patterns.Count;
+
+    public int RowsIn(int pattern) => Rows;
+
+    public int CellChars => 10;
+
+    /// <summary>A cell as ProTracker writes it: the note, the sample in hex, the effect and its
+    /// parameter - dots and dashes where there is none.</summary>
+    public string CellText(int pattern, int row, int channel)
+    {
+        var cell = Cell(pattern, row, channel);
+        string note = cell.Period > 0 ? NoteName(cell.Period) : "---";
+        string sample = cell.Sample > 0 ? $"{cell.Sample:X2}" : "..";
+        string effect = cell.Effect == 0 && cell.Parameter == 0 ? "..." : $"{cell.Effect:X}{cell.Parameter:X2}";
+        return $"{note} {sample} {effect}";
+    }
+
+    public bool CellEmpty(int pattern, int row, int channel) => Cell(pattern, row, channel).IsEmpty;
+
+    /// <summary>ProTracker's name for a period's note: C-1 at 856 to B-3 at 113, and on past them.</summary>
+    private static string NoteName(int period)
+    {
+        int note = (int)Math.Round(12 * Math.Log2(856.0 / period));
+        int octave = 1 + (int)Math.Floor(note / 12.0);
+        return $"{NoteNames[((note % 12) + 12) % 12]}{Math.Clamp(octave, 0, 9)}";
+    }
+
+    public string SamplesHeading => "SAMPLES";
+
+    IReadOnlyList<ModuleSample> ITrackerModule.Samples => _listed ??= Samples.Select(s => new ModuleSample(s.Name, s.Data.Length)).ToArray();
+
+    IReadOnlyList<ModuleSample> ITrackerModule.SoundSamples => ((ITrackerModule)this).Samples;
+
+    private ModuleSample[]? _listed;
+
+    public string Message => "";
+
+    public ITrackerPlayer CreatePlayer(int sampleRate = 44100, double stereoSeparation = 0.6) =>
+        new ModPlayer(this, sampleRate, stereoSeparation);
 
     /// <summary>Whether <paramref name="bytes"/> look like a module: a tag known at 1080, or the shape
     /// of a 15-sample one - sensible sample sizes, an order list within its patterns.</summary>
