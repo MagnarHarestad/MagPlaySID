@@ -16,9 +16,15 @@ dir="$out/MagPlaySID-$version"
 # first start most of all, for a quarter more to download.
 ahead=true
 
+# On Windows the native libraries - Skia, HarfBuzz, ANGLE, PortAudio - sit beside the exe: packed
+# inside it, each new version unpacked them into %TEMP%\.net on its first start, slowly, and left
+# them there. On Linux they stay inside, so the one file can be installed alone (see README.txt).
+unpack=true
+case "$rid" in win-*) unpack=false ;; esac
+
 rm -rf "$out"
 dotnet publish "$root/src/MagPlaySID" -c Release -r "$rid" --self-contained true \
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=$ahead \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=$unpack -p:PublishReadyToRun=$ahead \
   -p:DebugType=none -p:Version="$version" -o "$dir"
 
 cp "$root/LICENSE" "$root/THIRD-PARTY-NOTICES.md" "$dir/"
