@@ -107,6 +107,11 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly MenuItem _exportNotes = new();
+
+    /// <summary>The notes as text and as sheet music: a .sid's transcription only - a module's
+    /// patterns are its own, but its notes go to MIDI.</summary>
+    private readonly MenuItem _notesAsText = new() { Header = "As text..." };
+    private readonly MenuItem _notesAsSheet = new() { Header = "As sheet music (PDF)..." };
     private readonly MenuItem _exportSound = new();
     private readonly TextBlock _songLabel = new() { Text = "SONG", VerticalAlignment = VerticalAlignment.Center };
     private readonly StackPanel _songPills = new() { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
@@ -578,14 +583,16 @@ internal sealed class PlayerWindow : Window
             _settings.Save();
         };
 
-        // The song playing's notes, as the rows read them - once the whole of it is transcribed.
+        // The song playing's notes, as the rows read them - once the whole of it is transcribed - or
+        // a module's, as its player plays them.
         _exportNotes.Header = "Export notes";
-        var asText = new MenuItem { Header = "As text..." };
-        asText.Click += (_, _) => _ = ExportNotesAsync(pdf: false);
-        var asSheet = new MenuItem { Header = "As sheet music (PDF)..." };
-        asSheet.Click += (_, _) => _ = ExportNotesAsync(pdf: true);
-        _exportNotes.Items.Add(asText);
-        _exportNotes.Items.Add(asSheet);
+        _notesAsText.Click += (_, _) => _ = ExportNotesAsync(NotesFormat.Text);
+        _notesAsSheet.Click += (_, _) => _ = ExportNotesAsync(NotesFormat.Pdf);
+        var asMidi = new MenuItem { Header = "As MIDI..." };
+        asMidi.Click += (_, _) => _ = ExportNotesAsync(NotesFormat.Midi);
+        _exportNotes.Items.Add(_notesAsText);
+        _exportNotes.Items.Add(_notesAsSheet);
+        _exportNotes.Items.Add(asMidi);
         _exportNotes.IsEnabled = false;
 
         // The song playing's sound, once its length is known - or known not to be.
@@ -864,19 +871,58 @@ internal sealed class PlayerWindow : Window
         output?.Dispose();
     }
 
-    /// <summary>The song playing's transcription saved where the user says: its rows as text, or
-    /// engraved as sheet music in a PDF. Made off the UI thread - a long tune is many pages.</summary>
-    private async Task ExportNotesAsync(bool pdf)
+    private enum NotesFormat
     {
-        if (_file is not { } file || _transcription is not { } transcription || !_wholeTranscribed)
+        Text,
+        Pdf,
+        Midi,
+    }
+
+    /// <summary>The song playing's notes saved where the user says: a .sid's transcription as text,
+    /// engraved as sheet music in a PDF, or as MIDI; a module's as MIDI. Made off the UI thread - a
+    /// long tune is many pages.</summary>
+    private async Task ExportNotesAsync(NotesFormat format)
+    {
+        string product = UpdateCheck.Product;
+        string suggested;
+        Action<Stream> write;
+        if (_module is { } module && _path is { } modulePath && format == NotesFormat.Midi)
+        {
+            var length = _length?.Total ?? UnmeasuredLength;
+            suggested = SoundExport.FileName(module, modulePath);
+            write = stream => MidiExport.FromModule(module, modulePath, length, product).Write(stream);
+        }
+        else if (_file is { } file && _transcription is { } transcription && _wholeTranscribed)
+        {
+            var sheet = NoteSheet.Of(file, _song, transcription.Score, transcription.Timeline);
+            suggested = sheet.FileName;
+            int song = _song;
+            write = format switch
+            {
+                NotesFormat.Pdf => stream => SheetMusic.WritePdf(sheet, stream, product),
+                NotesFormat.Midi => stream => MidiExport.FromSid(file, song, transcription.Score, transcription.Timeline, product).Write(stream),
+                _ => stream =>
+                {
+                    using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), leaveOpen: true);
+                    writer.Write(sheet.ToText(product));
+                },
+            };
+        }
+        else
             return;
-        var sheet = NoteSheet.Of(file, _song, transcription.Score, transcription.Timeline);
+
+        var (title, extension, kind) = format switch
+        {
+            NotesFormat.Pdf => ("Export the notes as sheet music", "pdf", "PDF"),
+            NotesFormat.Midi => ("Export the notes as MIDI", "mid", "MIDI"),
+            _ => ("Export the notes as text", "txt", "Text"),
+        };
         var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = pdf ? "Export the notes as sheet music" : "Export the notes as text",
-            SuggestedFileName = sheet.FileName,
-            DefaultExtension = pdf ? "pdf" : "txt",
-            FileTypeChoices = [pdf ? new FilePickerFileType("PDF") { Patterns = ["*.pdf"] } : new FilePickerFileType("Text") { Patterns = ["*.txt"] }],
+            Title = title,
+            SuggestedFileName = suggested,
+            DefaultExtension = extension,
+            FileTypeChoices = [new FilePickerFileType(kind) { Patterns = [$"*.{extension}"] }],
             ShowOverwritePrompt = true,
         });
         if (target is null)
@@ -887,17 +933,7 @@ internal sealed class PlayerWindow : Window
             await using var stream = await target.OpenWriteAsync();
             if (stream.CanSeek)
                 stream.SetLength(0);
-            string product = UpdateCheck.Product;
-            await Task.Run(() =>
-            {
-                if (pdf)
-                    SheetMusic.WritePdf(sheet, stream, product);
-                else
-                {
-                    using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), leaveOpen: true);
-                    writer.Write(sheet.ToText(product));
-                }
-            });
+            await Task.Run(() => write(stream));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1576,9 +1612,10 @@ internal sealed class PlayerWindow : Window
         _transcribing?.Cancel();
         _transcription = null;
         _wholeTranscribed = false;
-        // Its sound can be saved - in stereo, as wide as it is heard - but there are no notes to save:
-        // the patterns are the module's own.
-        _exportNotes.IsEnabled = false;
+        // Its sound can be saved - in stereo, as wide as it is heard - and its notes as MIDI; as
+        // text or sheet music there is nothing to add to the patterns, which are the module's own.
+        _exportNotes.IsEnabled = true;
+        _notesAsText.IsEnabled = _notesAsSheet.IsEnabled = false;
         _exportSound.IsEnabled = true;
         _view.IsVisible = false;
         _moduleView.IsVisible = true;
@@ -1655,6 +1692,7 @@ internal sealed class PlayerWindow : Window
                     (_transcription, _measured) = (whole, length);
                     _wholeTranscribed = true;
                     _exportNotes.IsEnabled = true;
+                    _notesAsText.IsEnabled = _notesAsSheet.IsEnabled = true;
                     _exportSound.IsEnabled = true;
                     _view.ContinueWith(whole.Score, whole.Timeline);
                     _view.ShowSamples(whole.Samples);
