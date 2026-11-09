@@ -38,9 +38,37 @@ internal sealed class Transcription
     /// <summary>The whole tune, to its loop, and its length - measured and recorded in one run of
     /// the C64, keeping only what the tune's player writes. On <paramref name="rows"/> when given, so
     /// that the rows go on at the speed the opening showed them at.</summary>
-    public static (Transcription Transcription, SidSongLength.Result? Length) Whole(SidFile file, int song, Music.Grid? rows, CancellationToken cancel)
+    public static (Transcription Transcription, SidSongLength.Result? Length) Whole(SidFile file, int song, Music.Grid? rows, CancellationToken cancel) =>
+        Whole(RecordWhole(file, song, cancel), rows, cancel);
+
+    /// <summary>The whole tune played through to its loop on a thread of its own, while the opening
+    /// is made on another: the whole needs the opening's rows only once it is played.</summary>
+    public static Task<(Recording Recording, SidSongLength.Result? Length)> RecordWhole(SidFile file, int song, CancellationToken cancel)
     {
-        var (recording, length) = Recording.RecordWhole(file, song);
+        var done = new TaskCompletionSource<(Recording, SidSongLength.Result?)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                // Given up as soon as the tune is left: measuring can play up to twenty minutes of it,
+                // and a playlist skipped through left one running for each tune passed over.
+                done.SetResult(Recording.RecordWhole(file, song, cancel: cancel));
+            }
+            catch (Exception ex)
+            {
+                done.SetException(ex);
+            }
+        })
+        { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "Playing the whole tune" };
+        thread.Start();
+        return done.Task;
+    }
+
+    /// <summary>The whole tune made from its recording, once played, on the opening's rows.</summary>
+    public static (Transcription Transcription, SidSongLength.Result? Length) Whole(Task<(Recording Recording, SidSongLength.Result? Length)> recorded,
+                                                                                  Music.Grid? rows, CancellationToken cancel)
+    {
+        var (recording, length) = recorded.GetAwaiter().GetResult();
         cancel.ThrowIfCancellationRequested();
         return (Of(recording, rows, cancel), length);
     }

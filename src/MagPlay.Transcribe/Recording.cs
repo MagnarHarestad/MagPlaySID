@@ -86,14 +86,15 @@ public sealed class Recording
     /// whose music repeats sooner than its memory does is as long as its music - see SongPeriods.
     /// </summary>
     public static (Recording Recording, SidSongLength.Result? Length) RecordWhole(SidFile file, int song,
-        double seconds = 600, double maxSeconds = C64SongLength.MaxSeconds)
+        double seconds = 600, double maxSeconds = C64SongLength.MaxSeconds, CancellationToken cancel = default)
     {
         var player = Record(file, song, Math.Min(10, seconds)).Player;
         var tune = SidTune.Load(file, song);
         // Init's writes too, before the first call: the volume, envelopes and waveforms the player's
         // notes are played with.
         tune.Computer.Keep = context => context == player || tune.Computer.Calls.Count == 0;
-        var length = C64SongLength.Measure(tune, maxSeconds);
+        var length = C64SongLength.Measure(tune, maxSeconds, cancel);
+        cancel.ThrowIfCancellationRequested();
         length = SongPeriods.Refine(Of(tune.Computer, player, frames: file.IsBasic), length);
 
         double clock = Machines.ClockHz(tune.Computer.Machine);

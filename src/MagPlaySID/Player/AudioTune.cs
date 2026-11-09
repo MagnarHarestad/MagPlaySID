@@ -67,10 +67,12 @@ internal sealed class AudioTune : ITunePlayback, IPolyphonicTune, IDisposable
         Description = decoder.Description;
         _reader = new Thread(() => ReadAhead(decoder)) { IsBackground = true, Name = "Recording read-ahead", Priority = ThreadPriority.AboveNormal };
         _reader.Start();
-        // A moment of it ready before the device asks: a quarter second, or as much as comes in two.
+        // A moment of it ready before the device asks - a quarter second - but not waited for long:
+        // this is the window's thread, and a file still coming off iCloud held it two seconds. Read
+        // late, it is silent and stands still till it is read.
         var waited = System.Diagnostics.Stopwatch.StartNew();
-        while (Interlocked.Read(ref _aheadWritten) < SampleRate / 4 && !_ended && waited.ElapsedMilliseconds < 2000)
-            Thread.Sleep(5);
+        while (Interlocked.Read(ref _aheadWritten) < SampleRate / 4 && !_ended && waited.ElapsedMilliseconds < 100)
+            Thread.Sleep(2);
     }
 
     public int SourceRate { get; }

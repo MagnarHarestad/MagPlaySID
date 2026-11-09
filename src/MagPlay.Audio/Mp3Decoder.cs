@@ -32,9 +32,85 @@ public sealed class Mp3Decoder : AudioDecoder
             if (g.Samples > 0)
                 _left = g.Samples;
         }
+        // NLayer's Duration reads every frame of the file: a long mix cold off the disk took half a
+        // second of the window's. The first frame says as much: its Xing or VBRI count of frames, or
+        // for a constant bit rate, the file's size.
         Duration = _left > 0 ? TimeSpan.FromSeconds((double)_left / SampleRate)
+            : Estimate(stream) is { } seconds ? TimeSpan.FromSeconds(seconds)
             : _file.Duration > TimeSpan.Zero ? _file.Duration : null;
         Description = "MP3";
+    }
+
+    private static readonly int[] Mpeg1Rates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+    private static readonly int[] Mpeg2Rates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+    private static readonly int[] SampleRates = [44100, 48000, 32000];
+
+    /// <summary>How long a Layer III file plays, in seconds, from its first frame: the frames its
+    /// Xing, Info or VBRI header counts, or else - a constant bit rate - the bytes after it at that
+    /// rate; null when there is no Layer III frame to read it from.</summary>
+    internal static double? Estimate(Stream stream)
+    {
+        try
+        {
+            long start = 0;
+            var head = new byte[10];
+            stream.Position = 0;
+            if (stream.Read(head) == 10 && head[0] == 'I' && head[1] == 'D' && head[2] == '3')
+                start = 10 + ((head[6] & 0x7F) << 21 | (head[7] & 0x7F) << 14 | (head[8] & 0x7F) << 7 | (head[9] & 0x7F)) + ((head[5] & 0x10) != 0 ? 10 : 0);
+            stream.Position = start;
+            var window = new byte[16384];
+            int got = stream.Read(window);
+            for (int at = 0; at + 4 < got; at++)
+            {
+                if (window[at] != 0xFF || (window[at + 1] & 0xE0) != 0xE0)
+                    continue;
+                int version = (window[at + 1] >> 3) & 3, layer = (window[at + 1] >> 1) & 3;
+                int rateIndex = window[at + 2] >> 4, srIndex = (window[at + 2] >> 2) & 3, padding = (window[at + 2] >> 1) & 1;
+                if (version == 1 || layer != 1 || rateIndex is 0 or 15 || srIndex == 3)
+                    continue;
+                bool mpeg1 = version == 3;
+                int sampleRate = SampleRates[srIndex] >> (mpeg1 ? 0 : version == 2 ? 1 : 2);
+                int bitrate = (mpeg1 ? Mpeg1Rates : Mpeg2Rates)[rateIndex] * 1000;
+                int perFrame = mpeg1 ? 1152 : 576;
+                int length = ((mpeg1 ? 144 : 72) * bitrate / sampleRate) + padding;
+                // A second frame where the first says: a real header, not a stray 0xFF in a tag.
+                if (at + length + 2 < got && (window[at + length] != 0xFF || (window[at + length + 1] & 0xE0) != 0xE0))
+                    continue;
+
+                bool mono = (window[at + 3] >> 6) == 3;
+                int side = mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17);
+                int tag = at + 4 + side;
+                if (tag + 12 <= got && Encoding.ASCII.GetString(window, tag, 4) is "Xing" or "Info" && (window[tag + 7] & 1) != 0)
+                {
+                    long frames = (long)window[tag + 8] << 24 | window[tag + 9] << 16 | window[tag + 10] << 8 | window[tag + 11];
+                    if (frames > 0)
+                        return (double)frames * perFrame / sampleRate;
+                }
+                int vbri = at + 4 + 32;
+                if (vbri + 18 <= got && Encoding.ASCII.GetString(window, vbri, 4) == "VBRI")
+                {
+                    long frames = (long)window[vbri + 14] << 24 | window[vbri + 15] << 16 | window[vbri + 16] << 8 | window[vbri + 17];
+                    if (frames > 0)
+                        return (double)frames * perFrame / sampleRate;
+                }
+
+                // A constant rate: what follows the first frame, less an ID3v1 tag at the end.
+                long end = stream.Length;
+                if (end >= 128)
+                {
+                    stream.Position = end - 128;
+                    var v1 = new byte[3];
+                    if (stream.Read(v1) == 3 && v1[0] == 'T' && v1[1] == 'A' && v1[2] == 'G')
+                        end -= 128;
+                }
+                long bytes = end - (start + at);
+                return bytes > 0 ? bytes * 8.0 / bitrate : null;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        return null;
     }
 
     public override int Read(Span<float> interleaved)

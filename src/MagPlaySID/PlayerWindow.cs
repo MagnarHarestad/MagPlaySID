@@ -299,6 +299,7 @@ internal sealed class PlayerWindow : Window
         };
         Closed += (_, _) =>
         {
+            _closed = true;
             _settings.LastShown = _strip.ShownName;
             _settings.Save();
             _timer.Stop();
@@ -313,6 +314,9 @@ internal sealed class PlayerWindow : Window
         else
             Opened += (_, _) => Resume();
         Opened += async (_, _) => await CheckForUpdatesAsync();
+        // The piano's stream opened in the background, a moment after the window: opened at the
+        // first key struck, it held the window half a second.
+        Opened += (_, _) => DispatcherTimer.RunOnce(OpenPianoSoon, TimeSpan.FromSeconds(2));
     }
 
     private Control BuildLayout()
@@ -782,19 +786,49 @@ internal sealed class PlayerWindow : Window
     {
         if (_engine is { Paused: false })
             return;
-        try
-        {
-            _pianoOutput ??= AudioOutput.Start(_pianoSynth, latencyMs: 40);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or PortAudioSharp.PortAudioException)
-        {
-            // No sound card to play it on: the glow and the dust still show.
-        }
+        // No sound card to play it on: the glow and the dust still show. Its note sounds once the
+        // stream is open.
+        OpenPianoSoon();
         _pianoSynth.Strike(key);
         _piano.Glow(key);
         if (_piano.TranslatePoint(top, _dust) is { } at)
             _dust.Burst(at);
     }
+
+    private bool _pianoOpening;
+
+    /// <summary>The sound device's failure told once: a playlist would tell it at every tune.</summary>
+    private bool _soundTold;
+
+    /// <summary>The piano's stream opened off the window's thread, when it is not open or opening.</summary>
+    private void OpenPianoSoon()
+    {
+        if (_pianoOutput is not null || _pianoOpening)
+            return;
+        _pianoOpening = true;
+        var synth = _pianoSynth;
+        Task.Run(() =>
+        {
+            IAudioOutput? output = null;
+            try
+            {
+                output = AudioOutput.Start(synth, latencyMs: 40);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or PortAudioSharp.PortAudioException)
+            {
+            }
+            Dispatcher.UIThread.Post(() =>
+            {
+                _pianoOpening = false;
+                if (_closed)
+                    output?.Dispose();
+                else
+                    _pianoOutput ??= output;
+            });
+        });
+    }
+
+    private bool _closed;
 
     private void StopPiano()
     {
@@ -1115,9 +1149,10 @@ internal sealed class PlayerWindow : Window
     {
         string kind;
         TimeSpan? length;
+        AudioDecoder? opened = null;
         try
         {
-            using var decoder = AudioFile.Open(path);
+            var decoder = opened = AudioFile.Open(path);
             string channels = decoder.Channels switch { 1 => "mono", 2 => "stereo", var n => $"{n} channels" };
             kind = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{decoder.Description}   ·   {decoder.SampleRate / 1000.0:0.#} kHz {channels}");
             length = decoder.Duration;
@@ -1125,11 +1160,15 @@ internal sealed class PlayerWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException
                                        or ArgumentException or NotSupportedException or IndexOutOfRangeException)
         {
+            opened?.Dispose();
             if (!quiet)
                 _ = MessageWindow.ShowAsync(this, "Cannot play this recording", ex.Message);
             return false;
         }
 
+        // Played from the decoder just opened, at its start: not opened again a moment later.
+        _openedDecoder?.Decoder.Dispose();
+        _openedDecoder = (path, opened!);
         var tags = AudioFile.ReadTags(path);
         _file = null;
         _module = null;
@@ -1155,6 +1194,9 @@ internal sealed class PlayerWindow : Window
     }
 
     private TimeSpan? _recordingLength;
+
+    /// <summary>A recording's decoder opened to read what it is, at its start, for its playing to take.</summary>
+    private (string Path, AudioDecoder Decoder)? _openedDecoder;
 
     /// <summary>Whether a file is an Amiga module: not a .sid, and with a module's tag or shape.</summary>
     private static bool IsModule(byte[] bytes) =>
@@ -1319,14 +1361,15 @@ internal sealed class PlayerWindow : Window
 
     private void Start(int song)
     {
+        // The piano's stream stays open: closing it here and opening it at the next key cost the
+        // window half a second each time.
         StopPlayback();
-        StopPiano();
         if (!HasTune)
             return;
 
         try
         {
-            _engine = _recording is { } recording ? new AudioTune(recording, AudioFile.Open(recording))
+            _engine = _recording is { } recording ? new AudioTune(recording, TakeDecoder(recording))
                 : _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song));
             if (_engine is AudioTune audio && _recording is { } heard && _heardNotes.TryGetValue(heard, out var notes))
                 audio.SetNotes(notes);
@@ -1336,7 +1379,17 @@ internal sealed class PlayerWindow : Window
             BuildScopes(_engine.Voices);
             for (int voice = 0; voice < _scopes.Length; voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
-            _output = AudioOutput.Start(_engine, latencyMs: 100);
+            // On the stream kept open for tunes: a stream opened for each held the window half a second.
+            _output = AudioOutput.Share(_engine, latencyMs: 100);
+            var output = _output;
+            output.Stopped += ex => Dispatcher.UIThread.Post(() =>
+            {
+                if (_output == output && !_soundTold)
+                {
+                    _soundTold = true;
+                    _ = MessageWindow.ShowAsync(this, "No sound", ex is null ? "The sound device stopped playing." : $"The sound device cannot play: {ex.Message}");
+                }
+            });
         }
         catch (Exception ex) when (ex is SidPlaybackException or InvalidOperationException or PortAudioSharp.PortAudioException
                                        or IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException)
@@ -1351,6 +1404,19 @@ internal sealed class PlayerWindow : Window
         _fastForward.Lit = _fastForwarding;
         _details.Text = DescribeFile();
         LightSongPills();
+    }
+
+    /// <summary>The decoder opened for the recording at its start, or a new one.</summary>
+    private AudioDecoder TakeDecoder(string path)
+    {
+        if (_openedDecoder is { } opened)
+        {
+            _openedDecoder = null;
+            if (opened.Path == path)
+                return opened.Decoder;
+            opened.Decoder.Dispose();
+        }
+        return AudioFile.Open(path);
     }
 
     private void StopPlayback()
@@ -1529,6 +1595,9 @@ internal sealed class PlayerWindow : Window
         {
             try
             {
+                // The whole tune played through at once, on a core of its own, while the opening is made.
+                var recorded = Transcription.RecordWhole(file, song, cancel.Token);
+                recorded.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
                 var opening = Transcription.Opening(file, song, OpeningSeconds, cancel.Token);
                 Show(() =>
                 {
@@ -1542,7 +1611,7 @@ internal sealed class PlayerWindow : Window
                     Refresh();
                 });
 
-                var (whole, length) = Transcription.Whole(file, song, opening.Rows, cancel.Token);
+                var (whole, length) = Transcription.Whole(recorded, opening.Rows, cancel.Token);
                 Show(() =>
                 {
                     (_transcription, _measured) = (whole, length);

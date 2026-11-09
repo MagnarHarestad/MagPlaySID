@@ -40,11 +40,12 @@ public static class C64SongLength
 
     /// <summary>The length of <paramref name="tune"/>, run from where it is until it loops or
     /// <paramref name="maxSeconds"/> have played - recording as it was loaded to, so a tune can be
-    /// measured and recorded in one run. It is left where the loop was found.</summary>
-    public static SidSongLength.Result? Measure(SidTune tune, double maxSeconds = MaxSeconds)
+    /// measured and recorded in one run. It is left where the loop was found. Given up, with an
+    /// OperationCanceledException, when <paramref name="cancel"/> is: the tune is no longer wanted.</summary>
+    public static SidSongLength.Result? Measure(SidTune tune, double maxSeconds = MaxSeconds, CancellationToken cancel = default)
     {
         if (tune.File.IsBasic)
-            return MeasureBasic(tune, maxSeconds);
+            return MeasureBasic(tune, maxSeconds, cancel);
         var file = tune.File;
         var computer = tune.Computer;
         var pages = new bool[256];
@@ -106,6 +107,7 @@ public static class C64SongLength
             {
                 if (computer.Calls.Count == 0 && computer.Cycle >= noCalls)
                     return null;
+                cancel.ThrowIfCancellationRequested();
                 if (!tune.RunUnlessHalted(Slice))
                     return Halted(tune);
             }
@@ -131,7 +133,7 @@ public static class C64SongLength
     /// second - the KERNAL's interrupt's, which a BASIC tune's rows are framed by too, see
     /// <see cref="BasicFrame"/> - by the clock, as some programs turn the interrupt off to run faster.
     /// </summary>
-    private static SidSongLength.Result? MeasureBasic(SidTune tune, double maxSeconds)
+    private static SidSongLength.Result? MeasureBasic(SidTune tune, double maxSeconds, CancellationToken cancel)
     {
         var file = tune.File;
         var computer = tune.Computer;
@@ -211,6 +213,7 @@ public static class C64SongLength
         {
             while (found is null && computer.Cycle < end)
             {
+                cancel.ThrowIfCancellationRequested();
                 if (!tune.RunUnlessHalted(Slice))
                     return Halted(tune);
             }
