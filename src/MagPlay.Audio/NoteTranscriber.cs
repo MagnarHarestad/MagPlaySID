@@ -174,10 +174,28 @@ public sealed class NoteTranscriber
 
         /// <summary>Each key's first harmonics in the short window: quick to rise when it is struck.</summary>
         public readonly float[] KeyAttack = new float[NoteTranscriber.Keys];
+
+        /// <summary>Each key's fundamental alone in the short window: a note struck an octave above
+        /// raises the key's harmonics, not this.</summary>
+        public readonly float[] RootAttack = new float[NoteTranscriber.Keys];
         public float Onset;
         public float Loudness;
     }
 
+    /// <summary>Threads the frames are heard on, side by side: all the cores but one, kept for the
+    /// sound and the window.</summary>
+    internal static int Workers = Math.Max(1, Environment.ProcessorCount - 1);
+
+    /// <summary>Frames a worker hears at a time: three seconds.</summary>
+    private const int BlockFrames = 256;
+
+    /// <summary>
+    /// The recording read and resampled here, in order; its frames heard in blocks on worker threads
+    /// side by side - each frame stands on its own samples, but for the short window's onset, which
+    /// is the rise over the frame before, so a block hears the frame before it first and puts it
+    /// aside - and made into notes here, in order, as the blocks come back. The notes are the same
+    /// as one thread's, frame for frame, in a fraction of the time.
+    /// </summary>
     private List<HeardNote> Run(AudioDecoder decoder, Action<IReadOnlyList<HeardNote>, double>? progress, CancellationToken cancel)
     {
         var resampler = new Resampler(decoder.SampleRate, Rate, 1);
@@ -186,68 +204,154 @@ public sealed class NoteTranscriber
         var mono = new float[8192];
         var resampled = new float[16384];
 
-        // The last Window samples, the newest at the end, and the frames heard so far.
-        var history = new float[Window * 2];
-        int filled = 0, sinceFrame = 0;
+        // The samples not yet given to a block, from the absolute sample `kept` on.
+        var store = new List<float>(1 << 16);
+        long kept = 0, taken = 0;
+        long scheduled = 0;
         var frames = new List<Frame>();
         var notes = new List<HeardNote>();
         var tracker = new Tracker();
         double reported = 0;
 
+        // Not disposed: the workers may still be finishing a block as this returns; finished adding, they end.
+        var work = new System.Collections.Concurrent.BlockingCollection<(float[] Samples, int Count, TaskCompletionSource<Frame[]> Done)>();
+        var threads = new List<Thread>();
+        for (int w = 0; w < Workers; w++)
+        {
+            var thread = new Thread(() =>
+            {
+                var ear = this;
+                lock (threads)
+                {
+                    // Each thread its own buffers: the first takes this one's, the rest new ones.
+                    if (threads.IndexOf(Thread.CurrentThread) > 0)
+                        ear = new NoteTranscriber();
+                }
+                foreach (var (samples, count, done) in work.GetConsumingEnumerable())
+                {
+                    try
+                    {
+                        // The frame before the block first, for the onset's rise; then the block.
+                        Analyse(ear, samples.AsSpan(0, Window), new Frame());
+                        var heard = new Frame[count];
+                        for (int f = 0; f < count; f++)
+                        {
+                            heard[f] = new Frame();
+                            Analyse(ear, samples.AsSpan((f + 1) * Hop, Window), heard[f]);
+                        }
+                        done.SetResult(heard);
+                    }
+                    catch (Exception ex)
+                    {
+                        done.SetException(ex);
+                    }
+                }
+            })
+            { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "Hearing notes" };
+            lock (threads)
+                threads.Add(thread);
+        }
+        foreach (var thread in threads)
+            thread.Start();
+
+        var inFlight = new Queue<Task<Frame[]>>();
+
+        // The oldest block back: its frames made into notes, in order.
+        void TakeBack()
+        {
+            var heard = inFlight.Dequeue().GetAwaiter().GetResult();
+            foreach (var frame in heard)
+            {
+                frames.Add(frame);
+                tracker.Add(frames, notes);
+            }
+        }
+
+        // Every whole block heard so far given to a worker - and at the end, what is left.
+        void Schedule(bool end)
+        {
+            long ready = taken / Hop;
+            while (ready - scheduled >= BlockFrames || (end && scheduled < ready))
+            {
+                int count = (int)Math.Min(BlockFrames, ready - scheduled);
+                // From the start of the frame before's window to the end of the block's last.
+                long from = (scheduled * Hop) - Window;
+                var samples = new float[(count * Hop) + Window];
+                for (long at = Math.Max(from, kept); at < from + samples.Length; at++)
+                    samples[at - from] = store[(int)(at - kept)];
+                var done = new TaskCompletionSource<Frame[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                work.Add((samples, count, done), cancel);
+                inFlight.Enqueue(done.Task);
+                scheduled += count;
+
+                // What no block will need again let go.
+                long keepFrom = (scheduled * Hop) - Window;
+                if (keepFrom > kept)
+                {
+                    store.RemoveRange(0, (int)(keepFrom - kept));
+                    kept = keepFrom;
+                }
+                while (inFlight.Count > 0 && (inFlight.Peek().IsCompleted || inFlight.Count > Workers * 2))
+                    TakeBack();
+            }
+        }
+
         void Take(ReadOnlySpan<float> samples)
         {
             foreach (float sample in samples)
-            {
-                if (filled == history.Length)
-                {
-                    Array.Copy(history, Window, history, 0, Window);
-                    filled = Window;
-                }
-                history[filled++] = sample;
-                if (++sinceFrame == Hop)
-                {
-                    sinceFrame = 0;
-                    var frame = new Frame();
-                    Analyse(history.AsSpan(Math.Max(0, filled - Window), Math.Min(filled, Window)), frame);
-                    frames.Add(frame);
-                    tracker.Add(frames, notes);
-                }
-            }
+                store.Add(sample);
+            taken += samples.Length;
+            Schedule(end: false);
         }
 
-        int got;
-        while ((got = decoder.Read(read)) > 0)
+        try
         {
-            cancel.ThrowIfCancellationRequested();
-            int frameCount = got / channels;
-            if (mono.Length < frameCount)
-                mono = new float[frameCount];
-            for (int i = 0; i < frameCount; i++)
+            int got;
+            while ((got = decoder.Read(read)) > 0)
             {
-                float sum = 0;
-                for (int c = 0; c < channels; c++)
-                    sum += read[(i * channels) + c];
-                mono[i] = sum / channels;
-            }
-            int made = resampler.Process(mono.AsSpan(0, frameCount), ref resampled);
-            Take(resampled.AsSpan(0, made));
+                cancel.ThrowIfCancellationRequested();
+                int frameCount = got / channels;
+                if (mono.Length < frameCount)
+                    mono = new float[frameCount];
+                for (int i = 0; i < frameCount; i++)
+                {
+                    float sum = 0;
+                    for (int c = 0; c < channels; c++)
+                        sum += read[(i * channels) + c];
+                    mono[i] = sum / channels;
+                }
+                int made = resampler.Process(mono.AsSpan(0, frameCount), ref resampled);
+                Take(resampled.AsSpan(0, made));
 
-            double heard = frames.Count * FrameSeconds;
-            if (progress is not null && heard - reported >= 4)
+                double heard = frames.Count * FrameSeconds;
+                if (progress is not null && heard - reported >= 4)
+                {
+                    reported = heard;
+                    progress(Snapshot(notes, tracker.Pending(frames)), heard);
+                }
+            }
+            int last = resampler.Flush(ref resampled);
+            Take(resampled.AsSpan(0, last));
+            // Half a window of silence, so the last notes are heard to their end.
+            Take(new float[Window / 2]);
+            Schedule(end: true);
+            while (inFlight.Count > 0)
             {
-                reported = heard;
-                progress(Snapshot(notes, tracker.Pending(frames)), heard);
+                cancel.ThrowIfCancellationRequested();
+                TakeBack();
             }
         }
-        int last = resampler.Flush(ref resampled);
-        Take(resampled.AsSpan(0, last));
-        // Half a window of silence, so the last notes are heard to their end.
-        Take(new float[Window / 2]);
+        finally
+        {
+            work.CompleteAdding();
+        }
         tracker.Finish(frames, notes);
         notes.Sort((a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : a.Pitch.CompareTo(b.Pitch));
         progress?.Invoke(notes, frames.Count * FrameSeconds);
         return notes;
     }
+
+    private static void Analyse(NoteTranscriber ear, ReadOnlySpan<float> samples, Frame frame) => ear.Analyse(samples, frame);
 
     private static List<HeardNote> Snapshot(List<HeardNote> notes, IEnumerable<HeardNote> pending)
     {
@@ -309,6 +413,11 @@ public sealed class NoteTranscriber
             foreach (int bin in _keyShortBins[key])
                 sum += Math.Max(_shortMagnitude[bin], Math.Max(_shortMagnitude[bin - 1], _shortMagnitude[bin + 1]));
             frame.KeyAttack[key] = sum;
+            if (_keyShortBins[key].Length > 0)
+            {
+                int root = _keyShortBins[key][0];
+                frame.RootAttack[key] = Math.Max(_shortMagnitude[root], Math.Max(_shortMagnitude[root - 1], _shortMagnitude[root + 1]));
+            }
         }
 
         if (frame.Loudness < 1e-4f)
@@ -373,25 +482,7 @@ public sealed class NoteTranscriber
             float bestSalience = 0;
             for (int i = 0; i < _candidates.Length; i++)
             {
-                float s = 0;
-                var low = _bandLow[i];
-                var high = _bandHigh[i];
-                var weights = _weights[i];
-                var residual = _residuals[_spectrumOf[i]];
-                for (int m = 0; m < low.Length; m++)
-                {
-                    float peak;
-                    if (!medium)
-                        peak = MaxIn(low[m], high[m]);
-                    else
-                    {
-                        peak = 0;
-                        for (int k = low[m]; k <= high[m]; k++)
-                            if (residual[k] > peak)
-                                peak = residual[k];
-                    }
-                    s += weights[m] * peak;
-                }
+                float s = Salience(i, medium);
                 if (s > bestSalience)
                     (best, bestSalience) = (i, s);
             }
@@ -412,6 +503,32 @@ public sealed class NoteTranscriber
             if (medium)
                 Cancel(best, _residuals[1], 8);
         }
+    }
+
+
+    /// <summary>A candidate's salience in what is left of the spectrum: its partials' peaks, weighted.</summary>
+    private float Salience(int i, bool medium)
+    {
+        float s = 0;
+        var low = _bandLow[i];
+        var high = _bandHigh[i];
+        var weights = _weights[i];
+        var residual = _residuals[_spectrumOf[i]];
+        for (int m = 0; m < low.Length; m++)
+        {
+            float peak;
+            if (!medium)
+                peak = MaxIn(low[m], high[m]);
+            else
+            {
+                peak = 0;
+                for (int k = low[m]; k <= high[m]; k++)
+                    if (residual[k] > peak)
+                        peak = residual[k];
+            }
+            s += weights[m] * peak;
+        }
+        return s;
     }
 
     // The residual's maxima over every power-of-two run of bins: the loudest bin in any band is
@@ -503,11 +620,11 @@ public sealed class NoteTranscriber
         /// <summary>Frames a key may be silent within a note.</summary>
         internal static int Gap = 3;
 
-        /// <summary>The fewest frames a note lasts: 46 ms.</summary>
-        internal static int Shortest = 4;
+        /// <summary>The fewest frames a note lasts: 70 ms.</summary>
+        internal static int Shortest = 6;
 
         /// <summary>How much a key's harmonics rise in the short window for an onset to strike it.</summary>
-        internal static float StrikeRise = 1.6f;
+        internal static float StrikeRise = 1.5f;
 
         /// <summary>Of seven frames about, how many a key is found in to be sounding.</summary>
         internal static int Smooth = 4;
@@ -518,13 +635,23 @@ public sealed class NoteTranscriber
 
         /// <summary>Frames a note that has stopped sounding is kept: heard again before then with no
         /// strike, it is the same note, lost for a moment under others.</summary>
-        internal static int Resume = 40;
+        internal static int Resume = 80;
+
+        /// <summary>Whether a strike that only raises a key's upper harmonics - as a note struck an
+        /// octave, a twelfth or two octaves above does - leaves a note of it sounding on.</summary>
+        internal static bool Explain = true;
+
+        /// <summary>The fewest frames a note lasts that was not struck - first heard with no strike
+        /// of its own, as a chord's partials can make a key heard for a moment: 139 ms.</summary>
+        internal static int Unstruck = 12;
 
         // A note no longer heard, kept a while in case it comes back: its start and its last frame.
         private readonly int[] _restStart = new int[Keys];
         private readonly double[] _restStartSeconds = new double[Keys];
         private readonly int[] _restLast = new int[Keys];
         private readonly float[] _restPeak = new float[Keys];
+        private readonly bool[] _restOwn = new bool[Keys];
+        private readonly bool[] _own = new bool[Keys];
 
         private readonly int[] _start = new int[Keys];
         private readonly double[] _startSeconds = new double[Keys];
@@ -561,7 +688,7 @@ public sealed class NoteTranscriber
         {
             if (_restStart[key] < 0)
                 return;
-            Add(notes, key, _restStart[key], _restStartSeconds[key], _restLast[key] + 1, _restPeak[key]);
+            Add(notes, key, _restStart[key], _restStartSeconds[key], _restLast[key] + 1, _restPeak[key], _restOwn[key]);
             _restStart[key] = -1;
         }
 
@@ -569,7 +696,7 @@ public sealed class NoteTranscriber
         public IEnumerable<HeardNote> Pending(List<Frame> frames)
         {
             for (int key = 0; key < Keys; key++)
-                if (_start[key] >= 0 && _lastHeard[key] - _start[key] + 1 >= Shortest)
+                if (_start[key] >= 0 && _lastHeard[key] - _start[key] + 1 >= (_own[key] ? Shortest : Math.Max(Shortest, Unstruck)))
                     yield return new HeardNote(LowestPitch + key, _startSeconds[key], FrameTime(_lastHeard[key] + 1) + (LowestPitch + key >= SplitKey ? MediumEndShift : EndShift), Strength(_peak[key]));
         }
 
@@ -591,10 +718,10 @@ public sealed class NoteTranscriber
                 bool sounding = Sounding(frames, key, t);
                 if (_start[key] >= 0)
                 {
-                    if (onset && t - _start[key] >= Shortest && Struck(frames, key, t) && SoundsSoon(frames, key, t))
+                    if (onset && t - _start[key] >= Shortest && Struck(frames, key, t) && SoundsSoon(frames, key, t) && !Explained(frames, key, t))
                     {
                         End(notes, key, t);
-                        Begin(frames, key, t, StrikeTime(frames, t));
+                        Begin(frames, key, t, StrikeTime(frames, t), own: true);
                     }
                     else if (!sounding && t - _lastHeard[key] > Gap)
                     {
@@ -607,13 +734,14 @@ public sealed class NoteTranscriber
                     // Back within a moment and not struck: the note that rested goes on.
                     if (_restStart[key] >= 0 && !(onset && Struck(frames, key, t)) && !StruckSince(frames, key, _restLast[key], t))
                     {
-                        (_start[key], _startSeconds[key], _peak[key]) = (_restStart[key], _restStartSeconds[key], _restPeak[key]);
+                        (_start[key], _startSeconds[key], _peak[key], _own[key]) = (_restStart[key], _restStartSeconds[key], _restPeak[key], _restOwn[key]);
                         _restStart[key] = -1;
                     }
                     else
                     {
                         LetGo(notes, key);
-                        Begin(frames, key, t, StartSeconds(frames, key, t));
+                        double seconds = StartSeconds(frames, key, t, out bool own);
+                        Begin(frames, key, t, seconds, own);
                     }
                 }
                 if (_restStart[key] >= 0 && t - _restLast[key] > Resume)
@@ -626,8 +754,9 @@ public sealed class NoteTranscriber
             }
         }
 
-        private void Begin(List<Frame> frames, int key, int t, double seconds)
+        private void Begin(List<Frame> frames, int key, int t, double seconds, bool own)
         {
+            _own[key] = own;
             _start[key] = t;
             _startSeconds[key] = seconds;
             _lastHeard[key] = t;
@@ -658,6 +787,30 @@ public sealed class NoteTranscriber
             return after > (before * StrikeRise) + 1e-3f;
         }
 
+        /// <summary>Whether a strike of a sounding key is a note struck above it, whose partials are the
+        /// key's harmonics: one an octave, a twelfth or two octaves up is struck, and the key's own
+        /// fundamental does not rise.</summary>
+        private static bool Explained(List<Frame> frames, int key, int t)
+        {
+            if (!Explain)
+                return false;
+            bool above = false;
+            foreach (int up in (ReadOnlySpan<int>)[12, 19, 24])
+                if (key + up < Keys && Struck(frames, key + up, t) && !Sounding(frames, key + up, t - 4))
+                    above = true;
+            if (!above)
+                return false;
+            float before = float.MaxValue;
+            for (int i = Math.Max(0, t - 4); i < t; i++)
+                before = Math.Min(before, frames[i].RootAttack[key]);
+            if (before == float.MaxValue)
+                before = 0;
+            float after = 0;
+            for (int i = t; i < Math.Min(frames.Count, t + 3); i++)
+                after = Math.Max(after, frames[i].RootAttack[key]);
+            return after <= (before * StrikeRise) + 1e-3f;
+        }
+
         /// <summary>A peak of the onset strength, standing out from those about it.</summary>
         private static bool IsOnset(List<Frame> frames, int t)
         {
@@ -682,15 +835,15 @@ public sealed class NoteTranscriber
             if (resting)
             {
                 LetGo(notes, key);
-                (_restStart[key], _restStartSeconds[key], _restLast[key], _restPeak[key]) = (start, _startSeconds[key], end - 1, _peak[key]);
+                (_restStart[key], _restStartSeconds[key], _restLast[key], _restPeak[key], _restOwn[key]) = (start, _startSeconds[key], end - 1, _peak[key], _own[key]);
                 return;
             }
-            Add(notes, key, start, _startSeconds[key], end, _peak[key]);
+            Add(notes, key, start, _startSeconds[key], end, _peak[key], _own[key]);
         }
 
-        private static void Add(List<HeardNote> notes, int key, int start, double startSeconds, int end, float peak)
+        private static void Add(List<HeardNote> notes, int key, int start, double startSeconds, int end, float peak, bool own)
         {
-            if (end - start < Shortest)
+            if (end - start < (own ? Shortest : Math.Max(Shortest, Unstruck)))
                 return;
             // The long window still hears a note for a while after it ends.
             double endSeconds = Math.Max(startSeconds + 0.03, FrameTime(end) + (LowestPitch + key >= SplitKey ? MediumEndShift : EndShift));
@@ -708,12 +861,16 @@ public sealed class NoteTranscriber
 
         /// <summary>When a note first heard at frame t starts: at the latest onset that strikes it
         /// within the long window's lag before; else the strongest onset there; else the lag back.</summary>
-        private static double StartSeconds(List<Frame> frames, int key, int t)
+        private static double StartSeconds(List<Frame> frames, int key, int t, out bool own)
         {
             int from = Math.Max(1, t - LookBack), to = Math.Min(frames.Count - 2, t + 1);
             for (int i = to; i >= from; i--)
                 if (IsOnset(frames, i) && Struck(frames, key, i))
+                {
+                    own = !Explained(frames, key, i);
                     return StrikeTime(frames, i);
+                }
+            own = false;
             int best = -1;
             float bestOnset = 0;
             for (int i = from; i <= to; i++)
