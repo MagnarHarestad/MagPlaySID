@@ -59,7 +59,25 @@ internal sealed class C64Tune(C64PlaybackEngine engine) : ITunePlayback
     public float Volume { get => Engine.Volume; set => Engine.Volume = value; }
     public bool PlaysDigi => Engine.PlaysDigi;
     public WaveFormat WaveFormat => Engine.WaveFormat;
-    public int Read(byte[] buffer, int offset, int count) => Engine.Read(buffer, offset, count);
+
+    /// <summary>The tune brought up to the loudness all .sid tunes play at - see <see cref="TuneLoudness"/>.</summary>
+    private readonly PeakLimiter _limiter = TuneLoudness.Limiter(1, C64PlaybackEngine.SampleRate, TuneLoudness.SidGainDb);
+    private float[] _limited = [];
+
+    public int Read(byte[] buffer, int offset, int count)
+    {
+        int read = Engine.Read(buffer, offset, count);
+        var samples = MemoryMarshal.Cast<byte, short>(buffer.AsSpan(offset, read));
+        if (_limited.Length < samples.Length)
+            _limited = new float[samples.Length];
+        var limited = _limited.AsSpan(0, samples.Length);
+        for (int i = 0; i < samples.Length; i++)
+            limited[i] = samples[i] * (1f / 32768);
+        _limiter.Process(limited);
+        for (int i = 0; i < samples.Length; i++)
+            samples[i] = (short)Math.Clamp(MathF.Round(limited[i] * 32768), short.MinValue, short.MaxValue);
+        return read;
+    }
     public long TuneSampleAt(long device) => Engine.TuneSampleAt(device);
     public void SetVoiceMuted(int voice, bool muted) => Engine.SetVoiceMuted(voice, muted);
     public (int Frequency, int Control, int Envelope) VoiceAt(int voice, long at) => Engine.VoiceAt(voice, at);
@@ -106,12 +124,17 @@ internal sealed class ModuleTune : ITunePlayback
     private long _device, _tuneSample;
     private float _applied = -1;
 
+    /// <summary>The module brought up to the loudness its kind plays at - see <see cref="TuneLoudness"/>.</summary>
+    private readonly PeakLimiter _limiter;
+    private readonly float[] _limited = new float[Chunk * 2];
+
     private const int ModPlayer_MaxSpeed = 32;
 
     public ModuleTune(ITrackerModule module)
     {
         Module = module;
         _player = module.CreatePlayer(SampleRate);
+        _limiter = TuneLoudness.Limiter(2, SampleRate, TuneLoudness.ModuleGainDb(module));
         int channels = module.Channels;
         _scopes = new float[channels][];
         _states = new int[channels][];
@@ -222,9 +245,13 @@ internal sealed class ModuleTune : ITunePlayback
                 }
                 float scale = rate == 1 ? 1 : FastForwardVolume / rate;
                 gain += step;
-                output[(done + i) * 2] = (short)Math.Clamp(l * scale * gain * 30000, short.MinValue, short.MaxValue);
-                output[(done + i) * 2 + 1] = (short)Math.Clamp(r * scale * gain * 30000, short.MinValue, short.MaxValue);
+                // Not clipped here: the limiter takes what goes over.
+                _limited[i * 2] = l * scale * gain * (30000f / 32768);
+                _limited[i * 2 + 1] = r * scale * gain * (30000f / 32768);
             }
+            _limiter.Process(_limited.AsSpan(0, n * 2));
+            for (int i = 0; i < n * 2; i++)
+                output[done * 2 + i] = (short)Math.Clamp(MathF.Round(_limited[i] * 32768), short.MinValue, short.MaxValue);
             done += n;
         }
         _applied = volume;
