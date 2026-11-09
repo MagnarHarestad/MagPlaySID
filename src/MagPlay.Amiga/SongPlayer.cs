@@ -1308,7 +1308,8 @@ public sealed class SongPlayer : ITrackerPlayer
                     ? (Sample.VibratoSweep == 0 ? 1 : Math.Min(1, (double)_vibratoTicks / Sample.VibratoSweep))
                     : Math.Min(1, _vibratoTicks * Math.Max(1, Sample.VibratoSweep) / 256.0);
                 int wave = Sample.VibratoType switch { 1 => 2, 2 => 1, 3 => 1, _ => 0 };
-                double semitones = Wave(wave, _vibratoPosition >> 2) / 255.0 * Sample.VibratoDepth * sweep / (player._song.Type == SongFormat.Xm ? 16.0 : 64.0);
+                // At most the depth in FastTracker's pitch units - 64 a semitone - as in Impulse Tracker.
+                double semitones = Wave(wave, _vibratoPosition >> 2) / 255.0 * Sample.VibratoDepth * sweep / 64.0;
                 hertz *= Math.Pow(2, semitones / 12);
                 _vibratoPosition += Sample.VibratoRate;
             }
@@ -1430,12 +1431,12 @@ public sealed class SongPlayer : ITrackerPlayer
                         position = start;
                         at = start;
                     }
+                    // Between the sample at and the one after it, whichever way a ping-pong loop
+                    // goes: the one before, on the way back, ran each step's wave backwards.
                     double fraction = position - at;
-                    int next = at + direction;
+                    int next = at + 1;
                     if (next >= end)
-                        next = mode == 1 ? start : mode == 2 ? at : Math.Min(at, length - 1);
-                    else if (next < start && mode == 2 && direction < 0)
-                        next = at;
+                        next = mode == 1 ? start : at;
                     next = Math.Clamp(next, 0, length - 1);
                     s = (data[at] + ((data[next] - data[at]) * fraction)) / 32768.0;
                     if (filtered)
