@@ -746,12 +746,13 @@ internal sealed class PlayerWindow : Window
             {
                 string? name = _recording is not null ? (i == 0 ? "LEFT" : "RIGHT")
                     : _module is not null ? $"CH {i + 1}" : voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null;
-                var scope = new VoiceScopeView(i, name) { TextScale = TextScale };
+                var scope = new VoiceScopeView(i, name, shortName: _module is not null ? $"{i + 1}" : null) { TextScale = TextScale };
                 scope.MuteToggled += (voice, muted) =>
                 {
                     _muted[voice] = muted;
                     _engine?.SetVoiceMuted(voice, muted);
                 };
+                scope.SoloAsked += Solo;
                 _scopes[i] = scope;
                 _scopeRow.Children.Add(scope);
             }
@@ -768,6 +769,22 @@ internal sealed class PlayerWindow : Window
         {
             _scopes[i].Margin = new Thickness(i == 0 ? 0 : 5, 0, i == count - 1 ? 0 : 5, 0);
             Grid.SetColumn(_scopes[i], i);
+        }
+    }
+
+    /// <summary>A voice heard alone: every other muted - or, when it is alone already, all heard again.</summary>
+    private void Solo(int voice)
+    {
+        var mutable = _scopes.Where(s => s.Mutable).ToArray();
+        bool alone = mutable.All(s => s.Muted == (Array.IndexOf(_scopes, s) != voice));
+        for (int i = 0; i < mutable.Length; i++)
+        {
+            int at = Array.IndexOf(_scopes, mutable[i]);
+            bool muted = !alone && at != voice;
+            mutable[i].Muted = muted;
+            if (at < _muted.Length)
+                _muted[at] = muted;
+            _engine?.SetVoiceMuted(at, muted);
         }
     }
 

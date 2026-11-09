@@ -22,6 +22,10 @@ internal sealed class VoiceScopeView : Control
     private readonly float[] _samples = new float[SidFilePlaybackEngine.ScopeSamples];
     private readonly int _voice;
     private readonly string _name;
+
+    /// <summary>What the label shortens to where the scope is too narrow for the name: a module's
+    /// channel number alone, when there are many.</summary>
+    private readonly string _shortName;
     private readonly Color _colour;
     private readonly IBrush _fill = SidPlayerPalette.PanelFill();
     private readonly IPen _border = SidPlayerPalette.Pen(SidPlayerPalette.PanelBorder);
@@ -31,7 +35,7 @@ internal sealed class VoiceScopeView : Control
 
     /// <summary>The label, laid out once - again only when muting or the text's size changes it.</summary>
     private TextLayout? _label;
-    private (bool Muted, double Scale) _labelFor;
+    private (bool Muted, double Scale, double Width) _labelFor;
 
     private bool _muted;
     private readonly bool _mutable;
@@ -43,19 +47,43 @@ internal sealed class VoiceScopeView : Control
     /// <param name="name">What the scope is labelled; VOICE and the voice's number when left out.</param>
     /// <param name="colour">Its colour; the voice's place on its chip's when left out.</param>
     /// <param name="mutable">Whether a click mutes it - not a digi's, which plays through the volume.</param>
-    public VoiceScopeView(int voice, string? name = null, Color? colour = null, bool mutable = true)
+    /// <param name="shortName">The label where the name does not fit; the name when left out.</param>
+    public VoiceScopeView(int voice, string? name = null, Color? colour = null, bool mutable = true, string? shortName = null)
     {
         _voice = voice;
         _mutable = mutable;
         _name = name ?? $"VOICE {voice + 1}";
+        _shortName = shortName ?? _name;
         _colour = colour ?? SidPlayerPalette.VoiceColour(voice % 3);
         _glow = SidPlayerPalette.Pen(SidPlayerPalette.WithAlpha(_colour, 40), 3.5);
         _trace = SidPlayerPalette.Pen(_colour, 1.4);
         if (mutable)
+        {
             Cursor = new Cursor(StandardCursorType.Hand);
+            ToolTip.SetTip(this, "Click to mute, right-click to hear it alone");
+        }
     }
 
+    /// <summary>A click: the voice muted, or heard again.</summary>
     public event Action<int, bool>? MuteToggled;
+
+    /// <summary>A right-click: the voice to be heard alone - or, alone already, with the rest again.</summary>
+    public event Action<int>? SoloAsked;
+
+    public bool Mutable => _mutable;
+
+    /// <summary>Whether the voice is muted - set by the window too, for a solo.</summary>
+    public bool Muted
+    {
+        get => _muted;
+        set
+        {
+            if (_muted == value)
+                return;
+            _muted = value;
+            InvalidateVisual();
+        }
+    }
 
     public void Update(IScopeSource engine, long atSample)
     {
@@ -87,11 +115,18 @@ internal sealed class VoiceScopeView : Control
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
-        if (_mutable && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (_mutable && properties.IsLeftButtonPressed)
         {
             _muted = !_muted;
             MuteToggled?.Invoke(_voice, _muted);
             InvalidateVisual();
+            e.Handled = true;
+        }
+        else if (_mutable && properties.IsRightButtonPressed)
+        {
+            SoloAsked?.Invoke(_voice);
+            e.Handled = true;
         }
 
         base.OnPointerPressed(e);
@@ -127,12 +162,21 @@ internal sealed class VoiceScopeView : Control
 
         context.DrawRectangle(_border, bounds.Deflate(0.5));
 
-        if (_label is null || _labelFor != (_muted, TextScale))
+        if (_label is null || _labelFor != (_muted, TextScale, bounds.Width))
         {
-            _labelFor = (_muted, TextScale);
+            _labelFor = (_muted, TextScale, bounds.Width);
             _label?.Dispose();
-            _label = new TextLayout(_muted ? $"{_name}  MUTED" : _name, LabelFace, 10 * TextScale,
-                SidPlayerPalette.Brush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170)));
+            // The longest that fits: the name and MUTED, the name, the short name - which is drawn
+            // even where it does not fit, as the least there is to say.
+            var brush = SidPlayerPalette.Brush(_muted ? SidPlayerPalette.ControlDisabled : SidPlayerPalette.WithAlpha(_colour, 170));
+            string[] texts = _muted ? [$"{_name}  MUTED", _name, _shortName] : [_name, _shortName];
+            foreach (string text in texts)
+            {
+                _label?.Dispose();
+                _label = new TextLayout(text, LabelFace, 10 * TextScale, brush);
+                if (_label.Width + 12 <= bounds.Width)
+                    break;
+            }
         }
         _label.Draw(context, new Point(8, bounds.Height - _label.Height - 4));
     }
