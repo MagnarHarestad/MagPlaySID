@@ -80,6 +80,11 @@ internal sealed class PlaylistTune : Observable
 
     public bool IsPlaying { get => _playing; set => Set(ref _playing, value); }
 
+    /// <summary>The playlist it was found in, while it is listed as a search's hit; null otherwise.</summary>
+    public string? FoundIn { get => _foundIn; set => Set(ref _foundIn, value); }
+
+    private string? _foundIn;
+
     /// <summary>Its length, once it has been played: measuring it is playing it.</summary>
     public TimeSpan? Length { get => _length; set => Set(ref _length, value); }
 

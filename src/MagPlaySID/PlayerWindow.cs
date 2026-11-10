@@ -257,7 +257,16 @@ internal sealed class PlayerWindow : Window
 
         KeyDown += (_, e) =>
         {
-            if (e.Key == Key.Space)
+            // Typing in the search box is typing, not the window's keys.
+            if (e.Source is TextBox)
+                return;
+            if (e.Key == Key.F && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Meta)
+            {
+                ShowPlaylists(true);
+                _strip.FocusSearch();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Space)
             {
                 TogglePause();
                 e.Handled = true;
@@ -273,6 +282,8 @@ internal sealed class PlayerWindow : Window
         // Shift too: on some keyboards + is a shifted key. F fast-forwards while it is held.
         AddHandler(KeyDownEvent, (_, e) =>
         {
+            if (e.Source is TextBox)
+                return;
             if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.None)
             {
                 FastForward(true);

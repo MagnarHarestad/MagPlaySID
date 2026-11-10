@@ -35,6 +35,9 @@ internal sealed class PlaylistStrip : Border
     private static readonly Geometry PlayIcon = Geometry.Parse("M0,0 L10,6 L0,12 Z");
     private static readonly Geometry BarsIcon = Geometry.Parse("M0,6 H3 V14 H0 Z M5,0 H8 V14 H5 Z M10,4 H13 V14 H10 Z");
     private static readonly Geometry SortIcon = Geometry.Parse("M0,0 H14 V2 H0 Z M0,5 H10 V7 H0 Z M0,10 H6 V12 H0 Z");
+    private static readonly Geometry SearchIcon = Geometry.Parse(
+        "M5.5,0 A5.5,5.5 0 1 1 5.5,11 A5.5,5.5 0 1 1 5.5,0 Z M5.5,1.8 A3.7,3.7 0 1 0 5.5,9.2 A3.7,3.7 0 1 0 5.5,1.8 Z M9.2,8 L13,11.8 L11.8,13 L8,9.2 Z");
+    private static readonly Geometry CrossIcon = Geometry.Parse("M1,0 L5,4 L9,0 L10,1 L6,5 L10,9 L9,10 L5,6 L1,10 L0,9 L4,5 L0,1 Z");
     private static readonly Geometry InfoIcon = Geometry.Parse(
         "F0 M8,0 A8,8 0 1 1 7.99,0 Z M8,1.4 A6.6,6.6 0 1 0 8.01,1.4 Z M7.05,3.4 H8.95 V5.3 H7.05 Z M7.05,6.6 H8.95 V12.6 H7.05 Z");
 
@@ -78,6 +81,13 @@ internal sealed class PlaylistStrip : Border
     private readonly ObservableCollection<Playlist> _lists = [];
     private readonly ListBox _listBox = new();
     private readonly ListBox _tuneBox = new();
+
+    /// <summary>The search over every playlist: its box, and each tune found with the playlist it is
+    /// in - a tune is its playlist's own, so the same file in two is two hits.</summary>
+    private readonly TextBox _search = new();
+    private readonly Button _clearSearch = new();
+    private readonly Dictionary<PlaylistTune, Playlist> _found = [];
+    private List<PlaylistTune> _hits = [];
     private readonly TextBlock _caption = new();
     private readonly TextBlock _heading = new();
     private readonly TextBlock _count = new();
@@ -152,7 +162,14 @@ internal sealed class PlaylistStrip : Border
         });
 
         Child = BuildLayout();
-        _listBox.SelectionChanged += (_, _) => ShowTunes();
+        // A playlist chosen while searching ends the search: it is that playlist that is wanted.
+        _listBox.SelectionChanged += (_, _) =>
+        {
+            if (Searching)
+                _search.Text = "";
+            else
+                ShowTunes();
+        };
         if (_lists.Count > 0)
             _listBox.SelectedIndex = 0;
         ReadHeaders(_favourites.SelectMany(p => p.Tunes), HeadersRead);
@@ -182,7 +199,7 @@ internal sealed class PlaylistStrip : Border
     private static ScrollViewer? Scroller(ListBox list) => list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
 
     /// <summary>Where the playlists and the tunes shown are scrolled to.</summary>
-    public (ListPlace Playlists, ListPlace Tunes) Places => (TopOf(_listBox), TopOf(_tuneBox));
+    public (ListPlace Playlists, ListPlace Tunes) Places => (TopOf(_listBox), Searching ? new ListPlace(-1, 0) : TopOf(_tuneBox));
 
     /// <summary>The row at the top of <paramref name="list"/>'s view - the first one any of which shows -
     /// and how far into it the view starts.</summary>
@@ -282,7 +299,9 @@ internal sealed class PlaylistStrip : Border
         AutomationProperties.SetName(_new, "New playlist");
         Quiet(_new);
 
-        var top = new Grid { Margin = new Thickness(18, 14, 10, 6), Children = { _caption, _new } };
+        var top = new Grid { Margin = new Thickness(18, 6, 10, 6), Children = { _caption, _new } };
+        var search = BuildSearch();
+        var head = new StackPanel { Children = { search, top } };
 
         Restyle(_listBox);
         _listBox.ItemsSource = _lists;
@@ -407,7 +426,7 @@ internal sealed class PlaylistStrip : Border
         Grid.SetRow(_line, 2);
         Grid.SetRow(_splitter, 2);
         Grid.SetRow(tunes, 3);
-        _layout.Children.Add(top);
+        _layout.Children.Add(head);
         _layout.Children.Add(_listBox);
         _layout.Children.Add(_line);
         _layout.Children.Add(_splitter);
@@ -605,7 +624,17 @@ internal sealed class PlaylistStrip : Border
                 _ = ShowInfoAsync(tune);
         };
 
-        var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, author } };
+        // A search's hit says which playlist it is in.
+        var foundIn = new TextBlock
+        {
+            FontSize = 11 * _scale,
+            Foreground = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(Accent, 200)),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(0, 1, 0, 0),
+        };
+        foundIn.Bind(TextBlock.TextProperty, new Binding(nameof(PlaylistTune.FoundIn)) { StringFormat = "in {0}" });
+        foundIn.Bind(IsVisibleProperty, new Binding(nameof(PlaylistTune.FoundIn)) { Converter = StringConverters.IsNotNullOrEmpty });
+        var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { title, author, foundIn } };
         var grid = new Grid
         {
             // Built, not parsed from text: "37,5,*,Auto" - Big font's 37.5 where a comma is the
@@ -626,7 +655,7 @@ internal sealed class PlaylistStrip : Border
 
         row.Tapped += (_, _) =>
         {
-            if (!_dragged && row.DataContext is PlaylistTune tune && Shown is { } playlist)
+            if (!_dragged && row.DataContext is PlaylistTune tune && PlaylistOf(tune) is { } playlist)
                 Play?.Invoke(playlist, tune);
         };
         row.ContextRequested += (_, e) =>
@@ -638,8 +667,8 @@ internal sealed class PlaylistStrip : Border
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
             var items = new List<Control> { Item("Info...", () => _ = ShowInfoAsync(tune)), add, Item("Set length...", () => _ = SetLengthAsync(tune)) };
-            if (Shown is { } playlist)
-                items.Add(Item("Remove from playlist", () => Remove(playlist, tune)));
+            if (PlaylistOf(tune) is { } playlist)
+                items.Add(Item(Searching ? $"Remove from {playlist.Name}" : "Remove from playlist", () => Remove(playlist, tune)));
             OpenMenu(row, items);
         };
         return row;
@@ -723,7 +752,7 @@ internal sealed class PlaylistStrip : Border
     private void DragPressed(object? sender, PointerPressedEventArgs e)
     {
         _dragged = false;
-        if (!e.GetCurrentPoint(_tuneBox).Properties.IsLeftButtonPressed
+        if (Searching || !e.GetCurrentPoint(_tuneBox).Properties.IsLeftButtonPressed
             || (e.Source as StyledElement)?.DataContext is not PlaylistTune tune)
             return;
         _dragTune = tune;
@@ -824,6 +853,196 @@ internal sealed class PlaylistStrip : Border
     /// <summary>The name of the playlist shown; null with none.</summary>
     public string? ShownName => Shown?.Name;
 
+    private bool Searching => !string.IsNullOrWhiteSpace(_search.Text);
+
+    /// <summary>The playlist the hit last played is in, chosen when the search ends.</summary>
+    private Playlist? _playingIn;
+
+    /// <summary>The playlist a listed tune is in: the hit's own while searching, else the one shown.</summary>
+    private Playlist? PlaylistOf(PlaylistTune tune) =>
+        Searching ? _found.GetValueOrDefault(tune) : Shown;
+
+    /// <summary>The box at the top of the strip: what is typed finds tunes in every playlist by their
+    /// name, composer, group, year or file name - every word somewhere, in any case and with or
+    /// without accents. Enter plays the first, Escape or the cross ends it.</summary>
+    private Control BuildSearch()
+    {
+        // A soft pill, as the app's other controls are: filled, no edge until the pointer or the
+        // keyboard is on it; then a quiet ring in the accent and the glass lit with it.
+        var glass = Icon(SearchIcon, 13, 13, new Thickness(12, 0, 2, 0));
+        glass.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
+        glass.VerticalAlignment = VerticalAlignment.Center;
+
+        var cross = Icon(CrossIcon, 8, 8);
+        cross.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
+        _clearSearch.Content = cross;
+        _clearSearch.Width = _clearSearch.Height = 22;
+        _clearSearch.Padding = new Thickness(0);
+        _clearSearch.HorizontalContentAlignment = HorizontalAlignment.Center;
+        _clearSearch.VerticalContentAlignment = VerticalAlignment.Center;
+        _clearSearch.Margin = new Thickness(0, 0, 6, 0);
+        _clearSearch.VerticalAlignment = VerticalAlignment.Center;
+        _clearSearch.IsVisible = false;
+        _clearSearch.Click += (_, _) => EndSearch();
+        _clearSearch.PointerEntered += (_, _) => cross.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
+        _clearSearch.PointerExited += (_, _) => cross.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
+        ToolTip.SetTip(_clearSearch, "Clear the search - Esc");
+        Quiet(_clearSearch);
+        _clearSearch.CornerRadius = new CornerRadius(11);
+
+        // The key that leads here, shown while the box is empty and not in use.
+        string shortcut = OperatingSystem.IsMacOS() ? "\u2318F" : "Ctrl F";
+        var keycap = new Border
+        {
+            CornerRadius = new CornerRadius(5),
+            BorderThickness = new Thickness(1),
+            BorderBrush = SidPlayerPalette.Brush(SidPlayerPalette.PanelBorder),
+            Background = SidPlayerPalette.Brush(SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 8)),
+            Padding = new Thickness(5, 1, 5, 2),
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Child = new TextBlock
+            {
+                Text = shortcut,
+                FontSize = 10,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle),
+            },
+        };
+
+        void Lit()
+        {
+            bool typed = !string.IsNullOrEmpty(_search.Text), active = _search.IsFocused || _search.IsKeyboardFocusWithin;
+            _clearSearch.IsVisible = typed;
+            keycap.IsVisible = !typed && !active;
+            glass.Foreground = SidPlayerPalette.Brush(active || typed ? Accent : SidPlayerPalette.Subtitle);
+        }
+        _search.GotFocus += (_, _) => Lit();
+        _search.LostFocus += (_, _) => Lit();
+        _search.TextChanged += (_, _) => Lit();
+
+        _search.Watermark = "Search tunes";
+        _search.InnerLeftContent = glass;
+        _search.InnerRightContent = new Panel { Children = { keycap, _clearSearch } };
+        _search.FontSize = 13;
+        _search.Height = 36;
+        _search.MinHeight = 36;
+        _search.Padding = new Thickness(8, 0, 4, 0);
+        _search.Margin = new Thickness(12, 14, 12, 4);
+        _search.CornerRadius = new CornerRadius(18);
+        _search.BorderThickness = new Thickness(1);
+        _search.VerticalContentAlignment = VerticalAlignment.Center;
+        _search.CaretBrush = SidPlayerPalette.Brush(Accent);
+        AutomationProperties.SetName(_search, "Search playlists");
+        foreach (var (key, colour) in new (string, Color)[]
+        {
+            ("TextControlBackground", SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 10)),
+            ("TextControlBackgroundPointerOver", SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 16)),
+            ("TextControlBackgroundFocused", SidPlayerPalette.WithAlpha(SidPlayerPalette.Title, 14)),
+            ("TextControlForeground", SidPlayerPalette.Title), ("TextControlForegroundPointerOver", SidPlayerPalette.Title),
+            ("TextControlForegroundFocused", SidPlayerPalette.Title),
+            ("TextControlPlaceholderForeground", SidPlayerPalette.Subtitle), ("TextControlPlaceholderForegroundPointerOver", SidPlayerPalette.Subtitle),
+            ("TextControlPlaceholderForegroundFocused", SidPlayerPalette.WithAlpha(SidPlayerPalette.Subtitle, 150)),
+            ("TextControlBorderBrush", Colors.Transparent),
+            ("TextControlBorderBrushPointerOver", SidPlayerPalette.PanelBorder),
+            ("TextControlBorderBrushFocused", SidPlayerPalette.WithAlpha(Accent, 150)),
+            ("TextControlSelectionHighlightColor", SidPlayerPalette.WithAlpha(Accent, 110)),
+        })
+            _search.Resources[key] = SidPlayerPalette.Brush(colour);
+        // Fluent thickens a focused box's lower edge: one pixel all round instead.
+        _search.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(1);
+        _search.Resources["TextControlBorderThemeThickness"] = new Thickness(1);
+        Lit();
+
+        _search.TextChanged += (_, _) =>
+        {
+            if (!Searching && _playingIn is { } playlist && Shown != playlist)
+            {
+                // The search over, the playlist of the tune played from it is the one shown.
+                _playingIn = null;
+                ForgetHits();
+                _listBox.SelectedItem = playlist;
+                return;
+            }
+            ShowTunes();
+        };
+        _search.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                EndSearch();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter && _hits.Count > 0 && PlaylistOf(_hits[0]) is { } playlist)
+            {
+                Play?.Invoke(playlist, _hits[0]);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Down && _hits.Count > 0)
+            {
+                _tuneBox.SelectedIndex = 0;
+                (_tuneBox.ContainerFromIndex(0) as Control)?.Focus();
+                e.Handled = true;
+            }
+        };
+        return _search;
+    }
+
+    /// <summary>The search box focused, its text chosen to type over - Ctrl+F.</summary>
+    public void FocusSearch()
+    {
+        _search.Focus();
+        _search.SelectAll();
+    }
+
+    private void EndSearch()
+    {
+        _search.Text = "";
+        _owner.Focus();
+    }
+
+    /// <summary>The tunes the search finds, in the playlists' order, each saying where it is.</summary>
+    private void ShowHits()
+    {
+        var words = _search.Text!.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var compare = System.Globalization.CultureInfo.InvariantCulture.CompareInfo;
+        const System.Globalization.CompareOptions loose = System.Globalization.CompareOptions.IgnoreCase
+            | System.Globalization.CompareOptions.IgnoreNonSpace | System.Globalization.CompareOptions.IgnoreWidth;
+        ForgetHits();
+        var hits = new List<PlaylistTune>();
+        foreach (var playlist in _lists)
+            foreach (var tune in playlist.Tunes)
+            {
+                string text = $"{tune.Title} {tune.Author} {tune.Group} {tune.Year} {System.IO.Path.GetFileNameWithoutExtension(tune.Path)}";
+                if (words.All(word => compare.IndexOf(text, word, loose) >= 0))
+                {
+                    hits.Add(tune);
+                    _found[tune] = playlist;
+                    tune.FoundIn = playlist.Name;
+                }
+            }
+        _hits = hits;
+        _tuneBox.ItemsSource = hits;
+        _heading.Text = "Search";
+        _playAll.IsVisible = false;
+        _sort.IsVisible = false;
+        _empty.Text = $"No tune in the playlists matches \u201c{_search.Text!.Trim()}\u201d - by its name, composer, group, year or file name.";
+        _empty.IsVisible = hits.Count == 0;
+        Count();
+        if (_playing is not null && hits.Contains(_playing))
+            _tuneBox.SelectedItem = _playing;
+    }
+
+    /// <summary>The last search's hits no longer say where they were found.</summary>
+    private void ForgetHits()
+    {
+        foreach (var tune in _found.Keys)
+            tune.FoundIn = null;
+        _found.Clear();
+        _hits = [];
+    }
+
     /// <summary>The playlist called <paramref name="name"/>; null when there is none.</summary>
     public Playlist? Find(string? name) =>
         name is null ? null : _lists.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -837,6 +1056,12 @@ internal sealed class PlaylistStrip : Border
 
     private void ShowTunes()
     {
+        if (Searching)
+        {
+            ShowHits();
+            return;
+        }
+        ForgetHits();
         var playlist = Shown;
         _tuneBox.ItemsSource = playlist?.Tunes;
         _heading.Text = playlist?.Name ?? "";
@@ -953,6 +1178,13 @@ internal sealed class PlaylistStrip : Border
 
     private void Count()
     {
+        if (Searching)
+        {
+            int lists = _found.Values.Distinct().Count();
+            _count.Text = _hits.Count == 0 ? "Nothing found"
+                : $"{(_hits.Count == 1 ? "1 tune" : $"{_hits.Count} tunes")} in {(lists == 1 ? "1 playlist" : $"{lists} playlists")}";
+            return;
+        }
         var playlist = Shown;
         _count.Text = playlist is null ? "" : playlist.Tunes.Count == 1 ? "1 tune" : $"{playlist.Tunes.Count} tunes";
     }
@@ -995,6 +1227,15 @@ internal sealed class PlaylistStrip : Border
             return;
 
         tune.IsPlaying = true;
+        if (Searching)
+        {
+            // Played while searching - a hit, or the next in a hit's playlist: the hits stay, and
+            // its playlist is shown once the search ends.
+            _playingIn = playlist;
+            if (_found.ContainsKey(tune))
+                _tuneBox.SelectedItem = tune;
+            return;
+        }
         if (playlist is not null && Shown != playlist)
             _listBox.SelectedItem = playlist;
         _tuneBox.SelectedItem = tune;
