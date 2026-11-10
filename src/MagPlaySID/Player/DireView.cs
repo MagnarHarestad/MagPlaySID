@@ -5,6 +5,7 @@ using Avalonia.Platform;
 using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using MagPlay.C64;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -16,8 +17,12 @@ namespace MagPlaySid.Player;
 /// spin when it leaps. The spotlights and the ball's glitter take the voices' colours. It moves by
 /// the tune's own time, so it stands still when the tune is paused. Painted like the Last Ninja.
 /// </summary>
-internal sealed class DireView : Control
+internal sealed class DireView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private readonly DireWorld _world = new();
     private readonly NinjaFrame[] _frames = [new(), new(), new()];
     private readonly NinjaPainter _painter = new();

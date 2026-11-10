@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -12,8 +13,12 @@ namespace MagPlaySid.Player;
 /// fast-forwards. Nearer ridges hide what lies behind them, and the lines fade with distance. Worked
 /// out and painted only when the tune has moved.
 /// </summary>
-internal sealed class LandscapeView : Control
+internal sealed class LandscapeView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private const int Rows = 30;
     private const int Columns = 121;
 

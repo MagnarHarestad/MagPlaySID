@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -17,8 +18,12 @@ internal enum TransportGlyph
 }
 
 /// <summary>One transport control, drawn rather than imaged, so it is sharp at any scale.</summary>
-internal sealed class TransportButton : Control
+internal sealed class TransportButton : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private TransportGlyph _glyph;
     private bool _hovered;
     private bool _pressed;

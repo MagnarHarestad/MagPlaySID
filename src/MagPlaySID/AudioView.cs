@@ -4,6 +4,7 @@ using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using MagPlay.Audio;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -13,8 +14,12 @@ namespace MagPlaySid;
 /// rows do, the coming notes below. Many at once, as the transcription hears them; those sounding now
 /// lit. Beside it, the notes sounding and the chord they make, and how far the hearing has got.
 /// </summary>
-internal sealed class AudioView : Control
+internal sealed class AudioView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private double _scale = 1;
 
     private double HeaderHeight => 26 * _scale;

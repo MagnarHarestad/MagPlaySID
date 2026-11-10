@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using Avalonia.Media.TextFormatting;
 using MagPlay.C64;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -18,8 +19,12 @@ namespace MagPlaySid;
 /// 3SID tune's other chips light keys too, each voice in the colour of its place on its chip. The
 /// keys can be struck, too - and slid across - for the window to do with as it will.
 /// </summary>
-internal sealed class PianoView : Control
+internal sealed class PianoView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private const int Octaves = 8;
     private const int Keys = Octaves * 12;
     private const int WhiteKeys = Octaves * 7;

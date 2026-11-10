@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using MagSid.Playback;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -12,8 +13,12 @@ namespace MagPlaySid.Player;
 /// so a steady note stands still. A click mutes the voice. A port of the Windows editor's view.
 /// A voice past the third - on a second or third SID - takes the colour of its place on its chip.
 /// </summary>
-internal sealed class VoiceScopeView : Control
+internal sealed class VoiceScopeView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private const int VisibleSamples = 620;
     private const int TriggerSearch = SidFilePlaybackEngine.ScopeSamples - VisibleSamples - 1;
 

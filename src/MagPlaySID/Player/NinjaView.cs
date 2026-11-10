@@ -6,6 +6,7 @@ using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using MagPlay.C64;
 using SkiaSharp;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -19,8 +20,12 @@ namespace MagPlaySid.Player;
 /// moves by the tune's own time, so it stands still when the tune is paused and fights faster as it
 /// fast-forwards. Painted with Skia straight onto the window's surface, for the glow and the blur.
 /// </summary>
-internal sealed class NinjaView : Control
+internal sealed class NinjaView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private readonly NinjaWorld _world = new();
     private readonly NinjaFrame[] _frames = [new(), new(), new()];
     private readonly NinjaPainter _painter = new();

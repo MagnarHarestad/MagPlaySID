@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -14,8 +15,12 @@ namespace MagPlaySid;
 /// as the song goes on; the others light their edge under the pointer. A small dot marks the song
 /// the user chose to play first.
 /// </summary>
-internal sealed class SongPill : Control
+internal sealed class SongPill : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private static readonly Typeface Mono = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"));
     private static readonly Typeface MonoBold = new(new FontFamily("Menlo, Consolas, DejaVu Sans Mono, monospace"), FontStyle.Normal, FontWeight.Bold);
 

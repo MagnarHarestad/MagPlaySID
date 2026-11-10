@@ -5,6 +5,7 @@ using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using MagPlay.Amiga;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -16,8 +17,12 @@ namespace MagPlaySid;
 /// and beside it the samples or instruments, each lit while a channel plays it. The module is its own score: nothing
 /// here is worked out, all of it is read from the file.
 /// </summary>
-internal sealed class ModuleView : Control
+internal sealed class ModuleView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private double _scale = 1;
 
     private double RowHeight => 17 * _scale;

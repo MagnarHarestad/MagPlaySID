@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using MagSid.Playback;
 using NAudio.Dsp;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -10,8 +11,12 @@ namespace MagPlaySid.Player;
 /// The spectrum: a bar per frequency band across the audible range, with a peak mark above each
 /// that falls slowly - the instant and the memory of it. A port of the Windows editor's view.
 /// </summary>
-internal sealed class SpectrumView : Control
+internal sealed class SpectrumView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private const int Bands = 96;
     private const double LowestHz = 40.0;
     private const double HighestHz = 11000.0;

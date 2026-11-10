@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -16,8 +17,12 @@ namespace MagPlaySid;
 /// back to the usual. Its word above - Mono, Stereo, or the number while the pointer is on it.
 /// Drawn, as the knob is, and only when something about it has changed.
 /// </summary>
-internal sealed class StereoSlider : Control
+internal sealed class StereoSlider : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     /// <summary>Where it stands until it is moved: the Amiga's channels a good deal apart, but not
     /// each in one ear alone.</summary>
     public const double Usual = 0.6;

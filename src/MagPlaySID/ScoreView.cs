@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using MagPlay.Score;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -19,8 +20,12 @@ namespace MagPlaySid;
 /// plays takes over below what is on screen, so nothing the listener can see changes. Clicking a
 /// voice's rows selects it. A 2SID or 3SID tune shows every chip's voices, in narrower columns.
 /// </summary>
-internal sealed class ScoreView : Control
+internal sealed class ScoreView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     /// <summary>How much larger than the small size the text is - the rows, their spacing and the
     /// columns all grow with it.</summary>
     private double _scale = 1;

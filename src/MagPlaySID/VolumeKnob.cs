@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 using MagPlaySid.Player;
+using Avalonia.Rendering;
 
 namespace MagPlaySid;
 
@@ -15,8 +16,12 @@ namespace MagPlaySid;
 /// pointer is on it. Dragged up or down or scrolled it turns; a click without a drag mutes it.
 /// Drawn, as the transport is, and only when something about it has changed.
 /// </summary>
-internal sealed class VolumeKnob : Control
+internal sealed class VolumeKnob : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private const double Size = 38;
     private const double Ring = 3;
 

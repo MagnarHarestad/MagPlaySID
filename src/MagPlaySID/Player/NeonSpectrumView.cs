@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using MagSid.Playback;
+using Avalonia.Rendering;
 
 namespace MagPlaySid.Player;
 
@@ -14,8 +15,12 @@ namespace MagPlaySid.Player;
 /// its own share of the notes, flaring on a hit and dimming after. The swell itself moves by the
 /// tune's own time, so it stands still when the tune is paused and rushes when it fast-forwards.
 /// </summary>
-internal sealed class NeonSpectrumView : Control
+internal sealed class NeonSpectrumView : Control, ICustomHitTest
 {
+    /// <summary>Under the pointer anywhere in its bounds: tested so, not against each of the
+    /// lines and shapes it last drew - every move of the mouse tested them all.</summary>
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     private const int Bars = 96;
     private const float PeakFallPerFrame = 0.007f;
 
