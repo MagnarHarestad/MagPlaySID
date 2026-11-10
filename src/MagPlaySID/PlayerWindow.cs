@@ -1160,6 +1160,13 @@ internal sealed class PlayerWindow : Window
     {
         for ((Playlist List, PlaylistTune Tune)? at = (playlist, tune); at is { } here; at = After(here.List, here.Tune))
         {
+            if (_foundRun is { } run && !run.Any(h => h.Tune == here.Tune))
+            {
+                // Played on past the search's hits: the search ends, and the playlist it goes on
+                // in is shown, the tune lit.
+                _foundRun = null;
+                _strip.EndSearch();
+            }
             _queue = here.List;
             _queueTune = here.Tune;
             _finished = false;

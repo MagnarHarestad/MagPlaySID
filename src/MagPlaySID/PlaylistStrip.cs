@@ -1013,7 +1013,8 @@ internal sealed class PlaylistStrip : Border
         _search.SelectAll();
     }
 
-    private void EndSearch()
+    /// <summary>The search ended: its box empty, and the playlist shown again.</summary>
+    public void EndSearch()
     {
         _search.Text = "";
         _owner.Focus();
