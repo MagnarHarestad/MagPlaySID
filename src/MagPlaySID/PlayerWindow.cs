@@ -158,6 +158,11 @@ internal sealed class PlayerWindow : Window
 
     /// <summary>The playlist playing and its tune: the next follows when this one ends.</summary>
     private Playlist? _queue;
+
+    /// <summary>The search's hits being played through, each with its playlist: the tune after one
+    /// is the next hit, and after the last, the next in its playlist. Null when not playing from a
+    /// search.</summary>
+    private IReadOnlyList<(Playlist List, PlaylistTune Tune)>? _foundRun;
     private PlaylistTune? _queueTune;
     /// <summary>The playlist's last tune has played: nothing follows it.</summary>
     private bool _finished;
@@ -205,7 +210,16 @@ internal sealed class PlayerWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         _strip = new PlaylistStrip(this) { PlaylistsHeight = _settings.PlaylistsHeight };
-        _strip.Play += PlayFromList;
+        _strip.Play += (playlist, tune) =>
+        {
+            _foundRun = null;
+            PlayFromList(playlist, tune);
+        };
+        _strip.PlayFound += (run, at) =>
+        {
+            _foundRun = run;
+            PlayFromList(run[at].List, run[at].Tune);
+        };
         _strip.LengthSet += path =>
         {
             if (_path is { } playing && Playlist.SamePath(playing, path))
@@ -1126,12 +1140,14 @@ internal sealed class PlayerWindow : Window
         }
 
         var playlist = _strip.AddFolder(name, tunes);
+        _foundRun = null;
         PlayFromList(playlist, playlist.Tunes[0]);
     }
 
     /// <summary>One tune, on its own - whatever playlist was playing stops there.</summary>
     private void PlayFile(string path)
     {
+        _foundRun = null;
         _queue = null;
         _queueTune = null;
         _finished = false;
@@ -1142,24 +1158,50 @@ internal sealed class PlayerWindow : Window
     /// <summary>A playlist's tune, and the rest after it; one that will not play is passed over.</summary>
     private void PlayFromList(Playlist playlist, PlaylistTune tune)
     {
-        for (PlaylistTune? next = tune; next is not null; next = playlist.After(next))
+        for ((Playlist List, PlaylistTune Tune)? at = (playlist, tune); at is { } here; at = After(here.List, here.Tune))
         {
-            _queue = playlist;
-            _queueTune = next;
+            _queue = here.List;
+            _queueTune = here.Tune;
             _finished = false;
-            _strip.ShowPlaying(playlist, next);
+            _strip.ShowPlaying(here.List, here.Tune);
             // Every song of it, from the one chosen to play first - or the first - or the one it starts on.
-            if (Load(next.Path, quiet: true, everySong: _settings.PlayEverySong))
+            if (Load(here.Tune.Path, quiet: true, everySong: _settings.PlayEverySong))
                 return;
         }
 
         EndOfPlaylist();
     }
 
+    /// <summary>The tune after <paramref name="tune"/>: the next of the search's hits played from,
+    /// while there is one; else the next in its playlist.</summary>
+    private (Playlist List, PlaylistTune Tune)? After(Playlist playlist, PlaylistTune tune)
+    {
+        if (_foundRun is { } run)
+        {
+            for (int i = 0; i + 1 < run.Count; i++)
+                if (run[i].Tune == tune)
+                    return run[i + 1];
+        }
+        return playlist.After(tune) is { } next ? (playlist, next) : null;
+    }
+
+    /// <summary>The tune before <paramref name="tune"/>: the hit before it while playing a search's
+    /// hits, else the one before it in its playlist.</summary>
+    private (Playlist List, PlaylistTune Tune)? Before(Playlist playlist, PlaylistTune tune)
+    {
+        if (_foundRun is { } run)
+        {
+            for (int i = 1; i < run.Count; i++)
+                if (run[i].Tune == tune)
+                    return run[i - 1];
+        }
+        return playlist.Before(tune) is { } before ? (playlist, before) : null;
+    }
+
     private void PlayNextInList()
     {
-        if (_queue is { } playlist && _queueTune is { } tune && playlist.After(tune) is { } next)
-            PlayFromList(playlist, next);
+        if (_queue is { } playlist && _queueTune is { } tune && After(playlist, tune) is { } next)
+            PlayFromList(next.List, next.Tune);
         else
             EndOfPlaylist();
     }
@@ -1822,8 +1864,8 @@ internal sealed class PlayerWindow : Window
     /// from its start.</summary>
     private void PreviousTune()
     {
-        if (_queue is { } playlist && _queueTune is { } tune && playlist.Before(tune) is { } before)
-            PlayFromList(playlist, before);
+        if (_queue is { } playlist && _queueTune is { } tune && Before(playlist, tune) is { } before)
+            PlayFromList(before.List, before.Tune);
         else
             Restart();
     }
@@ -1832,13 +1874,13 @@ internal sealed class PlayerWindow : Window
     /// has put it - and with no playlist.</summary>
     private void ShowNextTune() =>
         _next.IsEnabled = HasTune && !_finished
-                          && _queue is { } playlist && _queueTune is { } tune && playlist.After(tune) is not null;
+                          && _queue is { } playlist && _queueTune is { } tune && After(playlist, tune) is not null;
 
     /// <summary>On a tune in the playlist - whatever song of this one plays.</summary>
     private void NextTune()
     {
-        if (_queue is { } playlist && _queueTune is { } tune && !_finished && playlist.After(tune) is { } next)
-            PlayFromList(playlist, next);
+        if (_queue is { } playlist && _queueTune is { } tune && !_finished && After(playlist, tune) is { } next)
+            PlayFromList(next.List, next.Tune);
     }
 
     /// <summary>The tune's song <paramref name="song"/>, from its start: nothing when it has no such song.</summary>

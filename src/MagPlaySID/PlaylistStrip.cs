@@ -132,6 +132,10 @@ internal sealed class PlaylistStrip : Border
     /// <summary>A tune chosen to play, and the playlist to go on with after it.</summary>
     public event Action<Playlist, PlaylistTune>? Play;
 
+    /// <summary>A search's hit played: the hits as they are listed, each with its playlist, and which
+    /// of them - played on in that order, then on in the last one's playlist.</summary>
+    public event Action<IReadOnlyList<(Playlist List, PlaylistTune Tune)>, int>? PlayFound;
+
     /// <summary>A playlist was made or a folder opened: the strip should be shown, if it is not.</summary>
     public event Action? ShowRequested;
 
@@ -655,7 +659,11 @@ internal sealed class PlaylistStrip : Border
 
         row.Tapped += (_, _) =>
         {
-            if (!_dragged && row.DataContext is PlaylistTune tune && PlaylistOf(tune) is { } playlist)
+            if (_dragged || row.DataContext is not PlaylistTune tune)
+                return;
+            if (Searching)
+                PlayHit(tune);
+            else if (Shown is { } playlist)
                 Play?.Invoke(playlist, tune);
         };
         row.ContextRequested += (_, e) =>
@@ -974,9 +982,9 @@ internal sealed class PlaylistStrip : Border
                 EndSearch();
                 e.Handled = true;
             }
-            else if (e.Key == Key.Enter && _hits.Count > 0 && PlaylistOf(_hits[0]) is { } playlist)
+            else if (e.Key == Key.Enter && _hits.Count > 0)
             {
-                Play?.Invoke(playlist, _hits[0]);
+                PlayHit(_hits[0]);
                 e.Handled = true;
             }
             else if (e.Key == Key.Down && _hits.Count > 0)
@@ -987,6 +995,15 @@ internal sealed class PlaylistStrip : Border
             }
         };
         return _search;
+    }
+
+    /// <summary>A hit played, and the hits after it to follow it.</summary>
+    private void PlayHit(PlaylistTune tune)
+    {
+        var run = _hits.Where(_found.ContainsKey).Select(t => (_found[t], t)).ToList();
+        int at = run.FindIndex(h => h.t == tune);
+        if (at >= 0)
+            PlayFound?.Invoke(run, at);
     }
 
     /// <summary>The search box focused, its text chosen to type over - Ctrl+F.</summary>
