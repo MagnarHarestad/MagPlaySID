@@ -674,7 +674,7 @@ internal sealed class PlaylistStrip : Border
             var add = new MenuItem { Header = "Add to playlist" };
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
-            var items = new List<Control> { Item("Info...", () => _ = ShowInfoAsync(tune)), add, Item("Set length...", () => _ = SetLengthAsync(tune)) };
+            var items = new List<Control> { Item("Info...", () => _ = ShowInfoAsync(tune)), add, Item("Set length...", () => _ = SetLengthAsync(tune)), RepeatItem(tune.Path) };
             if (PlaylistOf(tune) is { } playlist)
                 items.Add(Item(Searching ? $"Remove from {playlist.Name}" : "Remove from playlist", () => Remove(playlist, tune)));
             OpenMenu(row, items);
@@ -1142,6 +1142,35 @@ internal sealed class PlaylistStrip : Border
     {
         Favourites.SetRepeat(path, times);
         Favourites.Save(_favourites);
+    }
+
+    /// <summary>The times a tune may be set to play in all; <see cref="Favourites.Forever"/>, on and on.</summary>
+    public static readonly (int? Times, string Name)[] RepeatChoices =
+    [
+        (null, "Play once"), (2, "Twice"), (3, "3 times"), (4, "4 times"), (5, "5 times"), (10, "10 times"),
+        (Favourites.Forever, "Forever"),
+    ];
+
+    /// <summary>A tune's repeat chosen from its right-click: the window's repeat button shows it, if
+    /// that tune is playing - its path.</summary>
+    public event Action<string>? RepeatChosen;
+
+    /// <summary>"Repeat tune" in a tune's right-click: the repeat button's choices, the tune's own ticked.</summary>
+    private MenuItem RepeatItem(string path)
+    {
+        var current = Favourites.Repeat(path);
+        var repeat = new MenuItem { Header = "Repeat tune" };
+        foreach (var (times, name) in RepeatChoices)
+        {
+            var item = new MenuItem { Header = name, ToggleType = MenuItemToggleType.Radio, GroupName = "RepeatTune", IsChecked = times == current };
+            item.Click += (_, _) =>
+            {
+                ChooseRepeat(path, times);
+                RepeatChosen?.Invoke(path);
+            };
+            repeat.Items.Add(item);
+        }
+        return repeat;
     }
 
     private async Task ShowInfoAsync(PlaylistTune tune)

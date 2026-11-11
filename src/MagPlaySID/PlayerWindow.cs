@@ -66,13 +66,6 @@ internal sealed class PlayerWindow : Window
     private readonly TransportButton _next = new(TransportGlyph.Next);
     private readonly TransportButton _repeat = new(TransportGlyph.Repeat) { Quiet = true };
 
-    /// <summary>The times a tune may be set to play in all; <see cref="Favourites.Forever"/>, on and on.</summary>
-    private static readonly (int? Times, string Name)[] RepeatChoices =
-    [
-        (null, "Play once"), (2, "Twice"), (3, "3 times"), (4, "4 times"), (5, "5 times"), (10, "10 times"),
-        (Favourites.Forever, "Forever"),
-    ];
-
     /// <summary>The times the tune playing has played to its end, this time round.</summary>
     private int _played;
     private readonly TextBlock _title = new();
@@ -217,6 +210,16 @@ internal sealed class PlayerWindow : Window
         {
             _foundRun = run;
             PlayFromList(run[at].List, run[at].Tune);
+        };
+        _strip.RepeatChosen += path =>
+        {
+            // The tune playing set to repeat from its row: counted from the time playing now, as
+            // from the repeat button.
+            if (_path is { } playing && Playlist.SamePath(playing, path))
+            {
+                _played = 0;
+                ShowRepeat();
+            }
         };
         _strip.LengthSet += path =>
         {
@@ -2150,7 +2153,7 @@ internal sealed class PlayerWindow : Window
             return;
         var current = RepeatTimes;
         var menu = new ContextMenu { Placement = PlacementMode.TopEdgeAlignedRight, PlacementTarget = _repeat };
-        foreach (var (times, name) in RepeatChoices)
+        foreach (var (times, name) in PlaylistStrip.RepeatChoices)
         {
             var item = new MenuItem { Header = name, ToggleType = MenuItemToggleType.Radio, GroupName = "Repeat", IsChecked = times == current };
             item.Click += (_, _) =>
