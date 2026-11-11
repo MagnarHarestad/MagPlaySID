@@ -36,6 +36,15 @@ internal sealed class OutrunView : Control, ICustomHitTest
     /// <summary>A song's length when it is not known: the night comes at its half, three minutes in.</summary>
     private const double UnknownLength = 360;
 
+    /// <summary>The most other cars on the road at once.</summary>
+    public const int TrafficCount = 6;
+
+    /// <summary>How far ahead the road can be seen: the sea and the other cars come from there.</summary>
+    private const double Ahead = 30000;
+
+    /// <summary>When in the song the road runs by the sea: from this share of it to the sunset's.</summary>
+    private const double OceanStarts = 0.18, OceanEnds = 0.5;
+
     private readonly OutrunFrame[] _frames = [new(), new(), new()];
     private readonly OutrunPainter _painter = new();
     private int _nextFrame;
@@ -46,6 +55,11 @@ internal sealed class OutrunView : Control, ICustomHitTest
     private double _lastKick = -10, _lastSparkle = -10;
     private double _phase;
     private readonly float[] _ridge = new float[Ridge];
+    private bool _oceanOn;
+    private double _oceanFrom = double.MaxValue, _oceanTo = double.MaxValue;
+    private readonly OutrunTraffic[] _traffic = new OutrunTraffic[TrafficCount];
+    private double _nextTraffic;
+    private uint _seed = 0x2545F491;
 
     public OutrunView() => ClipToBounds = true;
 
@@ -54,6 +68,7 @@ internal sealed class OutrunView : Control, ICustomHitTest
     public void Update(IReadOnlyList<float> bands, long at, double? lengthSeconds)
     {
         double now = at / (double)SidFilePlaybackEngine.SampleRate;
+        bool jumped = _time < 0 || now < _time - 0.05 || now > _time + 0.5;
         double dt = _time < 0 ? 0 : Math.Clamp(now - _time, 0, 0.5);
         _time = now;
         int count = bands.Count;
@@ -118,8 +133,76 @@ internal sealed class OutrunView : Control, ICustomHitTest
         _distance += step;
         _heading += OutrunTrack.Curve(_distance / OutrunTrack.SegmentLength) * step * 0.00012;
 
-        _phase = Phase(now, lengthSeconds is > 1 ? lengthSeconds.Value : UnknownLength);
+        double length = lengthSeconds is > 1 ? lengthSeconds.Value : UnknownLength;
+        _phase = Phase(now, length);
+        Coast(now, length, jumped);
+        Drive(now, dt, jumped);
         InvalidateVisual();
+    }
+
+    /// <summary>The sea beside the road from the song's first fifth to the sunset: coming into sight
+    /// at the horizon, and leaving the same way - at once after a jump in the song.</summary>
+    private void Coast(double now, double length, bool jumped)
+    {
+        bool wanted = now >= length * OceanStarts && now < length * OceanEnds;
+        if (jumped)
+        {
+            _oceanOn = wanted;
+            (_oceanFrom, _oceanTo) = wanted ? (double.MinValue, double.MaxValue) : (double.MaxValue, double.MaxValue);
+        }
+        else if (wanted != _oceanOn)
+        {
+            _oceanOn = wanted;
+            if (wanted)
+                (_oceanFrom, _oceanTo) = (_distance + Ahead, double.MaxValue);
+            else
+                _oceanTo = _distance + Ahead;
+        }
+    }
+
+    /// <summary>The other cars: those going the same way slower, so they are overtaken, and those
+    /// coming the other way - a new one now and then, more often the livelier the music.</summary>
+    private void Drive(double now, double dt, bool jumped)
+    {
+        if (jumped)
+        {
+            Array.Clear(_traffic);
+            _nextTraffic = now + 1;
+        }
+        for (int c = 0; c < _traffic.Length; c++)
+        {
+            ref var car = ref _traffic[c];
+            if (!car.Active)
+                continue;
+            car.Z += car.Speed * dt;
+            if (car.Z < _distance - 300 || car.Z > _distance + (Ahead * 1.1))
+                car.Active = false;
+        }
+        if (now < _nextTraffic)
+            return;
+        _nextTraffic = now + ((1.0 + (Random() * 2.8)) / (0.7 + _energy));
+        int free = Array.FindIndex(_traffic, car => !car.Active);
+        if (free < 0)
+            return;
+        bool oncoming = Random() < 0.4;
+        _traffic[free] = new OutrunTraffic
+        {
+            Active = true,
+            Oncoming = oncoming,
+            Coupe = Random() < 0.6,
+            Z = _distance + (Ahead * 0.92),
+            Speed = oncoming ? -(2800 + (Random() * 1800)) : 2200 + (Random() * 1400),
+            Lane = oncoming ? -0.78f : 0.78f,
+            Paint = (byte)(Random() * 6),
+        };
+    }
+
+    private double Random()
+    {
+        _seed ^= _seed << 13;
+        _seed ^= _seed >> 17;
+        _seed ^= _seed << 5;
+        return (_seed & 0xFFFFFF) / (double)0x1000000;
     }
 
     /// <summary>The time of day: 0 the day, 0.5 the sunset at about the song's half, 1 the night.</summary>
@@ -140,6 +223,11 @@ internal sealed class OutrunView : Control, ICustomHitTest
         _lastKick = _lastSparkle = -10;
         _phase = 0;
         Array.Clear(_ridge);
+        _oceanOn = false;
+        _oceanFrom = _oceanTo = double.MaxValue;
+        Array.Clear(_traffic);
+        _nextTraffic = 0;
+        _seed = 0x2545F491;
         InvalidateVisual();
     }
 
@@ -160,6 +248,8 @@ internal sealed class OutrunView : Control, ICustomHitTest
         frame.Sparkle = _sparkle;
         frame.Energy = _energy;
         Array.Copy(_ridge, frame.Ridge, Ridge);
+        Array.Copy(_traffic, frame.Traffic, TrafficCount);
+        (frame.OceanFrom, frame.OceanTo) = (_oceanFrom, _oceanTo);
         context.Custom(new Paint(new Rect(size), frame, _painter));
     }
 
@@ -188,7 +278,21 @@ internal sealed class OutrunFrame
 {
     public float Width, Height, Phase, Kick, Sparkle, Energy;
     public double Time, Distance, Heading;
+
+    /// <summary>Where along the road the sea lies to its right, from and to.</summary>
+    public double OceanFrom = double.MaxValue, OceanTo = double.MaxValue;
     public readonly float[] Ridge = new float[OutrunView.Ridge];
+    public readonly OutrunTraffic[] Traffic = new OutrunTraffic[OutrunView.TrafficCount];
+}
+
+/// <summary>Another car on the road: where along it, in which lane - a share of the road's half-width,
+/// left of the middle coming the other way - how fast, and what it looks like.</summary>
+internal struct OutrunTraffic
+{
+    public bool Active, Oncoming, Coupe;
+    public double Z, Speed;
+    public float Lane;
+    public byte Paint;
 }
 
 /// <summary>The road: its bends and hills by how far along it is, the same every drive.</summary>
@@ -232,18 +336,22 @@ internal sealed class OutrunPainter
     private readonly Dictionary<int, SKMaskFilter> _blurs = [];
 
     private readonly SKPath _grassA = new(), _grassB = new(), _roadA = new(), _roadB = new(), _rumbleA = new(), _rumbleB = new(),
-        _lanes = new(), _laneGlow = new(), _gridAcross = new(), _gridAlong = new(), _ridge = new(), _ridgeLine = new(), _far = new(), _stripes = new();
+        _lanes = new(), _laneGlow = new(), _gridAcross = new(), _gridAlong = new(), _ridge = new(), _ridgeLine = new(), _far = new(), _stripes = new(),
+        _sand = new(), _foam = new(), _seaA = new(), _seaB = new(), _glints = new(), _hair = new(), _hairShine = new(), _path = new();
 
     // Each segment as seen from the camera: the road's middle and half-width where it starts, the
     // scale there, and how far down the ground nearer to the car already reaches.
     private readonly float[] _x = new float[DrawDistance + 1], _y = new float[DrawDistance + 1], _scale = new float[DrawDistance + 1], _clip = new float[DrawDistance + 1];
-    private readonly bool[] _seen = new bool[DrawDistance + 1];
+    private readonly bool[] _seen = new bool[DrawDistance + 1], _ocean = new bool[DrawDistance + 1];
+    private readonly int[] _trafficAt = new int[OutrunView.TrafficCount];
     private readonly float[] _nearX = new float[DrawDistance + 1], _nearY = new float[DrawDistance + 1], _nearW = new float[DrawDistance + 1];
 
     private static readonly SKPath PalmTrunk = BuildPalmTrunk(), PalmLeaves = BuildPalmLeaves(), LampPole = BuildLampPole();
-    private static readonly SKPath CarBody = Car.Body(), CarDeck = Car.Deck(), CarBumper = Car.Bumper(), CarPanel = Car.Panel(),
-        CarTyres = Car.Tyres(), CarGlass = Car.Glass(), CarHeadrests = Car.Headrests(), CarDriverHair = Car.DriverHair(),
-        CarPassengerHair = Car.PassengerHair(), CarLightsShape = Car.Lights(), CarPlate = Car.Plate(), CarPipes = Car.Pipes(), CarShine = Car.Shine();
+    private static readonly SKPath CarBody = Car.Body(), CarDeck = Car.Deck(), CarVents = Car.Vents(), CarBumper = Car.Bumper(), CarPanel = Car.Panel(),
+        CarTyres = Car.Tyres(), TyreTread = Car.Tread(), CarGlass = Car.Glass(), CarFrame = Car.Frame(), CarSeats = Car.Seats(),
+        DriverShoulders = Car.DriverShoulders(), PassengerShoulders = Car.PassengerShoulders(), CarLightsShape = Car.Lights(),
+        CarStrakes = Car.Strakes(), CarChrome = Car.Chrome(), CarPlate = Car.Plate(), CarPlateText = Car.PlateText(), CarPipes = Car.Pipes(),
+        CarPipeHoles = Car.PipeHoles(), CarShine = Car.Shine(), CoupeRoof = Car.CoupeRoof(), CoupeWindow = Car.CoupeWindow(), Grille = Car.Grille();
 
     private static readonly (float X, float Y, float Size)[] Stars = MakeStars();
     private static readonly (float X, float Y, float Size)[] Clouds = [(0.08f, 0.28f, 1.0f), (0.27f, 0.16f, 0.7f), (0.55f, 0.24f, 1.2f), (0.78f, 0.12f, 0.8f), (0.93f, 0.3f, 0.9f), (1.2f, 0.2f, 1.0f)];
@@ -271,6 +379,10 @@ internal sealed class OutrunPainter
     private static readonly uint[] Leaves = [0xFF2F8F3A, 0xFF3F7A35, 0xFF24102F, 0xFF13061F, 0xFF0A0314];
     private static readonly uint[] CarRed = [0xFFD8211C, 0xFFD8301E, 0xFFC0204A, 0xFF9A1844, 0xFF7A1238];
     private static readonly uint[] CarDark = [0xFF8E1210, 0xFF7E1A14, 0xFF6A1030, 0xFF4A0A2A, 0xFF36081F];
+    private static readonly uint[] SeaA = [0xFF1F7FC8, 0xFF2A6AA8, 0xFF5A3A8A, 0xFF2A1A5A, 0xFF100A28];
+    private static readonly uint[] SeaB = [0xFF2C90D8, 0xFF3679B6, 0xFF68469C, 0xFF341F68, 0xFF150C32];
+    private static readonly uint[] SeaFar = [0xFF6CBCEA, 0xFF96B0CC, 0xFFC0729E, 0xFF5E2C7E, 0xFF1C0E3C];
+    private static readonly uint[] Sand = [0xFFF2E2B2, 0xFFE4CA98, 0xFF9C5C6C, 0xFF4A2244, 0xFF1A0A24];
     private static readonly uint[] Cloud = [0xFFFFFFFF, 0xFFFFE6C8, 0xFFFFA8B8, 0xFF9A4A9A, 0xFF4A1A5A];
 
     public void Paint(SKCanvas canvas, OutrunFrame frame)
@@ -291,7 +403,11 @@ internal sealed class OutrunPainter
         PaintStars(canvas, frame, w, horizon, night);
         PaintSun(canvas, frame, w, h, horizon, p, dusk, sky);
         PaintClouds(canvas, frame, w, horizon, p, night);
-        PaintMountains(canvas, frame, w, h, horizon, p, night);
+        double horizonZ = frame.Distance + (DrawDistance * OutrunTrack.SegmentLength * 0.8);
+        float oceanView = frame.OceanFrom <= horizonZ && frame.OceanTo > horizonZ
+            ? Math.Clamp((float)((horizonZ - frame.OceanFrom) / 6000), 0, 1) * (float)Math.Clamp((frame.OceanTo - horizonZ) / 6000, 0, 1)
+            : 0;
+        PaintMountains(canvas, frame, w, h, horizon, p, night, oceanView);
 
         // The ground to the horizon, then the road over it.
         _flat.Color = Colour(Ground, p);
@@ -311,6 +427,10 @@ internal sealed class OutrunPainter
 
         PaintRoadside(canvas, frame, w, h, focal, p, night);
         PaintCar(canvas, frame, w, h, p, night);
+        long first = (long)Math.Floor(frame.Distance / OutrunTrack.SegmentLength);
+        foreach (ref readonly var car in frame.Traffic.AsSpan())
+            if (car.Active)
+                PaintTraffic(canvas, car, frame, first, w, p, night, nearerThanPlayer: true);
         canvas.Restore();
     }
 
@@ -397,7 +517,7 @@ internal sealed class OutrunPainter
         }
     }
 
-    private void PaintMountains(SKCanvas canvas, OutrunFrame frame, float w, float h, float horizon, float p, float night)
+    private void PaintMountains(SKCanvas canvas, OutrunFrame frame, float w, float h, float horizon, float p, float night, float oceanView)
     {
         // The far range: the same peaks, turning past as the road bends.
         _far.Reset();
@@ -408,6 +528,8 @@ internal sealed class OutrunPainter
             float u = i / 64f;
             double t = (u + offset) * Math.PI * 2;
             float peak = (float)(0.55 + (0.25 * Math.Sin(t * 3)) + (0.15 * Math.Sin((t * 7) + 1.3)) + (0.08 * Math.Sin((t * 13) + 0.4)));
+            // Over the sea to the right, the land falls away.
+            peak *= 1 - (oceanView * Smooth(u, 0.5f, 0.64f) * 0.96f);
             _far.LineTo(u * w, horizon - (peak * horizon * 0.32f));
         }
         _far.LineTo(w, horizon + 1);
@@ -429,7 +551,8 @@ internal sealed class OutrunPainter
             float u = i / (float)(points - 1);
             float wave = (float)(0.5 + (0.5 * Math.Sin((i * 1.9) + 0.6)));
             float valley = 0.3f + (0.7f * Math.Min(1, Math.Abs(u - 0.5f) * 2.6f));
-            float y = lowest - (horizon * valley * ((0.06f * wave) + (0.46f * frame.Ridge[i])));
+            float sink = 1 - (oceanView * Smooth(u, 0.5f, 0.64f));
+            float y = lowest + (horizon * 0.06f * (1 - sink)) - (horizon * valley * sink * ((0.06f * wave) + (0.46f * frame.Ridge[i])));
             float x = u * w;
             if (i == 0)
             {
@@ -466,7 +589,8 @@ internal sealed class OutrunPainter
         double into = (distance / length) - first;
         double cameraY = OutrunTrack.Hill(distance + 1800) + CameraHeight;
 
-        foreach (var path in (ReadOnlySpan<SKPath>)[_grassA, _grassB, _roadA, _roadB, _rumbleA, _rumbleB, _lanes, _laneGlow, _gridAcross, _gridAlong])
+        long glintTick = (long)(frame.Time * 5);
+        foreach (var path in (ReadOnlySpan<SKPath>)[_grassA, _grassB, _roadA, _roadB, _rumbleA, _rumbleB, _lanes, _laneGlow, _gridAcross, _gridAlong, _sand, _foam, _seaA, _seaB, _glints])
             path.Reset();
 
         // From the car to the horizon, each segment drawn only where the ground nearer the car does
@@ -490,6 +614,7 @@ internal sealed class OutrunPainter
             _scale[i] = scale;
             _clip[i] = maxY;
             _seen[i] = false;
+            _ocean[i] = false;
 
             if (havePrevious && sy < py && sy < maxY)
             {
@@ -505,6 +630,24 @@ internal sealed class OutrunPainter
                 long stripe = (segment - 1) / 3;
                 bool even = stripe % 2 == 0;
                 (even ? _grassA : _grassB).AddRect(new SKRect(0, sy, w, ny + 0.5f));
+                double worldZ = (segment - 1) * length;
+                bool ocean = worldZ >= frame.OceanFrom && worldZ < frame.OceanTo;
+                _ocean[i] = ocean;
+                if (ocean)
+                {
+                    // The sea to the right: a beach, the surf rolling in and out on it, and the
+                    // water in bands of swell, the sun glinting on it far out.
+                    float shore = 1.9f + (0.07f * (float)Math.Sin((segment * 0.8) - (frame.Time * 2.4)));
+                    Band(_sand, nx, nw, ny, sx, sw, sy, 1.1f, shore);
+                    Band(_foam, nx, nw, ny, sx, sw, sy, shore, shore + 0.12f);
+                    Band((segment / 4) % 2 == 0 ? _seaA : _seaB, nx, nw, ny, sx, sw, sy, shore + 0.12f, 400);
+                    uint glint = Hash(segment * 7);
+                    if (i > 14 && (glint + glintTick) % 3 == 0)
+                    {
+                        float across = shore + 0.6f + ((glint >> 8) % 1000 / 1000f * 9);
+                        Band(_glints, nx, nw, ny, sx, sw, sy, across, across + 0.5f + ((glint >> 20) % 10 / 10f));
+                    }
+                }
                 Quad(even ? _roadA : _roadB, nx, nw, ny, sx, sw, sy);
                 float rumble = 0.11f;
                 Band(even ? _rumbleA : _rumbleB, nx, nw, ny, sx, sw, sy, 1, 1 + rumble);
@@ -536,8 +679,11 @@ internal sealed class OutrunPainter
                     {
                         _gridAcross.MoveTo(0, ny);
                         _gridAcross.LineTo(nx - (nw * 1.12f), ny);
-                        _gridAcross.MoveTo(nx + (nw * 1.12f), ny);
-                        _gridAcross.LineTo(w, ny);
+                        if (!ocean)
+                        {
+                            _gridAcross.MoveTo(nx + (nw * 1.12f), ny);
+                            _gridAcross.LineTo(w, ny);
+                        }
                     }
                 }
                 _seen[i] = true;
@@ -570,7 +716,7 @@ internal sealed class OutrunPainter
                 bool drawing = false;
                 for (int i = 1; i <= DrawDistance; i++)
                 {
-                    if (!_seen[i])
+                    if (!_seen[i] || (across > 0 && _ocean[i]))
                     {
                         drawing = false;
                         continue;
@@ -586,6 +732,29 @@ internal sealed class OutrunPainter
         canvas.DrawPath(_grassA, _flat);
         _flat.Color = Colour(GrassB, p);
         canvas.DrawPath(_grassB, _flat);
+        if (!_seaA.IsEmpty || !_seaB.IsEmpty)
+        {
+            // The far sea up to the horizon, beyond the last of the road drawn.
+            int last = DrawDistance;
+            while (last > 0 && !_seen[last])
+                last--;
+            if (last > 0 && _ocean[last])
+            {
+                float seaX = _x[last] + (RoadHalf * _scale[last] * 2.0f);
+                _flat.Color = Colour(SeaFar, p);
+                canvas.DrawRect(seaX, horizon, w - seaX, _y[last] - horizon + 0.5f, _flat);
+            }
+            _fill.Color = Colour(Sand, p);
+            canvas.DrawPath(_sand, _fill);
+            _fill.Color = Colour(SeaA, p);
+            canvas.DrawPath(_seaA, _fill);
+            _fill.Color = Colour(SeaB, p);
+            canvas.DrawPath(_seaB, _fill);
+            _fill.Color = Mix(new SKColor(0xFF, 0xFF, 0xFF, 230), new SKColor(0xFF, 0xC0, 0xE0, 200), p);
+            canvas.DrawPath(_foam, _fill);
+            _fill.Color = Mix(Colour(SunTop, p), SKColors.White, 0.3f).WithAlpha(200);
+            canvas.DrawPath(_glints, _fill);
+        }
         if (night > 0.02f)
         {
             // The neon grid on the ground, flaring with the bass.
@@ -625,8 +794,14 @@ internal sealed class OutrunPainter
         var trunk = Colour(Trunk, p);
         var leaves = Colour(Leaves, p);
         var rim = new SKColor(0xFF, 0x6A, 0xD5);
+        for (int c = 0; c < frame.Traffic.Length; c++)
+            _trafficAt[c] = frame.Traffic[c].Active ? (int)(Math.Floor(frame.Traffic[c].Z / OutrunTrack.SegmentLength) - first) : -1;
         for (int i = DrawDistance; i >= 2; i--)
         {
+            // The cars between this segment and the next, farther than its palms.
+            for (int c = 0; c < frame.Traffic.Length; c++)
+                if (_trafficAt[c] == i)
+                    PaintTraffic(canvas, frame.Traffic[c], frame, first, w, p, night, nearerThanPlayer: false);
             float scale = _scale[i];
             if (scale <= 0 || _clip[i] <= 0 || _y[i] < 0)
                 continue;
@@ -637,6 +812,10 @@ internal sealed class OutrunPainter
             if (!palm && !lamp)
                 continue;
             float side = (hash & 1) == 0 ? -1 : 1;
+            double worldZ = segment * OutrunTrack.SegmentLength;
+            bool beach = side > 0 && worldZ >= frame.OceanFrom && worldZ < frame.OceanTo;
+            if (beach && (lamp || segment % 10 != 0))
+                continue;
             float clipY = _clip[i];
             float baseY = _y[i];
             if (PalmHeight * scale > h * 1.5f)
@@ -647,7 +826,7 @@ internal sealed class OutrunPainter
             canvas.ClipRect(new SKRect(0, 0, w, clipY));
             if (palm)
             {
-                float across = RoadHalf * (1.55f + ((hash >> 3) % 100 / 100f * 0.9f));
+                float across = RoadHalf * (beach ? 1.3f + ((hash >> 3) % 100 / 100f * 0.35f) : 1.55f + ((hash >> 3) % 100 / 100f * 0.9f));
                 float x = _x[i] + (side * across * scale);
                 float size = PalmHeight * scale * (0.8f + ((hash >> 11) % 100 / 250f));
                 float sway = (float)(Math.Sin((frame.Time * 1.7) + (segment * 0.7)) * 0.03) + (frame.Kick * 0.025f);
@@ -701,11 +880,19 @@ internal sealed class OutrunPainter
         }
     }
 
+    /// <summary>How far ahead of the camera the car's wheels touch the road, in world units.</summary>
+    public const float CarAhead = 1800;
+
+    /// <summary>A car on the road as wide as the player's, in world units.</summary>
+    private const float CarWidth = 1700;
+
+    private static readonly uint[] TrafficPaints = [0xFFF2F2EE, 0xFF2C5FD0, 0xFFF2C230, 0xFF1C1C22, 0xFF22A89A, 0xFFB8BCC4];
+
     private void PaintCar(SKCanvas canvas, OutrunFrame frame, float w, float h, float p, float night)
     {
-        float size = Math.Min(h * 0.46f / 100, w * 0.32f / 200);
+        float size = Math.Min(h * 0.46f / 100, w * 0.27f / 200);
         double bend = OutrunTrack.Curve((frame.Distance / OutrunTrack.SegmentLength) + 9);
-        float drift = (float)Math.Clamp(-bend * 0.03, -0.06, 0.06) * w;
+        float drift = (float)Math.Clamp(-bend * 0.015, -0.03, 0.03) * w;
         float bounce = frame.Kick * 2.2f * size + (float)(Math.Sin(frame.Time * 23) * 0.25 * size * (0.3 + frame.Energy));
         float x = (w / 2) - (100 * size) + drift;
         float y = h - (100 * size) - 2 + bounce;
@@ -715,44 +902,279 @@ internal sealed class OutrunPainter
         canvas.RotateDegrees((float)Math.Clamp(bend * 1.2, -3, 3), 100 * size, 96 * size);
         canvas.Scale(size);
 
-        // Its shadow on the road, then the car from the road up.
-        _fill.Color = new SKColor(0, 0, 0, (byte)(110 - (40 * night)));
-        canvas.DrawOval(100, 95, 96, 7, _fill);
-        _fill.Color = new SKColor(0x14, 0x12, 0x18);
-        canvas.DrawPath(CarTyres, _fill);
         var red = Colour(CarRed, p);
         var dark = Colour(CarDark, p);
-        _fill.Color = dark;
-        canvas.DrawPath(CarBumper, _fill);
-        _fill.Color = red;
-        canvas.DrawPath(CarBody, _fill);
-        _fill.Color = Mix(red, dark, 0.35f);
-        canvas.DrawPath(CarDeck, _fill);
-        _fill.Color = new SKColor(0xD8, 0xF0, 0xFF, (byte)(70 - (30 * night)));
+        float light = Math.Clamp(0.35f + (0.65f * frame.Kick) + (0.4f * night), 0, 1);
+        if (night > 0.05f)
+        {
+            // Its tail lights' glow on the road behind it.
+            Halo(canvas, 39, 92, 46, new SKColor(0xFF, 0x18, 0x30, (byte)(night * light * 90)));
+            Halo(canvas, 161, 92, 46, new SKColor(0xFF, 0x18, 0x30, (byte)(night * light * 90)));
+        }
+        Shadow(canvas, night);
+
+        // The two in it, behind the windscreen, their hair blown back by the wind of the drive.
+        float wind = 0.6f + Math.Min(0.9f, frame.Energy * 1.2f) + (frame.Kick * 0.3f);
+        _fill.Color = new SKColor(0xDC, 0xF0, 0xFF, (byte)(60 - (25 * night)));
         canvas.DrawPath(CarGlass, _fill);
-        _fill.Color = new SKColor(0x3A, 0x22, 0x18);
-        canvas.DrawPath(CarDriverHair, _fill);
-        _fill.Color = Mix(new SKColor(0xF2, 0xD0, 0x7A), new SKColor(0xB0, 0x80, 0x90), night);
-        canvas.DrawPath(CarPassengerHair, _fill);
-        _fill.Color = new SKColor(0x1C, 0x16, 0x1C);
-        canvas.DrawPath(CarHeadrests, _fill);
-        canvas.DrawPath(CarPanel, _fill);
-        _fill.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)(90 - (50 * night)));
+        _stroke.Color = new SKColor(0x22, 0x20, 0x26);
+        _stroke.StrokeWidth = 1.6f;
+        canvas.DrawPath(CarFrame, _stroke);
+        _fill.Color = new SKColor(0x18, 0x18, 0x1C);
+        canvas.DrawRoundRect(94, 9.5f, 12, 4, 1.2f, 1.2f, _fill);
+        _fill.Color = Mix(new SKColor(0xF4, 0xF2, 0xEC), new SKColor(0x9A, 0x86, 0xB0), night);
+        canvas.DrawPath(DriverShoulders, _fill);
+        _fill.Color = Mix(new SKColor(0xF0, 0x6A, 0x9A), new SKColor(0x9A, 0x40, 0x7A), night);
+        canvas.DrawPath(PassengerShoulders, _fill);
+        _fill.Color = Mix(new SKColor(0xC8, 0x8E, 0x6A), new SKColor(0x6A, 0x4A, 0x5A), night);
+        canvas.DrawRect(73, 22, 6, 6, _fill);
+        canvas.DrawRect(121.5f, 22, 5, 6, _fill);
+        Hair(_hair, frame.Time, wind, passenger: false);
+        _fill.Color = Mix(new SKColor(0x3A, 0x22, 0x18), new SKColor(0x1A, 0x10, 0x18), night);
+        canvas.DrawPath(_hair, _fill);
+        Hair(_hair, frame.Time, wind, passenger: true);
+        _fill.Color = Mix(new SKColor(0xF4, 0xD2, 0x7C), new SKColor(0xC8, 0x90, 0xA8), night);
+        canvas.DrawPath(_hair, _fill);
+        _fill.Color = Mix(new SKColor(0xFF, 0xF0, 0xB8), new SKColor(0xFF, 0xB8, 0xE0), night).WithAlpha(150);
+        canvas.DrawPath(_hairShine, _fill);
+        _fill.Color = new SKColor(0x2A, 0x1E, 0x1C);
+        canvas.DrawPath(CarSeats, _fill);
+
+        // The rear deck and the body, lit from above: lighter along the top, darker to the sides.
+        using (var deck = SKShader.CreateLinearGradient(new SKPoint(0, 27), new SKPoint(0, 41), [Mix(red, dark, 0.55f), Mix(red, dark, 0.2f)], SKShaderTileMode.Clamp))
+        {
+            _fill.Shader = deck;
+            _fill.Color = SKColors.White;
+            canvas.DrawPath(CarDeck, _fill);
+        }
+        _stroke.Color = Mix(dark, SKColors.Black, 0.4f);
+        _stroke.StrokeWidth = 0.9f;
+        canvas.DrawPath(CarVents, _stroke);
+        _fill.Color = new SKColor(0x16, 0x14, 0x18);
+        canvas.DrawPath(CarTyres, _fill);
+        _stroke.Color = new SKColor(0x30, 0x2E, 0x36);
+        _stroke.StrokeWidth = 1.1f;
+        canvas.DrawPath(TyreTread, _stroke);
+        _fill.Color = new SKColor(0x1A, 0x18, 0x1E);
+        canvas.DrawPath(CarBumper, _fill);
+        using (var body = SKShader.CreateLinearGradient(new SKPoint(0, 40), new SKPoint(0, 80),
+                   [Mix(red, SKColors.White, 0.22f), red, Mix(red, SKColors.Black, 0.4f)], [0, 0.35f, 1], SKShaderTileMode.Clamp))
+        {
+            _fill.Shader = body;
+            canvas.DrawPath(CarBody, _fill);
+        }
+        using (var sides = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(200, 0),
+                   [new SKColor(0, 0, 0, 110), new SKColor(0, 0, 0, 0), new SKColor(0, 0, 0, 0), new SKColor(0, 0, 0, 110)], [0, 0.18f, 0.82f, 1], SKShaderTileMode.Clamp))
+        {
+            _fill.Shader = sides;
+            canvas.DrawPath(CarBody, _fill);
+            _fill.Shader = null;
+        }
+        // A highlight along its top edge: the sky by day, the neon by night.
+        _fill.Color = Mix(new SKColor(0xFF, 0xFF, 0xFF, 120), new SKColor(0xFF, 0x60, 0xD8, 150), night);
         canvas.DrawPath(CarShine, _fill);
 
-        // The tail lights, glowing as the bass hits and more so at night.
-        float light = Math.Clamp(0.35f + (0.65f * frame.Kick) + (0.4f * night), 0, 1);
-        _glow.Color = new SKColor(0xFF, 0x20, 0x30, (byte)(light * 200));
-        _glow.MaskFilter = Blur(6);
-        canvas.DrawPath(CarLightsShape, _glow);
-        _glow.MaskFilter = null;
-        _fill.Color = Mix(new SKColor(0xC0, 0x10, 0x18), new SKColor(0xFF, 0x70, 0x70), light);
-        canvas.DrawPath(CarLightsShape, _fill);
+        // The black tail panel with its strakes over the lights, the chrome, the plate and the pipes.
+        _fill.Color = new SKColor(0x14, 0x12, 0x16);
+        canvas.DrawPath(CarPanel, _fill);
+        if (night > 0.05f)
+        {
+            _glow.Color = new SKColor(0xFF, 0x20, 0x30, (byte)(light * 190));
+            _glow.MaskFilter = Blur(5);
+            canvas.DrawPath(CarLightsShape, _glow);
+            _glow.MaskFilter = null;
+        }
+        using (var lamp = SKShader.CreateLinearGradient(new SKPoint(0, 53), new SKPoint(0, 65),
+                   [Mix(new SKColor(0xD0, 0x18, 0x20), new SKColor(0xFF, 0x9A, 0x9A), light), Mix(new SKColor(0x8A, 0x08, 0x10), new SKColor(0xFF, 0x30, 0x40), light)], SKShaderTileMode.Clamp))
+        {
+            _fill.Shader = lamp;
+            _fill.Color = SKColors.White;
+            canvas.DrawPath(CarLightsShape, _fill);
+            _fill.Shader = null;
+        }
+        _stroke.Color = new SKColor(0x10, 0x0E, 0x12);
+        _stroke.StrokeWidth = 1.1f;
+        canvas.DrawPath(CarStrakes, _stroke);
+        _stroke.Color = Mix(new SKColor(0xD8, 0xDC, 0xE4), new SKColor(0x9A, 0x8A, 0xB8), night);
+        _stroke.StrokeWidth = 0.9f;
+        canvas.DrawPath(CarChrome, _stroke);
         _fill.Color = Mix(new SKColor(0xF4, 0xD8, 0x3C), new SKColor(0x9A, 0x8A, 0x50), night);
         canvas.DrawPath(CarPlate, _fill);
-        _fill.Color = new SKColor(0x8A, 0x8A, 0x92);
+        _fill.Color = new SKColor(0x22, 0x20, 0x28);
+        canvas.DrawPath(CarPlateText, _fill);
+        _fill.Color = Mix(new SKColor(0xB8, 0xBC, 0xC6), new SKColor(0x7A, 0x70, 0x90), night);
         canvas.DrawPath(CarPipes, _fill);
+        _fill.Color = new SKColor(0x0C, 0x0A, 0x0E);
+        canvas.DrawPath(CarPipeHoles, _fill);
         canvas.Restore();
+    }
+
+    /// <summary>A car's shadow on the road under it, in the car's own box.</summary>
+    private void Shadow(SKCanvas canvas, float night)
+    {
+        using var shadow = SKShader.CreateRadialGradient(new SKPoint(100, 95), 100,
+            [new SKColor(0, 0, 0, (byte)(150 - (50 * night))), new SKColor(0, 0, 0, 0)], [0.6f, 1], SKShaderTileMode.Clamp);
+        _fill.Shader = shadow;
+        _fill.Color = SKColors.White;
+        canvas.Save();
+        canvas.Scale(1, 0.1f, 100, 95);
+        canvas.DrawCircle(100, 95, 100, _fill);
+        canvas.Restore();
+        _fill.Shader = null;
+    }
+
+    /// <summary>A soft light: brightest at its middle, gone at <paramref name="reach"/>.</summary>
+    private void Halo(SKCanvas canvas, float x, float y, float reach, SKColor colour)
+    {
+        using var halo = SKShader.CreateRadialGradient(new SKPoint(x, y), reach, [colour, colour.WithAlpha(0)], SKShaderTileMode.Clamp);
+        _flat.Color = SKColors.White;
+        _flat.Shader = halo;
+        canvas.DrawCircle(x, y, reach, _flat);
+        _flat.Shader = null;
+    }
+
+    /// <summary>The driver's short hair ruffling, or the passenger's long hair streaming out to the
+    /// side and back in the wind, each lock moving on its own - in the car's box.</summary>
+    private void Hair(SKPath path, double time, float wind, bool passenger)
+    {
+        path.Reset();
+        if (!passenger)
+        {
+            _hairShine.Reset();
+            path.AddCircle(76, 16.5f, 8.6f);
+            for (int k = 0; k < 4; k++)
+            {
+                float rootX = 70 + (k * 4), rootY = 9 + (k == 0 || k == 3 ? 2 : 0);
+                float flutter = (float)Math.Sin((time * (14 + k)) + (k * 1.7)) * 1.4f * wind;
+                path.MoveTo(rootX - 2.5f, rootY + 1.5f);
+                path.QuadTo(rootX + 1, rootY - 3 - (wind * 1.2f), rootX + 4 + flutter, rootY - 2.5f - (wind * 1.5f) + (flutter * 0.4f));
+                path.QuadTo(rootX + 2, rootY, rootX + 2.5f, rootY + 2);
+                path.Close();
+            }
+            return;
+        }
+        path.AddCircle(124, 16.5f, 8.2f);
+        // The locks: from the crown and the side of the head, out to the right and up, longer
+        // the faster the drive, each waving at its own pace.
+        for (int k = 0; k < 6; k++)
+        {
+            float share = k / 5f;
+            float rootX = 119 + (share * 9), rootY = 10 + (share * 11);
+            float length = (17 + (share * 8)) * (0.75f + (wind * 0.3f));
+            double phase = (time * (8.5 + (k * 0.9))) + (k * 1.3);
+            float wave = (float)Math.Sin(phase) * 3.2f * wind;
+            float lift = (float)Math.Cos(phase * 0.7) * 1.5f * wind;
+            float tipX = rootX + length, tipY = rootY - 6 + (share * 9) + wave;
+            float midX = rootX + (length * 0.45f), midY = rootY - 4 + (share * 6) - lift + (wave * 0.4f);
+            float thick = 4.8f - (share * 1.2f);
+            path.MoveTo(rootX - 2, rootY + 1);
+            path.QuadTo(midX, midY - thick, tipX, tipY);
+            path.QuadTo(midX, midY + thick, rootX + 1, rootY + 4);
+            path.Close();
+            if (k % 2 == 1)
+            {
+                _hairShine.MoveTo(rootX + 2, rootY);
+                _hairShine.QuadTo(midX, midY - (thick * 0.4f), rootX + (length * 0.8f), tipY - 0.5f);
+                _hairShine.QuadTo(midX, midY + (thick * 0.1f), rootX + 3, rootY + 1.2f);
+                _hairShine.Close();
+            }
+        }
+    }
+
+    /// <summary>Another car on the road at its place, behind the ground nearer the camera: seen from
+    /// behind when it goes the same way, from the front when it comes the other way.</summary>
+    private void PaintTraffic(SKCanvas canvas, in OutrunTraffic car, OutrunFrame frame, long first, float w, float p, float night, bool nearerThanPlayer)
+    {
+        double ahead = car.Z - frame.Distance;
+        if (ahead < 200 || (ahead < CarAhead) != nearerThanPlayer)
+            return;
+        double at = car.Z / OutrunTrack.SegmentLength;
+        int i = (int)(Math.Floor(at) - first);
+        if (i < 0 || i >= DrawDistance || _scale[i + 1] <= 0 || _scale[i] <= 0)
+            return;
+        float t = (float)(at - Math.Floor(at));
+        float scale = _scale[i] + ((_scale[i + 1] - _scale[i]) * t);
+        float x = _x[i] + ((_x[i + 1] - _x[i]) * t) + (car.Lane * RoadHalf * scale);
+        float y = _y[i] + ((_y[i + 1] - _y[i]) * t);
+        float width = CarWidth * scale;
+        if (width < 1.5f || width > w * 0.5f)
+            return;
+        float size = width / 200;
+        float clip = _clip[Math.Min(DrawDistance, i + 1)];
+        if (y - (100 * size) > clip)
+            return;
+
+        canvas.Save();
+        if (!nearerThanPlayer)
+            canvas.ClipRect(new SKRect(0, 0, w, clip));
+        float lit = Math.Clamp(0.3f + (0.5f * night) + (0.3f * frame.Kick), 0, 1);
+        if (car.Oncoming && night > 0.05f)
+        {
+            // Its headlights' beams on the road toward the camera.
+            _path.Reset();
+            _path.MoveTo(x - (width * 0.35f), y - (width * 0.05f));
+            _path.LineTo(x + (width * 0.35f), y - (width * 0.05f));
+            _path.LineTo(x + (width * 0.9f), y + (width * 0.5f));
+            _path.LineTo(x - (width * 0.9f), y + (width * 0.5f));
+            _path.Close();
+            _flat.Color = new SKColor(0xFF, 0xF4, 0xD0, (byte)(night * 40));
+            canvas.DrawPath(_path, _flat);
+        }
+        canvas.Translate(x - (100 * size), y - (100 * size));
+        canvas.Scale(size);
+        Shadow(canvas, night);
+        var paint = Mix(new SKColor(TrafficPaints[car.Paint % TrafficPaints.Length]), new SKColor(0x30, 0x20, 0x48), night * 0.55f);
+        _fill.Color = new SKColor(0x16, 0x14, 0x18);
+        canvas.DrawPath(CarTyres, _fill);
+        _fill.Color = new SKColor(0x1A, 0x18, 0x1E);
+        canvas.DrawPath(CarBumper, _fill);
+        if (car.Coupe)
+        {
+            _fill.Color = Mix(paint, SKColors.Black, 0.15f);
+            canvas.DrawPath(CoupeRoof, _fill);
+            _fill.Color = car.Oncoming ? new SKColor(0x40, 0x58, 0x70) : new SKColor(0x22, 0x2A, 0x36);
+            canvas.DrawPath(CoupeWindow, _fill);
+        }
+        else
+        {
+            _fill.Color = Mix(paint, SKColors.Black, 0.3f);
+            canvas.DrawPath(CarDeck, _fill);
+        }
+        using (var body = SKShader.CreateLinearGradient(new SKPoint(0, 40), new SKPoint(0, 80),
+                   [Mix(paint, SKColors.White, 0.25f), paint, Mix(paint, SKColors.Black, 0.45f)], [0, 0.35f, 1], SKShaderTileMode.Clamp))
+        {
+            _fill.Shader = body;
+            _fill.Color = SKColors.White;
+            canvas.DrawPath(CarBody, _fill);
+            _fill.Shader = null;
+        }
+        _fill.Color = new SKColor(0x14, 0x12, 0x16);
+        canvas.DrawPath(CarPanel, _fill);
+        if (car.Oncoming)
+        {
+            _fill.Color = Mix(new SKColor(0xC8, 0xCC, 0xD4), new SKColor(0xFF, 0xFC, 0xE8), lit);
+            canvas.DrawPath(CarLightsShape, _fill);
+            _stroke.Color = new SKColor(0x40, 0x40, 0x48);
+            _stroke.StrokeWidth = 1.2f;
+            canvas.DrawPath(Grille, _stroke);
+        }
+        else
+        {
+            _fill.Color = Mix(new SKColor(0xB0, 0x10, 0x18), new SKColor(0xFF, 0x50, 0x58), lit);
+            canvas.DrawPath(CarLightsShape, _fill);
+        }
+        _fill.Color = new SKColor(0xEE, 0xEE, 0xE6);
+        canvas.DrawPath(CarPlate, _fill);
+        canvas.Restore();
+
+        if (night > 0.05f && width > 4)
+        {
+            // Its lights shining: tail lights red, headlights white.
+            var colour = car.Oncoming ? new SKColor(0xFF, 0xF6, 0xDC, (byte)(night * 200)) : new SKColor(0xFF, 0x28, 0x38, (byte)(night * lit * 170));
+            float lx = x - (width * 0.39f), rx = x + (width * 0.39f), ly = y - (width * 0.205f);
+            Halo(canvas, lx, ly, width * (car.Oncoming ? 0.3f : 0.18f), colour);
+            Halo(canvas, rx, ly, width * (car.Oncoming ? 0.3f : 0.18f), colour);
+        }
     }
 
     private static void Quad(SKPath path, float x1, float w1, float y1, float x2, float w2, float y2)
@@ -891,17 +1313,33 @@ internal sealed class OutrunPainter
         return path;
     }
 
-    /// <summary>The convertible from behind, in a box 200 wide and 100 high, its wheels on the
-    /// box's floor: low and wide, the two in it, black tail light panel and twin pipes.</summary>
+    /// <summary>The cars' shapes, in a box 200 wide and 100 high with the wheels on its floor: low and
+    /// wide, a black tail panel with strakes over the lights, twin pipes each side.</summary>
     private static class Car
     {
-        public static SKPath Tyres()
+        private static SKPath Rounded(params (float L, float T, float R, float B, float Radius)[] boxes)
         {
             var path = new SKPath();
-            path.AddRoundRect(new SKRect(6, 62, 34, 97), 5, 5);
-            path.AddRoundRect(new SKRect(166, 62, 194, 97), 5, 5);
+            foreach (var (l, t, r, b, radius) in boxes)
+                path.AddRoundRect(new SKRect(l, t, r, b), radius, radius);
             return path;
         }
+
+        private static SKPath Lines(params (float X1, float Y1, float X2, float Y2)[] lines)
+        {
+            var path = new SKPath();
+            foreach (var (x1, y1, x2, y2) in lines)
+            {
+                path.MoveTo(x1, y1);
+                path.LineTo(x2, y2);
+            }
+            return path;
+        }
+
+        public static SKPath Tyres() => Rounded((6, 62, 34, 97, 5), (166, 62, 194, 97, 5));
+
+        public static SKPath Tread() => Lines((9, 70, 31, 70), (9, 76, 31, 76), (9, 82, 31, 82), (9, 88, 31, 88),
+            (169, 70, 191, 70), (169, 76, 191, 76), (169, 82, 191, 82), (169, 88, 191, 88));
 
         public static SKPath Bumper()
         {
@@ -937,85 +1375,98 @@ internal sealed class OutrunPainter
             return path;
         }
 
+        public static SKPath Vents() => Lines((44, 31.5f, 156, 31.5f), (38, 34.5f, 162, 34.5f), (32, 37.5f, 168, 37.5f));
+
         public static SKPath Glass()
         {
             var path = new SKPath();
             path.MoveTo(46, 28);
-            path.LineTo(60, 9);
-            path.LineTo(140, 9);
+            path.LineTo(60, 8);
+            path.LineTo(140, 8);
             path.LineTo(154, 28);
             path.Close();
             return path;
         }
 
-        public static SKPath DriverHair()
+        public static SKPath Frame()
         {
             var path = new SKPath();
-            path.AddCircle(76, 17, 9.5f);
-            path.AddRoundRect(new SKRect(62, 22, 90, 34), 6, 6);
+            path.MoveTo(46, 28);
+            path.LineTo(60, 8);
+            path.LineTo(140, 8);
+            path.LineTo(154, 28);
             return path;
         }
 
-        public static SKPath PassengerHair()
+        private static SKPath Shoulders(float left, float right)
         {
+            float middle = (left + right) / 2;
             var path = new SKPath();
-            path.AddCircle(124, 17, 9);
-            // Her hair flying in the wind.
-            path.MoveTo(118, 10);
-            path.QuadTo(140, 4, 158, 14);
-            path.QuadTo(146, 14, 150, 22);
-            path.QuadTo(138, 18, 132, 26);
-            path.LineTo(120, 24);
+            path.MoveTo(left, 42);
+            path.QuadTo(left + 1, 27, middle, 26);
+            path.QuadTo(right - 1, 27, right, 42);
             path.Close();
-            path.AddRoundRect(new SKRect(111, 22, 137, 34), 6, 6);
             return path;
         }
 
-        public static SKPath Headrests()
-        {
-            var path = new SKPath();
-            path.AddRoundRect(new SKRect(66, 22, 86, 31), 4, 4);
-            path.AddRoundRect(new SKRect(114, 22, 134, 31), 4, 4);
-            return path;
-        }
+        public static SKPath DriverShoulders() => Shoulders(60, 92);
 
-        public static SKPath Panel()
-        {
-            var path = new SKPath();
-            path.AddRoundRect(new SKRect(16, 50, 184, 68), 4, 4);
-            return path;
-        }
+        public static SKPath PassengerShoulders() => Shoulders(110, 139);
 
-        public static SKPath Lights()
-        {
-            var path = new SKPath();
-            path.AddRoundRect(new SKRect(20, 53, 58, 65), 2, 2);
-            path.AddRoundRect(new SKRect(142, 53, 180, 65), 2, 2);
-            return path;
-        }
+        public static SKPath Seats() => Rounded((66, 21, 86, 30, 4), (114, 21, 134, 30, 4), (58, 28, 94, 42, 5), (106, 28, 142, 42, 5));
 
-        public static SKPath Plate()
-        {
-            var path = new SKPath();
-            path.AddRoundRect(new SKRect(86, 72, 114, 82), 1.5f, 1.5f);
-            return path;
-        }
+        public static SKPath Panel() => Rounded((16, 50, 184, 68, 4));
+
+        public static SKPath Lights() => Rounded((20, 53, 58, 65, 2), (142, 53, 180, 65, 2));
+
+        public static SKPath Strakes() => Lines((18, 55.5f, 182, 55.5f), (18, 58.5f, 182, 58.5f), (18, 61.5f, 182, 61.5f), (18, 64.5f, 182, 64.5f));
+
+        public static SKPath Chrome() => Lines((17, 69.6f, 183, 69.6f), (24, 87.5f, 176, 87.5f));
+
+        public static SKPath Plate() => Rounded((86, 72, 114, 82, 1.5f));
+
+        public static SKPath PlateText() => Rounded((89, 75.5f, 95, 78.8f, 0.5f), (97, 75.5f, 103, 78.8f, 0.5f), (105, 75.5f, 111, 78.8f, 0.5f));
 
         public static SKPath Pipes()
         {
             var path = new SKPath();
-            path.AddCircle(40, 90, 4);
-            path.AddCircle(51, 90, 4);
-            path.AddCircle(149, 90, 4);
-            path.AddCircle(160, 90, 4);
+            foreach (float x in (ReadOnlySpan<float>)[38, 49, 151, 162])
+                path.AddCircle(x, 89, 4.2f);
             return path;
         }
 
-        public static SKPath Shine()
+        public static SKPath PipeHoles()
         {
             var path = new SKPath();
-            path.AddRoundRect(new SKRect(26, 42, 174, 44.5f), 1.2f, 1.2f);
+            foreach (float x in (ReadOnlySpan<float>)[38, 49, 151, 162])
+                path.AddCircle(x, 89, 2.6f);
             return path;
         }
+
+        public static SKPath Shine() => Rounded((26, 41.5f, 174, 43.5f, 1));
+
+        public static SKPath CoupeRoof()
+        {
+            var path = new SKPath();
+            path.MoveTo(36, 41);
+            path.LineTo(50, 14);
+            path.QuadTo(100, 7, 150, 14);
+            path.LineTo(164, 41);
+            path.Close();
+            return path;
+        }
+
+        public static SKPath CoupeWindow()
+        {
+            var path = new SKPath();
+            path.MoveTo(48, 37);
+            path.LineTo(57, 18);
+            path.QuadTo(100, 12.5f, 143, 18);
+            path.LineTo(152, 37);
+            path.Close();
+            return path;
+        }
+
+        public static SKPath Grille() => Lines((68, 55.5f, 132, 55.5f), (68, 59, 132, 59), (68, 62.5f, 132, 62.5f));
     }
 }
