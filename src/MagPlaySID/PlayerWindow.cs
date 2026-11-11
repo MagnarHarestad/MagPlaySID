@@ -1277,6 +1277,7 @@ internal sealed class PlayerWindow : Window
         _file = file;
         _module = null;
         _recording = null;
+        LeaveRepeat(path);
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
         _hvscKey = SongLengths.KeyOf(bytes);
@@ -1343,6 +1344,7 @@ internal sealed class PlayerWindow : Window
         _recordingTags = tags;
         _recordingKind = kind;
         _recordingLength = length;
+        LeaveRepeat(path);
         _path = path;
         byte[] key = Playlist.RecordingKey(path);
         _tuneKey = TuneHistory.KeyOf(key);
@@ -1388,6 +1390,7 @@ internal sealed class PlayerWindow : Window
         _file = null;
         _module = module;
         _recording = null;
+        LeaveRepeat(path);
         _path = path;
         _tuneKey = TuneHistory.KeyOf(bytes);
         _hvscKey = SongLengths.KeyOf(bytes);
@@ -2103,6 +2106,14 @@ internal sealed class PlayerWindow : Window
     /// on and on, null once.</summary>
     private int? RepeatTimes => _path is { } path ? Favourites.Repeat(path) : null;
 
+    /// <summary>The repeat of the tune playing forgotten as another tune - <paramref name="next"/> -
+    /// takes its place: when it is played again it plays once, unless chosen again.</summary>
+    private void LeaveRepeat(string next)
+    {
+        if (_path is { } leaving && !Playlist.SamePath(leaving, next))
+            PlaylistStrip.ChooseRepeat(leaving, null);
+    }
+
     /// <summary>Whether the tune is to play again when it ends.</summary>
     private bool RepeatsAgain() => RepeatTimes is { } times && (times == Favourites.Forever || _played + 1 < times);
 
@@ -2145,8 +2156,8 @@ internal sealed class PlayerWindow : Window
         };
     }
 
-    /// <summary>The choices of how many times the tune plays, the one it has ticked: kept for the
-    /// tune, wherever it is played from.</summary>
+    /// <summary>The choices of how many times the tune plays, the one it has ticked: for this tune
+    /// until another is played.</summary>
     private void OpenRepeatMenu()
     {
         if (_path is not { } path)
@@ -2160,7 +2171,7 @@ internal sealed class PlayerWindow : Window
             {
                 // Counted from the time playing now: the first of however many.
                 _played = 0;
-                _strip.ChooseRepeat(path, times);
+                PlaylistStrip.ChooseRepeat(path, times);
                 ShowRepeat();
             };
             menu.Items.Add(item);

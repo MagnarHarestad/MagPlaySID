@@ -366,15 +366,17 @@ internal static class Favourites
     private static Dictionary<string, int> _firstSongs = new(SamePaths);
 
     /// <summary>The tunes the user plays again: how many times in all, <see cref="Forever"/> for
-    /// as long as they are left playing.</summary>
-    private static Dictionary<string, int> _repeats = new(SamePaths);
+    /// as long as they are left playing. Not kept: a tune's repeat is forgotten when another tune
+    /// is played, and when the app closes.</summary>
+    private static readonly Dictionary<string, int> _repeats = new(SamePaths);
 
     /// <summary>A tune repeated until another is chosen.</summary>
     public const int Forever = 0;
 
     internal sealed record Stored(string Name, List<string> Tunes, TuneSort Sort = TuneSort.Own, string? Heart = null);
 
-    internal sealed record Kept(List<Stored>? Playlists, Dictionary<string, int>? FirstSongs, Dictionary<string, int>? Repeats = null);
+    // An older file also holds "Repeats": read past, as repeats are no longer kept.
+    internal sealed record Kept(List<Stored>? Playlists, Dictionary<string, int>? FirstSongs);
 
     /// <summary>The song the user chose to play first of the tune at <paramref name="path"/>; null
     /// when they have not chosen one.</summary>
@@ -393,8 +395,8 @@ internal static class Favourites
     /// <see cref="Forever"/> without end - or null when it plays once.</summary>
     public static int? Repeat(string path) => _repeats.TryGetValue(Path.GetFullPath(path), out int times) ? times : null;
 
-    /// <summary>Plays the tune <paramref name="times"/> times in all from now on - <see cref="Forever"/>
-    /// without end; null, once.</summary>
+    /// <summary>Plays the tune <paramref name="times"/> times in all, until another tune is played -
+    /// <see cref="Forever"/> without end; null, once.</summary>
     public static void SetRepeat(string path, int? times)
     {
         if (times is { } kept)
@@ -413,7 +415,6 @@ internal static class Favourites
                 ? new Kept(JsonSerializer.Deserialize(text, AppJson.Default.ListStored), null)
                 : JsonSerializer.Deserialize(text, AppJson.Default.Kept);
             _firstSongs = new Dictionary<string, int>(kept?.FirstSongs ?? [], SamePaths);
-            _repeats = new Dictionary<string, int>(kept?.Repeats ?? [], SamePaths);
             var playlists = new List<Playlist>();
             foreach (var s in (kept?.Playlists ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Name)))
             {
@@ -435,7 +436,7 @@ internal static class Favourites
         {
             Directory.CreateDirectory(Settings.Folder);
             var stored = playlists.Select(p => new Stored(p.Name, p.OwnOrder.Select(t => t.Path).ToList(), p.Sort, p.Heart)).ToList();
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(new Kept(stored, _firstSongs, _repeats), AppJson.Default.Kept));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(new Kept(stored, _firstSongs), AppJson.Default.Kept));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

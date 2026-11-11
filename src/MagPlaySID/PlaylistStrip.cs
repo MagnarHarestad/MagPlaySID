@@ -1137,12 +1137,8 @@ internal sealed class PlaylistStrip : Border
         Favourites.Save(_favourites);
     }
 
-    /// <summary>How many times in all a tune plays, kept with the favourites: null, once.</summary>
-    public void ChooseRepeat(string path, int? times)
-    {
-        Favourites.SetRepeat(path, times);
-        Favourites.Save(_favourites);
-    }
+    /// <summary>How many times in all a tune plays, until another tune is played: null, once.</summary>
+    public static void ChooseRepeat(string path, int? times) => Favourites.SetRepeat(path, times);
 
     /// <summary>The times a tune may be set to play in all; <see cref="Favourites.Forever"/>, on and on.</summary>
     public static readonly (int? Times, string Name)[] RepeatChoices =
