@@ -297,7 +297,7 @@ internal sealed class Playlist : Observable
     }
 
     /// <summary>Whether a file is a tune by its name: a .sid, an Amiga module - name.mod, or
-    /// mod.name as the Amiga named them - or a recording: .wav, .flac or .mp3.</summary>
+    /// mod.name as the Amiga named them - or a recording: .wav, .flac, .mp3, .ogg, .m4a or .aac.</summary>
     public static bool IsTuneName(string path)
     {
         string name = Path.GetFileName(path);

@@ -1103,7 +1103,7 @@ internal sealed class PlayerWindow : Window
         {
             Title = "Open a tune",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("SID tunes, tracker modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.s3m", "*.xm", "*.it", "*.mptm", "*.wav", "*.flac", "*.mp3"] }, FilePickerFileTypes.All],
+            FileTypeFilter = [new FilePickerFileType("SID tunes, tracker modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.s3m", "*.xm", "*.it", "*.mptm", "*.wav", "*.flac", "*.mp3", "*.ogg", "*.oga", "*.m4a", "*.aac"] }, FilePickerFileTypes.All],
         });
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)

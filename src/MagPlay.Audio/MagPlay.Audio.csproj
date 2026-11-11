@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Recorded music: WAV, FLAC and MP3 read into samples on every system, and its notes heard -
+  <!-- Recorded music: WAV, FLAC, MP3, Ogg Vorbis and AAC read into samples on every system, and its notes heard -
        transcribed, many at once, from the sound alone. -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -12,6 +12,10 @@
   <ItemGroup>
     <!-- MP3 frames decoded in managed code (MIT): no system codec, the same on Windows, macOS and Linux. -->
     <PackageReference Include="NLayer" Version="3.0.1" />
+    <!-- Ogg Vorbis (MIT) and AAC - .m4a and .aac, AAC-LC and HE-AAC (MIT) - decoded in managed code too. -->
+    <PackageReference Include="NVorbis" Version="0.10.5" />
+    <PackageReference Include="SharpJaad" Version="0.2.0" />
+    <PackageReference Include="SharpJaad.AAC" Version="0.2.0" />
   </ItemGroup>
 
 </Project>

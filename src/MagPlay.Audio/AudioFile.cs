@@ -5,12 +5,23 @@ public static class AudioFile
 {
     /// <summary>The names a recording goes by.</summary>
     public static bool IsAudioName(string path) =>
-        Path.GetExtension(path).ToLowerInvariant() is ".wav" or ".flac" or ".mp3";
+        Path.GetExtension(path).ToLowerInvariant() is ".wav" or ".flac" or ".mp3" or ".ogg" or ".oga" or ".m4a" or ".aac";
 
-    /// <summary>Whether a file's first bytes are a recording's - WAV, FLAC, or MP3 with or without
-    /// an ID3 tag - not a .sid or a module.</summary>
+    /// <summary>The start of an Ogg file: its first page.</summary>
+    private static bool IsOgg(ReadOnlySpan<byte> head) => head.Length >= 4 && head[..4].SequenceEqual("OggS"u8);
+
+    /// <summary>An MP4 file - an .m4a: its file-type box first.</summary>
+    private static bool IsMp4(ReadOnlySpan<byte> head) => head.Length >= 8 && head[4..8].SequenceEqual("ftyp"u8);
+
+    /// <summary>An ADTS frame's header - an .aac: the sync, then layer 00, as an MP3 frame never has.</summary>
+    private static bool IsAdts(ReadOnlySpan<byte> head) => head.Length >= 2 && head[0] == 0xFF && (head[1] & 0xF6) == 0xF0;
+
+    /// <summary>Whether a file's first bytes are a recording's - WAV, FLAC, Ogg, MP4 or ADTS AAC, or
+    /// MP3 with or without an ID3 tag - not a .sid or a module.</summary>
     public static bool Looks(ReadOnlySpan<byte> head)
     {
+        if (IsOgg(head) || IsMp4(head) || IsAdts(head))
+            return true;
         if (head.Length >= 12 && head[..4].SequenceEqual("RIFF"u8) && head[8..12].SequenceEqual("WAVE"u8))
             return true;
         if (head.Length >= 4 && head[..4].SequenceEqual("fLaC"u8))
@@ -37,6 +48,12 @@ public static class AudioFile
                 return new FlacDecoder(stream);
             if (head.Length >= 3 && head[..3].SequenceEqual("ID3"u8) && IsFlacAfterId3(stream))
                 return new FlacDecoder(stream);
+            if (IsOgg(head))
+                return new OggDecoder(stream);
+            if (IsMp4(head))
+                return AacDecoder.Open(stream, mp4: true);
+            if (IsAdts(head))
+                return AacDecoder.Open(stream, mp4: false);
             return new Mp3Decoder(stream);
         }
         catch
@@ -76,6 +93,18 @@ public static class AudioFile
                 return WavDecoder.ReadTags(stream);
             if ((head.Length >= 4 && head[..4].SequenceEqual("fLaC"u8)) || (head.Length >= 3 && head[..3].SequenceEqual("ID3"u8) && IsFlacAfterId3(stream)))
                 return new FlacDecoder(new NonClosing(stream)).Tags;
+            if (IsOgg(head))
+            {
+                using var ogg = new OggDecoder(new NonClosing(stream));
+                return ogg.Tags;
+            }
+            if (IsMp4(head))
+            {
+                using var m4a = AacDecoder.Open(new NonClosing(stream), mp4: true);
+                return m4a.Tags;
+            }
+            if (IsAdts(head))
+                return new AudioTags(null, null, null, null);
             return Mp3Decoder.ReadTags(stream);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException or ArgumentException)
