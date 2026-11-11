@@ -8,4 +8,5 @@ internal enum MeterKind
     Neon,
     LastNinja,
     DireGuys,
+    Outrun,
 }

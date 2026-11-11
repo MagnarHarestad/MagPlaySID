@@ -57,6 +57,7 @@ internal sealed class PlayerWindow : Window
     private NeonSpectrumView? _neon;
     private NinjaView? _ninja;
     private DireView? _dire;
+    private OutrunView? _outrun;
     private Grid _spectrumHost = null!;
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
@@ -98,6 +99,7 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _neonMeter = new() { Header = "Neon" };
     private readonly MenuItem _ninjaMeter = new() { Header = "Last Ninja" };
     private readonly MenuItem _direMeter = new() { Header = "Dire Guys" };
+    private readonly MenuItem _outrunMeter = new() { Header = "Outrun" };
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly MenuItem _exportNotes = new();
@@ -667,7 +669,7 @@ internal sealed class PlayerWindow : Window
         openFolder.Click += (_, _) => _ = PickFolderAsync();
 
         var meter = new MenuItem { Header = "Meter" };
-        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon), (_ninjaMeter, MeterKind.LastNinja), (_direMeter, MeterKind.DireGuys) })
+        foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon), (_ninjaMeter, MeterKind.LastNinja), (_direMeter, MeterKind.DireGuys), (_outrunMeter, MeterKind.Outrun) })
         {
             item.ToggleType = MenuItemToggleType.Radio;
             item.GroupName = "Meter";
@@ -729,17 +731,22 @@ internal sealed class PlayerWindow : Window
             _ninja ??= AddMeter(new NinjaView());
         else if (meter == MeterKind.DireGuys)
             _dire ??= AddMeter(new DireView());
+        else if (meter == MeterKind.Outrun)
+            _outrun ??= AddMeter(new OutrunView());
         _landscape.IsVisible = _landscapeMeter.IsChecked = meter == MeterKind.Landscape;
         _neonMeter.IsChecked = meter == MeterKind.Neon;
         _ninjaMeter.IsChecked = meter == MeterKind.LastNinja;
         _direMeter.IsChecked = meter == MeterKind.DireGuys;
+        _outrunMeter.IsChecked = meter == MeterKind.Outrun;
         if (_neon is not null)
             _neon.IsVisible = _neonMeter.IsChecked;
         if (_ninja is not null)
             _ninja.IsVisible = _ninjaMeter.IsChecked;
         if (_dire is not null)
             _dire.IsVisible = _direMeter.IsChecked;
-        _spectrum.IsVisible = _spectrumMeter.IsChecked = meter is not (MeterKind.Landscape or MeterKind.Neon or MeterKind.LastNinja or MeterKind.DireGuys);
+        if (_outrun is not null)
+            _outrun.IsVisible = _outrunMeter.IsChecked;
+        _spectrum.IsVisible = _spectrumMeter.IsChecked = meter is not (MeterKind.Landscape or MeterKind.Neon or MeterKind.LastNinja or MeterKind.DireGuys or MeterKind.Outrun);
     }
 
     /// <summary>A meter made the first time it is chosen, put under the empty window's text.</summary>
@@ -1520,6 +1527,7 @@ internal sealed class PlayerWindow : Window
         _neon?.Clear();
         _ninja?.Clear();
         _dire?.Clear();
+        _outrun?.Clear();
         foreach (var scope in _scopes)
             scope.Clear();
         _piano.Clear();
@@ -2077,6 +2085,7 @@ internal sealed class PlayerWindow : Window
             _neon?.Update(_spectrum.Relative, at);
             _ninja?.Update(engine, at);
             _dire?.Update(engine, at);
+            _outrun?.Update(_spectrum.Relative, at, _length?.Total.TotalSeconds);
             foreach (var scope in _scopes)
                 scope.Update(engine, at);
             _piano.Update(engine, at, _muted);
@@ -2137,6 +2146,7 @@ internal sealed class PlayerWindow : Window
             _neon?.Clear();
             _ninja?.Clear();
             _dire?.Clear();
+            _outrun?.Clear();
             foreach (var scope in _scopes)
                 scope.Clear();
             _piano.Clear();
