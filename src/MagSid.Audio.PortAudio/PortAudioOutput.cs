@@ -46,6 +46,7 @@ public sealed class PortAudioOutput : IAudioOutput
     private readonly int _blockAlign;
     private readonly int _sampleRate;
     private byte[] _buffer = [];
+    private short[] _mono = [];
 
     private volatile bool _paused = true;
     private bool _started;
@@ -83,20 +84,78 @@ public sealed class PortAudioOutput : IAudioOutput
 
     public static IAudioOutput Open(IWaveProvider source, int latencyMs) => new PortAudioOutput(source, latencyMs);
 
-    /// <summary>A stream on the default output device as PortAudio knows it now.</summary>
+    /// <summary>For tests: the device to open in place of the default, and the most channels to
+    /// send it - as a one-eared headset takes.</summary>
+    internal static Func<int>? DeviceOverride = null;
+    internal static int? ChannelsLimit = null;
+
+    /// <summary>Channels the device is sent: the source's, or one where the device has only one - a
+    /// one-eared headset, or a Bluetooth one in its hands-free mode - the two sides mixed into it.</summary>
+    private volatile int _deviceChannels;
+
+    /// <summary>The device the stream plays on.</summary>
+    public string DeviceName { get; private set; } = "";
+
+    /// <summary>
+    /// A stream on the default output device as PortAudio knows it now, sent no more channels than
+    /// it has; if it will not open, again with more time in hand; and if it still will not, on
+    /// Windows' sound mapper, which takes any format and converts it for the default device. One
+    /// that opens nowhere says which device it was and why, in PortAudio's words.
+    /// </summary>
     private PortAudioSharp.Stream OpenStream()
     {
-        int device = Pa.DefaultOutputDevice;
+        int device = DeviceOverride?.Invoke() ?? Pa.DefaultOutputDevice;
         if (device == Pa.NoDevice)
             throw new InvalidOperationException("There is no audio output device.");
 
-        var info = Pa.GetDeviceInfo(device);
+        PortAudioException? first = null;
+        string firstName = "";
+        foreach (int candidate in Candidates(device))
+        {
+            var info = Pa.GetDeviceInfo(candidate);
+            if (info.maxOutputChannels <= 0)
+                continue;
+            int channels = Math.Clamp(Math.Min(_source.WaveFormat.Channels, ChannelsLimit ?? int.MaxValue), 1, info.maxOutputChannels);
+            double wanted = _latencyMs / 1000.0;
+            foreach (double latency in (ReadOnlySpan<double>)[Math.Max(info.defaultLowOutputLatency, wanted), Math.Max(info.defaultHighOutputLatency, wanted * 2)])
+            {
+                try
+                {
+                    _deviceChannels = channels;
+                    var stream = OpenOn(candidate, channels, latency);
+                    DeviceName = info.name;
+                    if (first is not null)
+                        Trace.WriteLine($"MagPlaySID: {firstName} would not open ({Pa.GetErrorText(first.ErrorCode)}); playing on {info.name}, {channels} channel(s).");
+                    return stream;
+                }
+                catch (PortAudioException ex)
+                {
+                    if (first is null)
+                        (first, firstName) = (ex, info.name);
+                }
+            }
+        }
+        var code = first?.ErrorCode ?? ErrorCode.InvalidDevice;
+        throw new PortAudioException(code, $"{(firstName.Length > 0 ? firstName : "the output device")} would not open - {Pa.GetErrorText(code)}", first);
+    }
+
+    /// <summary>The device asked for, then - on Windows - the sound mapper.</summary>
+    private static IEnumerable<int> Candidates(int device)
+    {
+        yield return device;
+        for (int d = 0; d < Pa.DeviceCount; d++)
+            if (d != device && Pa.GetDeviceInfo(d).name.StartsWith("Microsoft Sound Mapper", StringComparison.Ordinal) && Pa.GetDeviceInfo(d).maxOutputChannels > 0)
+                yield return d;
+    }
+
+    private PortAudioSharp.Stream OpenOn(int device, int channels, double latency)
+    {
         var parameters = new StreamParameters
         {
             device = device,
-            channelCount = _source.WaveFormat.Channels,
+            channelCount = channels,
             sampleFormat = SampleFormat.Int16,
-            suggestedLatency = Math.Max(info.defaultLowOutputLatency, _latencyMs / 1000.0),
+            suggestedLatency = latency,
             hostApiSpecificStreamInfo = IntPtr.Zero,
         };
         var stream = new PortAudioSharp.Stream(null, parameters, _sampleRate,
@@ -274,7 +333,19 @@ public sealed class PortAudioOutput : IAudioOutput
 
         if (read < bytes)
             Array.Clear(_buffer, read, bytes - read);
-        Marshal.Copy(_buffer, 0, output, bytes);
+        int channels = _source.WaveFormat.Channels;
+        if (_deviceChannels == channels || channels != 2)
+        {
+            Marshal.Copy(_buffer, 0, output, bytes);
+        }
+        else
+        {
+            // A device of one channel: the two sides mixed into it.
+            if (_mono.Length < frameCount)
+                _mono = new short[frameCount];
+            MixToMono(MemoryMarshal.Cast<byte, short>(_buffer.AsSpan(0, bytes)), _mono);
+            Marshal.Copy(_mono, 0, output, (int)frameCount);
+        }
 
         if (!_paused)
         {
@@ -291,6 +362,15 @@ public sealed class PortAudioOutput : IAudioOutput
         }
 
         return StreamCallbackResult.Continue;
+    }
+
+    /// <summary>Stereo samples, left and right in turn, mixed to one channel: the two halved and
+    /// added, so a sound on one side only is as loud as on both at half.</summary>
+    internal static void MixToMono(ReadOnlySpan<short> stereo, Span<short> mono)
+    {
+        int frames = Math.Min(stereo.Length / 2, mono.Length);
+        for (int i = 0; i < frames; i++)
+            mono[i] = (short)((stereo[2 * i] + stereo[(2 * i) + 1]) >> 1);
     }
 
     public void Dispose()
