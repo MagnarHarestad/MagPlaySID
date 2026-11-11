@@ -1025,15 +1025,19 @@ internal sealed class PlaylistStrip : Border
     {
         var words = _search.Text!.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var compare = System.Globalization.CultureInfo.InvariantCulture.CompareInfo;
-        const System.Globalization.CompareOptions loose = System.Globalization.CompareOptions.IgnoreCase
-            | System.Globalization.CompareOptions.IgnoreNonSpace | System.Globalization.CompareOptions.IgnoreWidth;
+        const System.Globalization.CompareOptions exact = System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreWidth;
+        const System.Globalization.CompareOptions loose = exact | System.Globalization.CompareOptions.IgnoreNonSpace;
+        // A word in plain letters finds them with or without marks - "motorhead" finds Motörhead -
+        // but a word typed with ø, ü or å means that letter: ignoring its marks would make "ø" an
+        // "o" and find nearly every tune.
+        var options = words.ToDictionary(word => word, word => word.Any(c => c > '\u007F') ? exact : loose);
         ForgetHits();
         var hits = new List<PlaylistTune>();
         foreach (var playlist in _lists)
             foreach (var tune in playlist.Tunes)
             {
                 string text = $"{tune.Title} {tune.Author} {tune.Group} {tune.Year} {System.IO.Path.GetFileNameWithoutExtension(tune.Path)}";
-                if (words.All(word => compare.IndexOf(text, word, loose) >= 0))
+                if (words.All(word => compare.IndexOf(text, word, options[word]) >= 0))
                 {
                     hits.Add(tune);
                     _found[tune] = playlist;
