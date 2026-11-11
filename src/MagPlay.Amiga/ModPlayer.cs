@@ -120,6 +120,19 @@ public sealed class ModPlayer : ITrackerPlayer
     /// to its array from <paramref name="at"/> on, as its scope shows it; given <paramref name="states"/>,
     /// what it plays - see <see cref="Pack"/>; given <paramref name="rows"/>, the order and row heard
     /// and how far into it - see <see cref="UnpackRow"/>.</summary>
+    /// <summary>Played on unheard: an Amiga module's few channels are mixed as fast as they are moved.</summary>
+    public void Skip(long frames)
+    {
+        var left = new float[4096];
+        var right = new float[4096];
+        while (frames > 0 && !Stopped)
+        {
+            int n = (int)Math.Min(left.Length, frames);
+            Render(left.AsSpan(0, n), right.AsSpan(0, n));
+            frames -= n;
+        }
+    }
+
     public void Render(Span<float> left, Span<float> right, float[][]? channels = null, int[][]? states = null,
                        int[]? rows = null, int at = 0)
     {

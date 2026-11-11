@@ -61,10 +61,10 @@ internal sealed class PlayerWindow : Window
     private VoiceScopeView[] _scopes = [];
     private readonly Grid _scopeRow = new() { Height = 110, Margin = new Thickness(18, 6, 18, 4) };
     private readonly TransportButton _previous = new(TransportGlyph.Previous);
-    private readonly TransportButton _playPause = new(TransportGlyph.Pause);
+    private readonly TransportButton _playPause = new(TransportGlyph.Pause) { Round = true, Width = 52, Height = 52 };
     private readonly TransportButton _fastForward = new(TransportGlyph.FastForward);
     private readonly TransportButton _next = new(TransportGlyph.Next);
-    private readonly TransportButton _repeat = new(TransportGlyph.Repeat);
+    private readonly TransportButton _repeat = new(TransportGlyph.Repeat) { Quiet = true };
 
     /// <summary>The times a tune may be set to play in all; <see cref="Favourites.Forever"/>, on and on.</summary>
     private static readonly (int? Times, string Name)[] RepeatChoices =
@@ -77,7 +77,7 @@ internal sealed class PlayerWindow : Window
     private int _played;
     private readonly TextBlock _title = new();
     private readonly TextBlock _details = new();
-    private readonly TextBlock _elapsed = new();
+    private readonly TimeBar _timeBar = new();
     private readonly TextBlock _empty = new();
     private readonly TextBlock _retroStatus = new();
     private readonly Button _open = new();
@@ -88,8 +88,6 @@ internal sealed class PlayerWindow : Window
     private readonly VolumeKnob _volumeKnob = new();
     private readonly StereoSlider _stereo = new() { IsVisible = false };
 
-    /// <summary>The seconds the clock shows, played and in all (-1 not known).</summary>
-    private (int Played, int Length) _clockShown = (-1, -2);
 
     // The keys' secret: with no tune playing they are a piano's, and each one struck throws up dust.
     private readonly MagicDust _dust = new();
@@ -410,12 +408,8 @@ internal sealed class PlayerWindow : Window
 
         BuildScopes(3);
 
-        _elapsed.FontFamily = Mono;
-        _elapsed.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
-        _elapsed.VerticalAlignment = VerticalAlignment.Center;
-        _elapsed.Margin = new Thickness(14, 0);
-        _elapsed.Text = "00:00 - --:--";
-        _clockShown = (0, -1);
+        _timeBar.Show(TimeSpan.Zero, null);
+        _timeBar.JumpAsked += JumpTo;
 
         _previous.Click += PreviousTune;
         _fastForward.Held += () => FastForward(true);
@@ -428,12 +422,25 @@ internal sealed class PlayerWindow : Window
         _repeat.Click += OpenRepeatMenu;
         ToolTip.SetTip(_repeat, "Repeat this tune - a number of times, or forever");
 
-        var transport = new StackPanel
+        // The controls together, play in the middle as their round heart and repeat a step apart
+        // to its left - a setting, not a control; under them the time, played and to come, with a
+        // line between filled as far as the song has got.
+        _repeat.Margin = new Thickness(0, 0, 14, 0);
+        var controls = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(18, 4, 18, 6),
-            Children = { _previous, _elapsed, _playPause, _fastForward, _repeat, _next },
+            Spacing = 4,
+            Children = { _repeat, _previous, _playPause, _fastForward, _next },
+        };
+        foreach (var child in controls.Children)
+            child.VerticalAlignment = VerticalAlignment.Center;
+        _timeBar.MaxWidth = 620;
+        _timeBar.Margin = new Thickness(0, 4, 0, 0);
+        var transport = new StackPanel
+        {
+            Margin = new Thickness(18, 2, 18, 6),
+            Children = { controls, _timeBar },
         };
 
         _empty.Text = "Open a .sid, a tracker module or a recording - or drop one here";
@@ -745,7 +752,8 @@ internal sealed class PlayerWindow : Window
         _favouriteText.FontSize = 12 * scale;
         BuildSongPills();
         _strip.TextScale = scale;
-        _elapsed.FontSize = 16 * scale;
+        _timeBar.TextScale = scale;
+        _timeBar.Height = 22 * scale;
         _empty.FontSize = 14 * scale;
         _retroStatus.FontSize = 12 * scale;
         _view.TextScale = scale;
@@ -1516,18 +1524,22 @@ internal sealed class PlayerWindow : Window
         RememberPlace();
     }
 
-    private void Start(int song)
+    /// <param name="prepared">The tune already made and run to where it is to play from - a jump.</param>
+    private void Start(int song, ITunePlayback? prepared = null)
     {
         // The piano's stream stays open: closing it here and opening it at the next key cost the
         // window half a second each time.
         StopPlayback();
         if (!HasTune)
+        {
+            (prepared as IDisposable)?.Dispose();
             return;
+        }
 
         try
         {
-            _engine = _recording is { } recording ? new AudioTune(recording, TakeDecoder(recording))
-                : _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song));
+            _engine = prepared ?? (_recording is { } recording ? new AudioTune(recording, TakeDecoder(recording))
+                : _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song)));
             if (_engine is AudioTune audio && _recording is { } heard && _heardNotes.TryGetValue(heard, out var notes))
                 audio.SetNotes(notes);
             _engine.Volume = _volumeKnob.Gain;
@@ -1585,6 +1597,9 @@ internal sealed class PlayerWindow : Window
 
     private void StopPlayback()
     {
+        // A jump on its way belongs to what played: it goes with it.
+        _jump?.Cancel();
+        _jump = null;
         var output = _output;
         var engine = _engine;
         _output = null;
@@ -2064,13 +2079,9 @@ internal sealed class PlayerWindow : Window
             _playCounted = true;
             TuneHistory.Played(tuneKey);
         }
-        // Written again only when a second shown changes: not sixty new strings a second.
-        var clock = ((int)Math.Floor(position.TotalSeconds), _length is { } length ? (int)Math.Floor(length.Total.TotalSeconds) : -1);
-        if (clock != _clockShown)
-        {
-            _clockShown = clock;
-            _elapsed.Text = $"{Clock(position)} - {(_length is { } total ? Clock(total.Total) : "--:--")}";
-        }
+        // Drawn again only when a second shown, or a pixel of the line, changes.
+        _timeBar.Show(position, _length?.Total);
+        _timeBar.CanJump = CanJump;
         if (_songPills.Children.ElementAtOrDefault(_song - 1) is SongPill playing)
             playing.Progress = _length is { Total.TotalSeconds: > 0 } measured ? position / measured.Total : 0;
         if (engine is C64Tune c64 && _transcription is not null)
@@ -2155,6 +2166,78 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>Where the listener is inside the song: past the end it folds back into the loop.</summary>
+    /// <summary>Whether a click on the time bar can jump: a recording as soon as its length is known;
+    /// a module once its length is; a .sid once its length is and all of it is transcribed - the
+    /// rows are read by the C64's cycle, so then they go with it.</summary>
+    private bool CanJump =>
+        _engine is not null && _length is { Total.TotalSeconds: > 0 } && _jump is null
+        && (_recording is not null || _module is not null || (_file is not null && _wholeTranscribed));
+
+    /// <summary>The jump on its way, to cancel when another is asked for or the tune changes.</summary>
+    private CancellationTokenSource? _jump;
+
+    /// <summary>The song played on from <paramref name="share"/> of its length: a new engine made and
+    /// run there off the window's thread - a .sid's C64 run on unheard, a module played through, a
+    /// recording's reader moved - then swapped in for the one playing, paused if it was.</summary>
+    private async void JumpTo(double share)
+    {
+        if (!CanJump || _length is not { } length)
+            return;
+        var target = TimeSpan.FromSeconds(length.Total.TotalSeconds * Math.Clamp(share, 0, 0.999));
+        long sample = (long)(target.TotalSeconds * C64PlaybackEngine.SampleRate);
+        var (file, module, recording, song, path) = (_file, _module, _recording, _song, _path);
+        double stereo = _stereo.Value;
+        var cancel = new CancellationTokenSource();
+        _jump = cancel;
+        _timeBar.Jumping = share;
+        ITunePlayback? ready = null;
+        try
+        {
+            ready = await Task.Run<ITunePlayback>(() =>
+            {
+                if (recording is not null)
+                    return new AudioTune(recording, AudioFile.Open(recording), sample);
+                if (module is not null)
+                {
+                    var moduleTune = new ModuleTune(module) { StereoWidth = stereo };
+                    moduleTune.SkipTo(sample, cancel.Token);
+                    return moduleTune;
+                }
+                var engine = new C64PlaybackEngine(file!, song);
+                engine.SkipTo(sample, cancel.Token);
+                return new C64Tune(engine);
+            }, cancel.Token);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or InvalidDataException
+                                       or SidPlaybackException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            ready = null;
+        }
+        finally
+        {
+            if (_jump == cancel)
+                _jump = null;
+            _timeBar.Jumping = -1;
+        }
+        // Another tune or song by now: this jump is no longer wanted.
+        if (ready is null || cancel.IsCancellationRequested || _path != path || _song != song || _engine is not { } playing)
+        {
+            (ready as IDisposable)?.Dispose();
+            return;
+        }
+        bool paused = playing.Paused;
+        _metersAt = -1;
+        foreach (var scope in _scopes)
+            scope.Clear();
+        _piano.Clear();
+        Start(song, ready);
+        if (paused && _engine is { } now)
+        {
+            now.Paused = true;
+            _playPause.Glyph = TransportGlyph.Play;
+        }
+    }
+
     private TimeSpan PositionWithinSong(long samples)
     {
         var elapsed = TimeSpan.FromSeconds(samples / (double)C64PlaybackEngine.SampleRate);

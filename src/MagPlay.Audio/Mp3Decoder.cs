@@ -17,11 +17,22 @@ public sealed class Mp3Decoder : AudioDecoder
     /// <summary>Frames still to drop at the start; frames still to give, or -1 to the end.</summary>
     private long _skip, _left = -1;
 
+    /// <summary>The encoder's frames before the music, as the file began: where its time 0 is.</summary>
+    private long _delay = -1;
+
     public Mp3Decoder(Stream stream)
     {
         var gapless = Gapless(stream);
         stream.Position = 0;
-        _file = new MpegFile(stream);
+        try
+        {
+            _file = new MpegFile(stream);
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidOperationException)
+        {
+            // Damaged past what NLayer reads, or no MP3 at all: said as the other formats say it.
+            throw new InvalidDataException($"The MP3 file cannot be read: {ex.Message}", ex);
+        }
         SampleRate = _file.SampleRate;
         Channels = _file.Channels;
         if (SampleRate <= 0 || Channels <= 0)
@@ -113,6 +124,34 @@ public sealed class Mp3Decoder : AudioDecoder
         return null;
     }
 
+    /// <summary>Straight to the frame wanted: the decoder finds its MPEG frame by the headers.</summary>
+    public override void Skip(long frames)
+    {
+        if (frames <= 0)
+            return;
+        if (_delay < 0)
+            _delay = _skip;
+        try
+        {
+            _file.Time = TimeSpan.FromSeconds((frames + _delay) / (double)SampleRate);
+            _skip = 0;
+            if (_left > 0)
+                _left = Math.Max(0, _left - frames);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or IOException or ArgumentException)
+        {
+            // A file NLayer cannot find its way in - damaged, or not an MP3 at all: read through instead.
+            try
+            {
+                base.Skip(frames);
+            }
+            catch (Exception inner) when (inner is IndexOutOfRangeException or ArgumentException or InvalidOperationException)
+            {
+                _left = 0;
+            }
+        }
+    }
+
     public override int Read(Span<float> interleaved)
     {
         int written = 0;
@@ -126,7 +165,17 @@ public sealed class Mp3Decoder : AudioDecoder
                 break;
             if (_buffer.Length < want)
                 _buffer = new float[want];
-            int got = _file.ReadSamples(_buffer, 0, want);
+            int got;
+            try
+            {
+                got = _file.ReadSamples(_buffer, 0, want);
+            }
+            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidOperationException)
+            {
+                // A frame NLayer cannot decode: the recording ends there.
+                _left = 0;
+                break;
+            }
             got -= got % Channels;
             if (got <= 0)
                 break;

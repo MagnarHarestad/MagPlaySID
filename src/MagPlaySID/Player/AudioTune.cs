@@ -58,9 +58,16 @@ internal sealed class AudioTune : ITunePlayback, IPolyphonicTune, IDisposable
     private double _longest;
 
     /// <param name="path">The recording, opened here and again by the reader.</param>
-    public AudioTune(string path, AudioDecoder decoder)
+    /// <param name="start">Where it starts, in samples at <see cref="SampleRate"/>: past 0 for a jump.</param>
+    public AudioTune(string path, AudioDecoder decoder, long start = 0)
     {
         _path = path;
+        if (start > 0)
+        {
+            decoder.Skip((long)Math.Round(start * (double)decoder.SampleRate / SampleRate));
+            _turns[0] = (0, start, 1);
+            _tuneSample = _written = start;
+        }
         SourceRate = decoder.SampleRate;
         SourceChannels = decoder.Channels;
         Duration = decoder.Duration;

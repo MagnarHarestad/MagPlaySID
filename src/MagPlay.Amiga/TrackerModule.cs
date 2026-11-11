@@ -91,6 +91,10 @@ public interface ITrackerPlayer
 
     /// <summary>One tick played with no sound made: how long it lasts, in seconds.</summary>
     double SilentTick();
+
+    /// <summary>On <paramref name="frames"/> frames, unheard - for a jump: every voice moved on through
+    /// its sample as if it had sounded, so what plays from there is what would have.</summary>
+    void Skip(long frames);
 }
 
 /// <summary>Modules of every kind: told apart, read, measured; their channels' states and places

@@ -151,6 +151,32 @@ internal sealed class ModuleTune : ITunePlayback
 
     public ITrackerModule Module { get; }
 
+    /// <summary>The module played on, unheard, to sample <paramref name="target"/> - for a jump: every
+    /// voice moved through its sample as if heard, so what sounds from there is what would have. Its
+    /// samples, rows and scopes count on from there.</summary>
+    public void SkipTo(long target, CancellationToken cancel = default)
+    {
+        if (target <= 0)
+            return;
+        // A second at a time, so a jump asked again can stop this one.
+        for (long left = target; left > 0 && !_player.Stopped;)
+        {
+            cancel.ThrowIfCancellationRequested();
+            long n = Math.Min(SampleRate, left);
+            _player.Skip(n);
+            left -= n;
+        }
+        lock (_turns)
+        {
+            _turns.Clear();
+            _turns.Add((0, target, 1));
+            _device = 0;
+            _tuneSample = target;
+        }
+        lock (_lock)
+            _written = target;
+    }
+
     public int Voices => Module.Channels;
     public string? Failure => null;
     public bool Paused { get; set; }

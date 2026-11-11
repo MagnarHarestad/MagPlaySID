@@ -53,6 +53,14 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     private readonly SidTune _tune;
     private long _chipCycle;
     private bool _silent;
+
+    /// <summary>Set while the tune is run ahead with the chips standing still: their registers are
+    /// written, but not a cycle of them is worked out - see <see cref="SkipTo"/>.</summary>
+    private bool _skipping;
+
+    /// <summary>How long before the place jumped to the chips are run along, unheard, so their
+    /// envelopes and filter are where the music has them.</summary>
+    private const double SettleSeconds = 3;
     private short[] _pending = new short[8192];
     private int _pendingCount;
 
@@ -186,6 +194,52 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         }
     }
 
+    /// <summary>The tune run on, unheard, to sample <paramref name="target"/> - for a jump: the C64
+    /// alone, its SID writes only kept, to a few seconds before; then with the chips, so they sound
+    /// as the music has them there. A tune that reads a chip's oscillator or envelope has the chips
+    /// run along from that read on, so it goes the way it would. The tune's samples, its rows' and
+    /// its scopes', count on from there.</summary>
+    public void SkipTo(long target, CancellationToken cancel = default)
+    {
+        if (target <= 0)
+            return;
+        long targetCycle = CycleAt(target);
+        long fastUntil = targetCycle - (long)(SettleSeconds * ClockHz);
+        _silent = true;
+        if (fastUntil > _tune.Computer.Cycle)
+        {
+            _skipping = true;
+            while (_skipping && _tune.Computer.Cycle < fastUntil)
+            {
+                cancel.ThrowIfCancellationRequested();
+                _tune.Run(Math.Min(Slice * 50, fastUntil - _tune.Computer.Cycle));
+            }
+            if (_skipping)
+            {
+                // The chips take up from here: what was written to them is where the music is.
+                _skipping = false;
+                _chipCycle = _tune.Computer.Cycle;
+            }
+        }
+        while (_tune.Computer.Cycle < targetCycle)
+        {
+            cancel.ThrowIfCancellationRequested();
+            _tune.Run(Math.Min(Slice * 10, targetCycle - _tune.Computer.Cycle));
+            ClockTo(_tune.Computer.Cycle);
+        }
+        _silent = false;
+        _pendingCount = 0;
+        lock (_turns)
+        {
+            _turns.Clear();
+            _turns.Add((0, target, 1));
+            _device = 0;
+            _tuneSample = target;
+        }
+        lock (_scopeLock)
+            _scopeWritten = target;
+    }
+
     /// <summary>The C64's cycle at sample <paramref name="sample"/>.</summary>
     public long CycleAt(double sample) => StartCycle + (long)(sample * ClockHz / SampleRate);
 
@@ -291,7 +345,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     {
         if (chip >= _chips.Length)
             return;
-        ClockTo(cycle);
+        if (!_skipping)
+            ClockTo(cycle);
         _chips[chip].Write(register, value);
         _registers[chip][register] = value & 0xFF;
         if (chip == 0 && register == 0x18 && !PlaysDigi)
@@ -314,6 +369,15 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     {
         if (chip >= _chips.Length)
             return 0;
+        if (_skipping)
+        {
+            // The oscillator or envelope read - the music may wait on it, or take a random number
+            // from it: from here the chips run along.
+            if ((register & 0x1F) is not (0x1B or 0x1C))
+                return (byte)_chips[chip].Read(register);
+            _skipping = false;
+            _chipCycle = cycle;
+        }
         ClockTo(cycle);
         return (byte)_chips[chip].Read(register);
     }

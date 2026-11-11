@@ -95,6 +95,7 @@ public sealed class SongPlayer : ITrackerPlayer
 
     public void Render(Span<float> left, Span<float> right, float[][]? channels = null, int[][]? states = null, int[]? rows = null, int at = 0)
     {
+        _silent = false;
         double sep = Math.Clamp(StereoSeparation, 0, 1);
         // Loud enough beside a ProTracker module, with headroom for many channels: the song's own
         // mixing volume, as its tracker sets it.
@@ -157,6 +158,36 @@ public sealed class SongPlayer : ITrackerPlayer
                 right[j] = (float)(_mixRight[j] * scale);
             }
             f += run;
+        }
+        _voices.RemoveAll(v => v.Gone);
+    }
+
+    /// <summary>On, unheard, tick by tick as <see cref="Render"/> goes - each voice moved through its
+    /// sample, its gains ramped, without a sample of it worked out.</summary>
+    public void Skip(long frames)
+    {
+        _silent = false;
+        double sep = Math.Clamp(StereoSeparation, 0, 1);
+        while (frames > 0)
+        {
+            if (_tickSamplesLeft <= 0)
+            {
+                if (!Stopped)
+                    NextTick();
+                UpdateTargets(sep);
+                _tickSamples = _rate * 2.5 / _tempo;
+                _tickSamplesLeft += _tickSamples;
+            }
+            int run = 0;
+            do
+            {
+                _tickSamplesLeft--;
+                run++;
+            }
+            while (_tickSamplesLeft > 0 && run < frames);
+            foreach (var v in _voices)
+                v.Advance(run);
+            frames -= run;
         }
         _voices.RemoveAll(v => v.Gone);
     }
@@ -1229,6 +1260,63 @@ public sealed class SongPlayer : ITrackerPlayer
         }
 
         public void Stop() => Done = true;
+
+        /// <summary><paramref name="count"/> frames on, unheard: where <see cref="Mix"/> would leave
+        /// the voice - its place in the sample, round its loop, its gains ramped, ended or gone -
+        /// worked out at once, not a frame at a time.</summary>
+        public void Advance(int count)
+        {
+            int ramped = Math.Min(Ramp, count);
+            GainLeft += StepLeft * ramped;
+            GainRight += StepRight * ramped;
+            Ramp -= ramped;
+            if ((Ramp == 0 && Done) || Ended || Sample.Data.Length == 0)
+            {
+                Gone = Gone || Ramp == 0 || Ended || Sample.Data.Length == 0;
+                if (Gone)
+                    return;
+            }
+            int length = Sample.Data.Length;
+            int start, end, mode;
+            if (KeyOn && Sample.SustainMode > 0)
+                (start, end, mode) = (Sample.SustainStart, Sample.SustainEnd, Sample.SustainMode);
+            else
+                (start, end, mode) = (Sample.LoopStart, Sample.LoopEnd, Sample.LoopMode);
+            double move = _step * count;
+            if (mode == 0)
+            {
+                Position += move;
+                if (Position >= length)
+                    Ended = true;
+                return;
+            }
+            double span = Math.Max(1, end - start);
+            if (mode == 1)
+            {
+                Position += move;
+                if (Position >= end)
+                    Position = start + ((Position - end) % span);
+                return;
+            }
+            // Ping-pong: there and back is twice the loop; where in that it is, and which way.
+            if (Position < start && _direction > 0)
+            {
+                double before = start - Position;
+                if (move <= before)
+                {
+                    Position += move;
+                    return;
+                }
+                move -= before;
+                Position = start;
+            }
+            double along = (_direction > 0 ? Position - start : (end - start) + (end - Position)) + move;
+            along %= 2 * span;
+            if (along < span)
+                (Position, _direction) = (start + along, 1);
+            else
+                (Position, _direction) = (end - (along - span), -1);
+        }
 
         public void KeyOff()
         {

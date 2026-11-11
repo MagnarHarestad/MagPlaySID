@@ -57,6 +57,13 @@ internal sealed class TransportButton : Control, ICustomHitTest
         }
     }
 
+    /// <summary>The main button: a round disc in the accent with the glyph cut out of it, as a
+    /// player's play button is - not a glyph alone.</summary>
+    public bool Round { get; init; }
+
+    /// <summary>Grey until it is lit: a setting beside the controls, not one of them - repeat.</summary>
+    public bool Quiet { get; init; }
+
     /// <summary>Drawn in the accent while what it stands for is on - fast-forward, say.</summary>
     public bool Lit
     {
@@ -153,12 +160,26 @@ internal sealed class TransportButton : Control, ICustomHitTest
 
         var colour = !IsEnabled ? SidPlayerPalette.ControlDisabled
             : _lit ? SidPlayerPalette.VoiceColour(1)
-            : _hovered ? SidPlayerPalette.ControlHover : SidPlayerPalette.Control;
-        var brush = SidPlayerPalette.Brush(colour);
-
+            : _hovered ? SidPlayerPalette.ControlHover
+            : Quiet ? SidPlayerPalette.Subtitle : SidPlayerPalette.Control;
         double w = Bounds.Width, h = Bounds.Height;
         double inset = _pressed ? 2 : 0;
-        var box = new Rect((w * 0.22) + inset, (h * 0.22) + inset, (w * 0.56) - (inset * 2), (h * 0.56) - (inset * 2));
+        if (Round)
+        {
+            // The disc, lighter under the pointer; the glyph in the window's background on it.
+            var accent = SidPlayerPalette.VoiceColour(1);
+            var disc = !IsEnabled ? SidPlayerPalette.ControlDisabled
+                : _hovered ? Color.FromRgb((byte)Math.Min(255, accent.R + 24), (byte)Math.Min(255, accent.G + 24), (byte)Math.Min(255, accent.B + 24)) : accent;
+            double radius = (Math.Min(w, h) / 2) - 1 - inset;
+            context.DrawEllipse(SidPlayerPalette.Brush(disc), null, new Point(w / 2, h / 2), radius, radius);
+            colour = SidPlayerPalette.Background;
+        }
+        var brush = SidPlayerPalette.Brush(colour);
+        double glyph = Round ? 0.4 : 0.56;
+        var box = new Rect((w * (1 - glyph) / 2) + inset, (h * (1 - glyph) / 2) + inset, (w * glyph) - (inset * 2), (h * glyph) - (inset * 2));
+        // A play triangle sits a little right of the middle, to look centred.
+        if (Round && _glyph == TransportGlyph.Play)
+            box = box.Translate(new Vector(w * 0.04, 0));
 
         switch (_glyph)
         {
