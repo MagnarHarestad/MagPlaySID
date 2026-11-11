@@ -6,11 +6,11 @@
 <title>MagPlaySID - plays C64 .sid tunes, Amiga modules and recordings, and shows how they are built</title>
 <meta name="description" content="MagPlaySID - plays any Commodore 64 .sid tune on an emulated C64, and shows it as tracker rows - notes, instruments and effects - scrolling with the music. Drop a folder to play it as a playlist, keep your favourites, and save a tune's notes as text, sheet music or MIDI, or its sound as WAV, FLAC or MP3. Plays Amiga ProTracker modules and S3M, XM and IT modules too, and WAV, FLAC, MP3, OGG and AAC recordings with their notes heard as they play.">
 <link rel="icon" href="favicon.png">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <header><div class="wrap"><img src="favicon.png" alt=""><a class="brand" href="./">MagPlaySID</a>
-  <nav><a href="#features">Features</a><a href="#start">Get started</a><a href="#how">How it works</a><a href="#license">License</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a><a href="https://github.com/MagnarHarestad/MagPlaySID">Source</a></nav></div></header>
+  <nav><a href="#highlights">Highlights</a><a href="#features">Features</a><a href="#start">Get started</a><a href="#how">How it works</a><a href="#license">License</a><a href="https://magnarharestad.github.io/MagSID/">MagSID Editor</a><a href="https://github.com/MagnarHarestad/MagPlaySID">Source</a></nav></div></header>
 
 <main class="wrap">
   <section class="hero">
@@ -37,6 +37,135 @@
     <img src="screenshots/player.png?v=2" width="1180" height="900" alt="MagPlaySID playing MSI-Lost Souls from a favourites playlist: the playlist down the left with an info button on each tune, the tune's eight songs beside Add to playlist with the third playing, the sound as a wireframe landscape to fly into, a scope per voice, the tune's rows with the selected voice's instrument beside them, and a piano along the bottom">
     <figcaption>Your favourites as a playlist down the left, an ⓘ on each tune to read about it; a tune's songs as buttons, a ring showing how far the one playing has got; the sound as a landscape to fly into - one of five meters - and a scope per voice; the tracker rows scrolling beside the instrument sounding and its wave, pulse and filter programs; and a piano lighting each voice's key.</figcaption>
   </figure>
+
+  <section class="highlights" aria-labelledby="highlights">
+  <h2 id="highlights">Highlights</h2>
+  <p class="lead">Ten reasons to keep it open while the music plays.</p>
+  <div class="bento">
+
+    <article class="hl wide">
+      <div class="media"><img src="screenshots/hl-notes.webp" width="754" height="407" loading="lazy" alt="A recording's notes heard as it plays: a piano roll of every note found, coloured by how sure they are, over a piano with the notes sounding lit"></div>
+      <div class="body">
+        <span class="tag">Every format</span>
+        <h3>Any song, with its notes</h3>
+        <p>A <code>.sid</code> is transcribed into notes, instruments and effects; a tracker module shows its own patterns; a recording has its notes heard as it plays, chords and all.</p>
+        <ul class="chips" aria-label="Formats it plays">
+          <li>SID</li><li>MOD</li><li>XM</li><li>IT</li><li>S3M</li><li>MP3</li><li>WAV</li><li>FLAC</li><li>OGG</li><li>AAC</li><li>M4A</li><li>MP4</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="hl">
+      <div class="media paper"><img src="screenshots/hl-sheet.webp" width="860" height="420" loading="lazy" alt="Sheet music exported from MSI-Lost Souls: a staff for each of the three voices, in 4/4"></div>
+      <div class="body">
+        <span class="tag">Sheet music</span>
+        <h3>Notes on paper</h3>
+        <p>Save a <code>.sid</code>'s transcription as a PDF score - a staff for each voice, in bars of 4/4 - to print or play from.</p>
+      </div>
+    </article>
+
+    <article class="hl">
+      <div class="media convert" aria-hidden="true">
+        <div class="from"><span>.sid</span><span>.mod</span><span>.xm</span><span>.it</span></div>
+        <svg class="arrow" viewBox="0 0 48 24"><path d="M2 12h38M32 4l10 8-10 8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="to"><span>MP3</span><span>FLAC</span><span>WAV</span><span class="midi">MIDI</span></div>
+      </div>
+      <div class="body">
+        <span class="tag">Export</span>
+        <h3>Save it as MP3, FLAC, WAV or MIDI</h3>
+        <p>Turn a <code>.sid</code> or a module into MP3, FLAC or WAV, made many times faster than it plays - or its notes into a MIDI file, a track for each voice.</p>
+      </div>
+    </article>
+
+    <article class="hl tall">
+      <div class="media fill"><img src="screenshots/hl-search.webp" width="290" height="620" loading="lazy" alt="A search for comaland: five tunes found in three playlists, each saying which playlist it is in, one of them playing"></div>
+      <div class="body">
+        <span class="tag">Search</span>
+        <h3>Find it in every playlist</h3>
+        <p>Type a name, composer, group or year: hits from all your playlists, each saying where it lives. Play one and the next hits follow. <kbd>Ctrl</kbd>+<kbd>F</kbd> takes you there.</p>
+      </div>
+    </article>
+
+    <article class="hl">
+      <div class="media dark"><img class="pad" src="screenshots/hl-jump.webp" width="640" height="80" loading="lazy" alt="The play controls together, the round play button in the middle, and under them the time bar with the pointer over it"></div>
+      <div class="body">
+        <span class="tag">Jump</span>
+        <h3>Go anywhere in a song</h3>
+        <p>Click or drag the time bar. A recording or a module jumps at once, a <code>.sid</code> as soon as it is transcribed - and the notes, scopes and piano follow.</p>
+      </div>
+    </article>
+
+    <article class="hl">
+      <div class="media drop" aria-hidden="true">
+        <div class="window"><span class="file f1">tune.sid</span><span class="file f2">song.xm</span><span class="file f3">mix.flac</span><span class="zone">Drop to play</span></div>
+      </div>
+      <div class="body">
+        <span class="tag">Drag and drop</span>
+        <h3>Drop it, and it plays</h3>
+        <p>Drag a tune, a module or a recording onto the window and it starts at once. Drop a whole folder and it becomes a playlist.</p>
+      </div>
+    </article>
+
+    <article class="hl full">
+      <div class="media split">
+        <img src="screenshots/hl-meters.webp" width="854" height="272" loading="lazy" alt="The Dire Guys dancing to a FastTracker module, and under them a scope for each of its 24 channels">
+        <img src="screenshots/hl-instrument.webp" width="772" height="327" loading="lazy" alt="A .sid's rows for its three voices, and beside them how the instrument playing is built: its envelope, hard restart, and its wave, pulse and filter programs, the step playing lit">
+      </div>
+      <div class="body">
+        <span class="tag">Visuals</span>
+        <h3>Watch the music being made</h3>
+        <p>Five meters to choose from, a scope for every voice or channel, a piano lighting each note and the instruments playing lit up. For a SID voice, see how its instrument is built: envelope, hard restart, and its wave, pulse and filter programs, step by step.</p>
+      </div>
+    </article>
+
+    <article class="hl">
+      <div class="media fill"><img src="screenshots/hl-playlists.webp" width="290" height="470" loading="lazy" alt="Playlists with hearts in their own colours - orange, blue, green, yellow and violet - and a playlist's tunes in its own order"></div>
+      <div class="body">
+        <span class="tag">Playlists</span>
+        <h3>Playlists your way</h3>
+        <p>Give each playlist a heart in its own colour, sort by year, title, composer, length or plays - or shuffle - and drag tunes into your own order.</p>
+      </div>
+    </article>
+
+    <article class="hl wide">
+      <div class="media chart">
+        <svg viewBox="0 0 520 168" role="img" aria-labelledby="lufs-title">
+          <title id="lufs-title">Loudness before and after: .sid tunes from -15.3 to -10.8 LUFS, modules from -18.8 to -11.5 LUFS, MP3s left as mastered at -9.4 LUFS</title>
+          <g class="axis">
+            <line x1="70" y1="150" x2="510" y2="150"/>
+            <text x="70" y="165">-24</text><text x="216" y="165">-18</text><text x="363" y="165">-12</text><text x="490" y="165">-6 LUFS</text>
+          </g>
+          <line class="target" x1="388" y1="6" x2="388" y2="150"/>
+          <text class="target-label" x="392" y="16">-11 LUFS</text>
+          <g class="row"><text x="0" y="36">.sid</text>
+            <rect class="before" x="70" y="24" width="213" height="10" rx="3"/><rect class="after" x="70" y="37" width="323" height="10" rx="3"/></g>
+          <g class="row"><text x="0" y="80">modules</text>
+            <rect class="before" x="70" y="68" width="127" height="10" rx="3"/><rect class="after" x="70" y="81" width="306" height="10" rx="3"/></g>
+          <g class="row"><text x="0" y="124">MP3</text>
+            <rect class="before" x="70" y="112" width="357" height="10" rx="3"/><rect class="after mastered" x="70" y="125" width="357" height="10" rx="3"/></g>
+        </svg>
+        <p class="legend"><span class="b">before</span> <span class="a">now</span> <span class="m">as mastered</span></p>
+      </div>
+      <div class="body">
+        <span class="tag">Loudness</span>
+        <h3>Every format as loud as the next</h3>
+        <p>SID tunes and tracker modules are brought up to about -11 LUFS, like modern masters, through a true-peak limiter that keeps peaks under -0.3 dBTP - so a <code>.sid</code> after an MP3 is no longer a jump in volume. Recordings play as they were mastered.</p>
+      </div>
+    </article>
+
+    <article class="hl">
+      <div class="media platforms" aria-hidden="true">
+        <span>Windows 10/11</span><span>macOS · Apple Silicon</span><span>macOS · Intel</span><span>Linux x64</span>
+      </div>
+      <div class="body">
+        <span class="tag">Everywhere</span>
+        <h3>Fast on Windows, macOS and Linux</h3>
+        <p>Opens in about a second, plays light on the processor, and stays smooth however fast you move the mouse. Nothing to install - .NET is inside.</p>
+      </div>
+    </article>
+
+  </div>
+  </section>
 
   <h2 id="features">What it does</h2>
   <p class="lead">Any tune, played as the C64 plays it, and read back as a score.</p>
