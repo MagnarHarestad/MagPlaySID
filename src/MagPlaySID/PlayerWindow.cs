@@ -1573,7 +1573,10 @@ internal sealed class PlayerWindow : Window
             for (int voice = 0; voice < Math.Min(_scopes.Length, _muted.Length); voice++)
                 _engine.SetVoiceMuted(voice, _muted[voice]);
             // On the stream kept open for tunes: a stream opened for each held the window half a second.
-            _output = AudioOutput.Share(_engine, latencyMs: 100);
+            // A sixth of a second in hand on the device: a moment's hold-up at the app's start - a
+            // recording opened with it, its notes listened for - is not a gap in the sound. The
+            // clock and the meters follow what is heard, so they do not run ahead by it.
+            _output = AudioOutput.Share(_engine, latencyMs: 160);
             var output = _output;
             output.Stopped += ex => Dispatcher.UIThread.Post(() =>
             {
@@ -1674,6 +1677,11 @@ internal sealed class PlayerWindow : Window
         {
             try
             {
+                // The sound first: listened for once it has begun, so its first seconds are not
+                // shared with the listening - nor, when the app was started with it, with the app's
+                // own start.
+                if (cancel.Token.WaitHandle.WaitOne(ListenAfter))
+                    return;
                 using var decoder = AudioFile.Open(path);
                 var notes = NoteTranscriber.Transcribe(decoder, (so, far) => Show(so, far, complete: false), cancel.Token);
                 Dispatcher.UIThread.Post(() =>
@@ -1703,6 +1711,9 @@ internal sealed class PlayerWindow : Window
         { IsBackground = true, Name = "Listening for notes", Priority = ThreadPriority.BelowNormal };
         thread.Start();
     }
+
+    /// <summary>How long a recording plays before its notes are listened for.</summary>
+    private static readonly TimeSpan ListenAfter = TimeSpan.FromSeconds(1.5);
 
     /// <summary>The notes heard so far, shown and given to the tune for the piano and the meters.</summary>
     private void Heard(IReadOnlyList<HeardNote> notes, double seconds, bool complete)

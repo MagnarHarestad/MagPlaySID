@@ -182,9 +182,10 @@ public sealed class NoteTranscriber
         public float Loudness;
     }
 
-    /// <summary>Threads the frames are heard on, side by side: all the cores but one, kept for the
-    /// sound and the window.</summary>
-    internal static int Workers = Math.Max(1, Environment.ProcessorCount - 1);
+    /// <summary>Threads the frames are heard on, side by side: half the cores, at most four - the
+    /// rest kept for the sound, the window and the app starting up, as a recording opened with the
+    /// app is heard while both start.</summary>
+    internal static int Workers = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
 
     /// <summary>Frames a worker hears at a time: three seconds.</summary>
     private const int BlockFrames = 256;
@@ -212,6 +213,7 @@ public sealed class NoteTranscriber
         var notes = new List<HeardNote>();
         var tracker = new Tracker();
         double reported = 0;
+        var sinceReport = System.Diagnostics.Stopwatch.StartNew();
 
         // Not disposed: the workers may still be finishing a block as this returns; finished adding, they end.
         var work = new System.Collections.Concurrent.BlockingCollection<(float[] Samples, int Count, TaskCompletionSource<Frame[]> Done)>();
@@ -239,6 +241,7 @@ public sealed class NoteTranscriber
                             heard[f] = new Frame();
                             Analyse(ear, samples.AsSpan((f + 1) * Hop, Window), heard[f]);
                         }
+                        System.Buffers.ArrayPool<float>.Shared.Return(samples);
                         done.SetResult(heard);
                     }
                     catch (Exception ex)
@@ -276,8 +279,13 @@ public sealed class NoteTranscriber
                 int count = (int)Math.Min(BlockFrames, ready - scheduled);
                 // From the start of the frame before's window to the end of the block's last.
                 long from = (scheduled * Hop) - Window;
-                var samples = new float[(count * Hop) + Window];
-                for (long at = Math.Max(from, kept); at < from + samples.Length; at++)
+                // Three seconds of samples a block: from a pool, not made new - an array this big is
+                // only let go of by a full collection, and one a block made one every few blocks,
+                // each a pause of every thread, the sound's among them.
+                int length = (count * Hop) + Window;
+                var samples = System.Buffers.ArrayPool<float>.Shared.Rent(length);
+                Array.Clear(samples, 0, length);
+                for (long at = Math.Max(from, kept); at < from + length; at++)
                     samples[at - from] = store[(int)(at - kept)];
                 var done = new TaskCompletionSource<Frame[]>(TaskCreationOptions.RunContinuationsAsynchronously);
                 work.Add((samples, count, done), cancel);
@@ -324,9 +332,12 @@ public sealed class NoteTranscriber
                 Take(resampled.AsSpan(0, made));
 
                 double heard = frames.Count * FrameSeconds;
-                if (progress is not null && heard - reported >= 4)
+                // The notes so far shown now and then: every four seconds heard, but not more than
+                // twice a second - each a copy of them all, and the window's to take in.
+                if (progress is not null && heard - reported >= 4 && sinceReport.ElapsedMilliseconds >= 500)
                 {
                     reported = heard;
+                    sinceReport.Restart();
                     progress(Snapshot(notes, tracker.Pending(frames)), heard);
                 }
             }
