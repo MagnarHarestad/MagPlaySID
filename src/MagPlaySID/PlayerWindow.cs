@@ -490,6 +490,9 @@ internal sealed class PlayerWindow : Window
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
         };
+        // Shown only with its module: left over the .sid's rows, empty, it took the clicks that
+        // choose the voice whose instrument is shown.
+        moduleScroller.Bind(IsVisibleProperty, _moduleView.GetObservable(IsVisibleProperty));
         retro.Children.Add(new Panel { Children = { _view, moduleScroller, _audioView } });
 
         var root = new DockPanel();
