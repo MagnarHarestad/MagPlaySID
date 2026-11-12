@@ -56,6 +56,17 @@ public sealed class C64 : IMemoryBus
     private readonly byte[] _basic = new byte[0x2000];
     private readonly byte[] _colour = new byte[0x400];
     private readonly byte[] _sidRegisters = new byte[0x20];
+
+    /// <summary>
+    /// Each SID's data bus: the last byte written to it, or read from one of its four readable
+    /// registers, and when. A read of a register that can only be written gives that byte back,
+    /// as the chip does - a tune's INC or ROL of its control register works on what it last wrote
+    /// (Legend of Kage) - until it fades, after about 7,400 cycles on the 6581, as reSID and VICE
+    /// have it; after that, 0.
+    /// </summary>
+    private readonly byte[] _busValue = new byte[4];
+    private readonly long[] _busSince = new long[4];
+    private const long BusHolds = 0x1D00;
     private readonly List<TimedWrite> _sidWrites = [];
     private readonly int[] _extraSids;
     private readonly List<TimedWrite>[] _extraSidWrites;
@@ -529,6 +540,7 @@ public sealed class C64 : IMemoryBus
         {
             case < 0xD400: Vic.Write(address, value); break;
             case var _ when ExtraSid(address) is >= 0 and var chip:
+                Latch(chip + 1, value);
                 if ((address & 0x1F) > 0x18)
                     break;
                 _chip?.Write(_io, chip + 1, address & 0x1F, value);
@@ -560,6 +572,7 @@ public sealed class C64 : IMemoryBus
 
     private void WriteSid(int register, int value)
     {
+        Latch(0, value);
         if (register > 0x18)
             return;
 
@@ -591,19 +604,27 @@ public sealed class C64 : IMemoryBus
         {
             case 0x19:
             case 0x1A:
-                return 0xFF;
+                return Latch(chip, 0xFF);
             case 0x1B:
             case 0x1C:
                 if (_chip is not null)
-                    return _chip.Read(_io, chip, register);
+                    return Latch(chip, _chip.Read(_io, chip, register));
                 if (chip > 0)
-                    return 0;
+                    return Latch(chip, 0);
                 EnsureSid();
                 ClockSidTo(_io);
-                return (byte)_sid!.Read(register);
+                return Latch(chip, _sid!.Read(register));
             default:
-                return 0;
+                return _io - _busSince[chip] < BusHolds ? _busValue[chip] : (byte)0;
         }
+    }
+
+    /// <summary>A byte on a SID's data bus now; the byte.</summary>
+    private byte Latch(int chip, int value)
+    {
+        _busValue[chip] = (byte)value;
+        _busSince[chip] = _io;
+        return (byte)value;
     }
 
     /// <summary>The model, started the first time it is needed and brought up to now by playing it

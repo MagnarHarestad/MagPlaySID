@@ -93,7 +93,22 @@ public static class AudioOutput
         /// <summary>The stream, once it is open.</summary>
         public IAudioOutput? Device => _device;
 
-        public void OpenSoon(int latencyMs) => ThreadPool.QueueUserWorkItem(_ =>
+        public void OpenSoon(int latencyMs)
+        {
+            // A device that neither opens nor fails - its driver waiting on a sound server that
+            // holds it - leaves the tune standing still with no word: after a while, it is told.
+            _ = Task.Delay(OpenAtMost).ContinueWith(_ =>
+            {
+                if (_device is null && !Failed && !_closed)
+                    FailCurrent(new TimeoutException($"the sound device has not opened in {OpenAtMost.TotalSeconds:0} seconds - another program may be holding it"));
+            }, TaskScheduler.Default);
+            OpenNow(latencyMs);
+        }
+
+        /// <summary>How long a device may take to open before the tune waiting for it is told.</summary>
+        private static readonly TimeSpan OpenAtMost = TimeSpan.FromSeconds(8);
+
+        private void OpenNow(int latencyMs) => ThreadPool.QueueUserWorkItem(_ =>
         {
             try
             {

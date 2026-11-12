@@ -89,6 +89,9 @@ public sealed class PortAudioOutput : IAudioOutput
     internal static Func<int>? DeviceOverride = null;
     internal static int? ChannelsLimit = null;
 
+    /// <summary>For tests: a device whose callbacks are not counted, as one that never asks for sound.</summary>
+    internal static string? DeafDevice = null;
+
     /// <summary>Channels the device is sent: the source's, or one where the device has only one - a
     /// one-eared headset, or a Bluetooth one in its hands-free mode - the two sides mixed into it.</summary>
     private volatile int _deviceChannels;
@@ -96,25 +99,28 @@ public sealed class PortAudioOutput : IAudioOutput
     /// <summary>The device the stream plays on.</summary>
     public string DeviceName { get; private set; } = "";
 
+    /// <summary>Where in the list of devices to try the stream is open: the next one is tried if
+    /// this one never asks for sound.</summary>
+    private int _candidateAt;
+
     /// <summary>
-    /// A stream on the default output device as PortAudio knows it now, sent no more channels than
-    /// it has; if it will not open, again with more time in hand; and if it still will not, on
-    /// Windows' sound mapper, which takes any format and converts it for the default device. One
-    /// that opens nowhere says which device it was and why, in PortAudio's words.
+    /// A stream on the output device as PortAudio knows it now - the first of <see cref="Candidates"/>
+    /// from <paramref name="from"/> on that opens - sent no more channels than it has, and tried
+    /// again with more time in hand before the next is tried. One that opens nowhere says which
+    /// device it was and why, in PortAudio's words.
     /// </summary>
-    private PortAudioSharp.Stream OpenStream()
+    private PortAudioSharp.Stream OpenStream(int from = 0)
     {
         int device = DeviceOverride?.Invoke() ?? Pa.DefaultOutputDevice;
         if (device == Pa.NoDevice)
             throw new InvalidOperationException("There is no audio output device.");
 
+        var candidates = Candidates(device);
         PortAudioException? first = null;
         string firstName = "";
-        foreach (int candidate in Candidates(device))
+        for (int k = from; k < candidates.Count; k++)
         {
-            var info = Pa.GetDeviceInfo(candidate);
-            if (info.maxOutputChannels <= 0)
-                continue;
+            var info = Pa.GetDeviceInfo(candidates[k]);
             int channels = Math.Clamp(Math.Min(_source.WaveFormat.Channels, ChannelsLimit ?? int.MaxValue), 1, info.maxOutputChannels);
             double wanted = _latencyMs / 1000.0;
             foreach (double latency in (ReadOnlySpan<double>)[Math.Max(info.defaultLowOutputLatency, wanted), Math.Max(info.defaultHighOutputLatency, wanted * 2)])
@@ -122,10 +128,12 @@ public sealed class PortAudioOutput : IAudioOutput
                 try
                 {
                     _deviceChannels = channels;
-                    var stream = OpenOn(candidate, channels, latency);
+                    var stream = OpenOn(candidates[k], channels, latency);
                     DeviceName = info.name;
-                    if (first is not null)
-                        Trace.WriteLine($"MagPlaySID: {firstName} would not open ({Pa.GetErrorText(first.ErrorCode)}); playing on {info.name}, {channels} channel(s).");
+                    _candidateAt = k;
+                    Say(first is null
+                        ? $"playing on {info.name}, {channels} channel(s)"
+                        : $"{firstName} would not open ({Pa.GetErrorText(first.ErrorCode)}); playing on {info.name}, {channels} channel(s)");
                     return stream;
                 }
                 catch (PortAudioException ex)
@@ -135,17 +143,131 @@ public sealed class PortAudioOutput : IAudioOutput
                 }
             }
         }
-        var code = first?.ErrorCode ?? ErrorCode.InvalidDevice;
-        throw new PortAudioException(code, $"{(firstName.Length > 0 ? firstName : "the output device")} would not open - {Pa.GetErrorText(code)}", first);
+        if (first is null)
+            throw new InvalidOperationException("No other output device would play.");
+        var code = first.ErrorCode;
+        var failure = new PortAudioException(code, $"{firstName} would not open - {Pa.GetErrorText(code)}", first);
+        Say(failure.Message);
+        throw failure;
     }
 
-    /// <summary>The device asked for, then - on Windows - the sound mapper.</summary>
-    private static IEnumerable<int> Candidates(int device)
+    /// <summary>
+    /// The devices to try, in turn: the one asked for, then - on Windows - the sound mapper, which
+    /// takes any format and converts it for the default device. On Linux PipeWire's and
+    /// PulseAudio's own ALSA devices come first, where they are: ALSA's default reaches them only
+    /// through its configuration, and a desktop sound server is what other programs play through.
+    /// </summary>
+    private static List<int> Candidates(int device)
     {
-        yield return device;
+        var all = new List<(int Index, string Name)>();
         for (int d = 0; d < Pa.DeviceCount; d++)
-            if (d != device && Pa.GetDeviceInfo(d).name.StartsWith("Microsoft Sound Mapper", StringComparison.Ordinal) && Pa.GetDeviceInfo(d).maxOutputChannels > 0)
-                yield return d;
+        {
+            var info = Pa.GetDeviceInfo(d);
+            if (info.maxOutputChannels > 0)
+                all.Add((d, info.name));
+        }
+        var order = new List<int>();
+        void Add(int d)
+        {
+            if (d >= 0 && !order.Contains(d) && all.Any(a => a.Index == d))
+                order.Add(d);
+        }
+        int Named(string name) => all.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)) is { Name: not null } found ? found.Index : -1;
+        if (OperatingSystem.IsLinux() && DeviceOverride is null)
+        {
+            Add(Named("pipewire"));
+            Add(Named("pulse"));
+        }
+        Add(device);
+        if (OperatingSystem.IsLinux())
+        {
+            Add(Named("default"));
+            Add(Named("sysdefault"));
+        }
+        foreach (var (index, name) in all)
+            if (name.StartsWith("Microsoft Sound Mapper", StringComparison.Ordinal))
+                Add(index);
+        return order;
+    }
+
+    /// <summary>What happened to the sound, for anyone looking: the trace, and on Linux and macOS
+    /// the terminal the app was started from - where a report of no sound can be copied from.</summary>
+    private static void Say(string message)
+    {
+        Trace.WriteLine($"MagPlaySID: {message}");
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                Console.Error.WriteLine($"MagPlaySID: {message}");
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    /// <summary>Callbacks the stream has made since it was last started.</summary>
+    private long _callbacks;
+
+    /// <summary>Counts the stream's starts, so a check for one long gone does nothing.</summary>
+    private int _generation;
+
+    /// <summary>How long a started stream may go without asking for sound before the next device is tried.</summary>
+    private static readonly TimeSpan SilentDevice = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>The stream started, and checked a moment later for having asked for sound at all. Under <see cref="InitLock"/>.</summary>
+    private void StartStream()
+    {
+        Interlocked.Exchange(ref _callbacks, 0);
+        _stream.Start();
+        _started = true;
+        int generation = ++_generation;
+        _ = Task.Delay(SilentDevice).ContinueWith(_ => CheckAsking(generation), TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// A stream that opened and started but has never asked for sound - a device a sound server
+    /// holds, say, which takes the stream and then plays nothing - closed, and the next device
+    /// tried; with none left, the output stops and says why, rather than the tune standing still
+    /// with no word.
+    /// </summary>
+    private void CheckAsking(int generation)
+    {
+        Exception? stopped = null;
+        lock (InitLock)
+        {
+            if (_disposed || generation != _generation || !_started || _stream is null || Interlocked.Read(ref _callbacks) > 0)
+                return;
+            string silent = DeviceName;
+            _moving = true;
+            try
+            {
+                _stream.Abort();
+            }
+            catch (PortAudioException)
+            {
+            }
+            _stream.Dispose();
+            _started = false;
+            try
+            {
+                _stream = OpenStream(_candidateAt + 1);
+                Say($"{silent} took the stream but never asked for sound; trying {DeviceName}");
+                _moving = false;
+                StartStream();
+            }
+            catch (Exception ex) when (ex is PortAudioException or InvalidOperationException)
+            {
+                _stream = null!;
+                _moving = false;
+                _failure = new IOException($"{silent} took the stream but never asked for any sound, and no other output device would play", ex);
+                Say(_failure.Message);
+                stopped = _failure;
+            }
+        }
+        if (stopped is not null)
+            Stopped?.Invoke(stopped);
     }
 
     private PortAudioSharp.Stream OpenOn(int device, int channels, double latency)
@@ -225,10 +347,7 @@ public sealed class PortAudioOutput : IAudioOutput
                 {
                     output._stream = output.OpenStream();
                     if (playing[i])
-                    {
-                        output._stream.Start();
-                        output._started = true;
-                    }
+                        output.StartStream();
                 }
                 catch (Exception ex) when (ex is PortAudioException or InvalidOperationException)
                 {
@@ -253,8 +372,7 @@ public sealed class PortAudioOutput : IAudioOutput
             if (_started || _stream is null)
                 return;
 
-            _stream.Start();
-            _started = true;
+            StartStream();
         }
     }
 
@@ -300,6 +418,8 @@ public sealed class PortAudioOutput : IAudioOutput
         // The sound first: the device's thread raised above the window's and the background's on its
         // first call, so neither keeps it waiting till the device runs dry - only raised, as PortAudio
         // may have set it higher already. Where the system will not, it stays as it is.
+        if (DeafDevice is null || DeafDevice != DeviceName)
+            Interlocked.Increment(ref _callbacks);
         if (!_prioritised)
         {
             _prioritised = true;
