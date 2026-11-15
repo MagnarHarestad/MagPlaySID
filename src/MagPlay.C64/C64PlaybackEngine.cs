@@ -36,6 +36,23 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// clip where one would not: by chip count.</summary>
     private static readonly double[] MixScale = [0, 1, 0.7, 0.55];
 
+    /// <summary>What the sum of <paramref name="chips"/> chips is scaled by: the three-chip mix as it
+    /// always was, and past it one over the square root of their number - as many chips again sound
+    /// about as loud, not twice.</summary>
+    private static double Scale(int chips) => chips < MixScale.Length ? MixScale[chips] : 1 / Math.Sqrt(chips);
+
+    /// <summary>The most SID chips a tune plays on: the v5 format's fifteen.</summary>
+    public const int MostChips = 15;
+
+    /// <summary>For a tune heard in stereo, how much of each chip goes left and right: a chip to one
+    /// side at the square root of two there, so a chip on each side is about as loud as the two in
+    /// the middle - and every chip in the middle is the mono mix exactly.</summary>
+    private readonly double[] _toLeft = [], _toRight = [];
+
+    /// <summary>The right channel of the samples made and not yet handed over, for a stereo tune;
+    /// <see cref="_pending"/> then holds the left.</summary>
+    private short[] _pendingRight = [];
+
     /// <summary>How loud a fast-forward is: quieter than the tune, as tape winding on is.</summary>
     private const float FastForwardVolume = 0.3f;
 
@@ -93,7 +110,25 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// <param name="song">The subtune, counting from 1.</param>
     public C64PlaybackEngine(SidFile file, int song)
     {
-        int chips = 1 + Math.Min(2, file.ExtraSids.Count);
+        int chips = 1 + Math.Min(MostChips - 1, file.ExtraSids.Count);
+        IsStereo = chips > 1 && file.IsStereo;
+        if (IsStereo)
+        {
+            _toLeft = new double[chips];
+            _toRight = new double[chips];
+            for (int chip = 0; chip < chips; chip++)
+            {
+                var pan = chip < file.Panning.Count ? file.Panning[chip] : SidPan.Center;
+                (_toLeft[chip], _toRight[chip]) = pan switch
+                {
+                    SidPan.Left => (Math.Sqrt(2), 0),
+                    SidPan.Right => (0, Math.Sqrt(2)),
+                    _ => (1.0, 1.0),
+                };
+            }
+            _pendingRight = new short[_pending.Length];
+        }
+        WaveFormat = new(SampleRate, 16, IsStereo ? 2 : 1);
         _chips = new SidChip[chips];
         _registers = new int[chips][];
         _voiceStates = new int[3 * chips][];
@@ -179,7 +214,12 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// for, so a turn of the knob does not click. Below zero until the first.</summary>
     private float _applied = -1f;
 
-    public WaveFormat WaveFormat { get; } = new(SampleRate, 16, 1);
+    /// <summary>16-bit at <see cref="SampleRate"/>: mono, or stereo for a tune whose header places
+    /// its SIDs apart (<see cref="IsStereo"/>), left and right in turn.</summary>
+    public WaveFormat WaveFormat { get; }
+
+    /// <summary>Whether the sound is stereo: a v5 tune with SIDs to the left and the right.</summary>
+    public bool IsStereo { get; }
 
     /// <summary>The tune's own sample the device is playing at its sample <paramref name="device"/>:
     /// the samples of silence a pause gave the device are not the tune's, so a view following this
@@ -243,7 +283,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// <summary>The C64's cycle at sample <paramref name="sample"/>.</summary>
     public long CycleAt(double sample) => StartCycle + (long)(sample * ClockHz / SampleRate);
 
-    /// <summary>The SID chips the tune plays on: 1, or 2 or 3 for a 2SID or 3SID tune.</summary>
+    /// <summary>The SID chips the tune plays on: 1, or up to 15 for a multi-SID tune.</summary>
     public int Chips => _chips.Length;
 
     /// <summary>A voice muted: 0-2 the first chip's, 3-5 the second's, 6-8 the third's.</summary>
@@ -255,6 +295,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
     public int Read(byte[] buffer, int offset, int count)
     {
+        if (IsStereo)
+            return ReadStereo(buffer, offset, count);
         int wanted = count / 2;
         int rate = Paused || Failure is not null ? 0 : Affordable(_speed);
         _playing = rate;
@@ -330,6 +372,91 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         return wanted * 2;
     }
 
+    /// <summary><see cref="Read"/> for a stereo tune: frames of left and right, made and handed over
+    /// as the mono one's samples are.</summary>
+    private int ReadStereo(byte[] buffer, int offset, int count)
+    {
+        int wanted = count / 4;
+        int rate = Paused || Failure is not null ? 0 : Affordable(_speed);
+        _playing = rate;
+        lock (_turns)
+        {
+            if (_turns[^1].Rate != rate)
+                _turns.Add((_device, _tuneSample, rate));
+            if (_turns.Count > 256)
+                _turns.RemoveRange(0, _turns.Count - 256);
+            _device += wanted;
+            _tuneSample += (long)wanted * rate;
+        }
+
+        if (rate == 0)
+        {
+            Array.Clear(buffer, offset, wanted * 4);
+            return wanted * 4;
+        }
+
+        int needed = wanted * rate;
+        int before = _pendingCount;
+        long started = Stopwatch.GetTimestamp();
+        try
+        {
+            while (_pendingCount < needed)
+            {
+                _tune.Run(Slice);
+                ClockTo(_tune.Computer.Cycle);
+            }
+        }
+        catch (Exception ex)
+        {
+            Failure = ex.Message;
+        }
+        if (_pendingCount > before)
+        {
+            double each = Stopwatch.GetElapsedTime(started).TotalSeconds / (_pendingCount - before);
+            _secondsPerSample = _secondsPerSample == 0 ? each : _secondsPerSample + ((each - _secondsPerSample) * 0.1);
+        }
+
+        int ready = Math.Min(wanted, _pendingCount / rate);
+        var output = MemoryMarshal.Cast<byte, short>(buffer.AsSpan(offset, wanted * 4));
+        for (int i = 0; i < ready; i++)
+        {
+            if (rate == 1)
+            {
+                output[2 * i] = _pending[i];
+                output[(2 * i) + 1] = _pendingRight[i];
+                continue;
+            }
+            int left = 0, right = 0;
+            for (int j = 0; j < rate; j++)
+            {
+                left += _pending[(i * rate) + j];
+                right += _pendingRight[(i * rate) + j];
+            }
+            output[2 * i] = (short)(left * FastForwardVolume / rate);
+            output[(2 * i) + 1] = (short)(right * FastForwardVolume / rate);
+        }
+        float volume = _volume;
+        float gain = _applied < 0 ? volume : _applied;
+        if (gain != 1f || volume != 1f)
+        {
+            float step = (volume - gain) / Math.Max(1, ready);
+            for (int i = 0; i < ready; i++)
+            {
+                gain += step;
+                output[2 * i] = (short)(output[2 * i] * gain);
+                output[(2 * i) + 1] = (short)(output[(2 * i) + 1] * gain);
+            }
+        }
+        _applied = volume;
+        output[(ready * 2)..].Clear();
+
+        int used = ready * rate;
+        Array.Copy(_pending, used, _pending, 0, _pendingCount - used);
+        Array.Copy(_pendingRight, used, _pendingRight, 0, _pendingCount - used);
+        _pendingCount -= used;
+        return wanted * 4;
+    }
+
     /// <summary>The speed the tune can play at here: <paramref name="speed"/>, or as many of its
     /// samples to each of the device's as this computer makes in <see cref="Headroom"/> of the time
     /// a device's sample lasts - a 2SID tune, or a slower computer, tops out lower.</summary>
@@ -395,7 +522,11 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         while (cycles > 0)
         {
             if (_pendingCount == _pending.Length)
+            {
                 Array.Resize(ref _pending, _pending.Length * 2);
+                if (IsStereo)
+                    Array.Resize(ref _pendingRight, _pending.Length);
+            }
             int before = cycles;
             int sampled = _chips[0].ClockAndSample(ref cycles, _pending, _pendingCount, 1);
             if (_chips.Length > 1)
@@ -404,7 +535,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
                 break;
             if (_silent)
                 continue;
-            Capture(_pending[_pendingCount]);
+            Capture(IsStereo ? (short)((_pending[_pendingCount] + _pendingRight[_pendingCount]) / 2) : _pending[_pendingCount]);
             _pendingCount++;
         }
     }
@@ -413,6 +544,11 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     /// first's, the sum scaled for the number of chips.</summary>
     private void MixIn(int cycles, int sampled)
     {
+        if (IsStereo)
+        {
+            MixInStereo(cycles, sampled);
+            return;
+        }
         int sum = sampled > 0 ? _pending[_pendingCount] : 0;
         for (int chip = 1; chip < _chips.Length; chip++)
         {
@@ -421,7 +557,30 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
                 sum += _extraSample[0];
         }
         if (sampled > 0)
-            _pending[_pendingCount] = (short)Math.Clamp(sum * MixScale[_chips.Length], short.MinValue, short.MaxValue);
+            _pending[_pendingCount] = (short)Math.Clamp(sum * Scale(_chips.Length), short.MinValue, short.MaxValue);
+    }
+
+    /// <summary><see cref="MixIn"/> for a stereo tune: each chip's sample to the left and right as its
+    /// place has it, the first chip's too - the left into <see cref="_pending"/>, the right beside it.</summary>
+    private void MixInStereo(int cycles, int sampled)
+    {
+        double first = sampled > 0 ? _pending[_pendingCount] : 0;
+        double left = first * _toLeft[0], right = first * _toRight[0];
+        for (int chip = 1; chip < _chips.Length; chip++)
+        {
+            int run = cycles;
+            if (_chips[chip].ClockAndSample(ref run, _extraSample, 0, 1) > 0)
+            {
+                left += _extraSample[0] * _toLeft[chip];
+                right += _extraSample[0] * _toRight[chip];
+            }
+        }
+        if (sampled > 0)
+        {
+            double scale = Scale(_chips.Length);
+            _pending[_pendingCount] = (short)Math.Clamp(left * scale, short.MinValue, short.MaxValue);
+            _pendingRight[_pendingCount] = (short)Math.Clamp(right * scale, short.MinValue, short.MaxValue);
+        }
     }
 
     private void Capture(short mix)

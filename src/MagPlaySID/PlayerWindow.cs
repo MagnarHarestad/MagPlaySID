@@ -825,7 +825,9 @@ internal sealed class PlayerWindow : Window
             {
                 string? name = _recording is not null ? (i == 0 ? "LEFT" : "RIGHT")
                     : _module is not null ? $"CH {i + 1}" : voices > 3 ? $"SID{i / 3 + 1} V{i % 3 + 1}" : null;
-                var scope = new VoiceScopeView(i, name, shortName: _module is not null ? $"{i + 1}" : null) { TextScale = TextScale };
+                // Narrow, a module's channel is its number, a multi-SID tune's voice its SID's and its own: 4.2.
+                string? shortName = _module is not null ? $"{i + 1}" : _recording is null && voices > 3 ? $"{(i / 3) + 1}.{(i % 3) + 1}" : null;
+                var scope = new VoiceScopeView(i, name, shortName: shortName) { TextScale = TextScale };
                 scope.MuteToggled += (voice, muted) =>
                 {
                     _muted[voice] = muted;
@@ -1472,7 +1474,9 @@ internal sealed class PlayerWindow : Window
         if (file.IsRsid)
             parts.Add("RSID");
         if (file.ExtraSids.Count > 0)
-            parts.Add($"{1 + file.ExtraSids.Count}SID");
+            parts.Add($"{1 + file.ExtraSids.Count}SID{(file.IsStereo ? " stereo" : "")}");
+        if (file.RequiresFmOpl)
+            parts.Add("FM OPL not heard");
         if (file.UsesCiaTimer(_song))
             parts.Add("CIA timer");
         if (file.Songs > 1)
@@ -1869,7 +1873,7 @@ internal sealed class PlayerWindow : Window
         thread.Start();
     }
 
-    /// <summary>The song's length: the user's own, then the one measured, then HVSC's for a song the
+    /// <summary>The song's length: the user's own, then the one measured, then a v5 file's own, then HVSC's for a song the
     /// app cannot measure - kept for the playlist, and said in the status where it was not measured.</summary>
     private void ChooseLength()
     {
@@ -1885,6 +1889,8 @@ internal sealed class PlayerWindow : Window
             (_length, from) = (Given(own), "the length is the one you set");
         else if (_measured is not null)
             _length = _measured;
+        else if (_file?.SongLengths is { } stored && _song >= 1 && _song <= stored.Count && stored[_song - 1] is { } given)
+            (_length, from) = (Given(given), "the length is the one the file gives - it could not be measured");
         else if (SongLengths.Hvsc(hvsc, _song) is { } listed)
             (_length, from) = (Given(listed), "the length is HVSC's - it could not be measured");
         else

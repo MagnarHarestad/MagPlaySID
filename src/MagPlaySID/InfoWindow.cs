@@ -120,13 +120,19 @@ internal sealed class InfoSheet
             new("Format", $"{(file.IsRsid ? "RSID" : "PSID")} version {file.Version}" +
                           (file.IsBasic ? " - a BASIC program" : file.IsRsid ? " - runs on a real C64's interrupts" : "")),
             new("Machine", ((flags >> 2) & 3) switch { 1 => "PAL", 2 => "NTSC", 3 => "PAL or NTSC", _ => "Not said - played as PAL" }),
-            new("SID", Model((flags >> 4) & 3)),
+            new("SID", Model((flags >> 4) & 3) + Placed(file, 0)),
         };
         for (int i = 0; i < file.ExtraSids.Count; i++)
         {
-            int shift = i == 0 ? 6 : 8;
-            c64.Add(new InfoRow($"SID {i + 2}", $"${file.ExtraSids[i]:X4}, {Model((flags >> shift) & 3, sameAsFirst: true)}"));
+            // A v5 header gives every SID the first one's model; v3 and v4 name the second's and third's.
+            string model = file.Version >= 5 ? Model((flags >> 4) & 3) : Model((flags >> (i == 0 ? 6 : 8)) & 3, sameAsFirst: true);
+            c64.Add(new InfoRow($"SID {i + 2}", $"${file.ExtraSids[i]:X4}, {model}{Placed(file, i + 1)}"));
         }
+        if (file.RequiresFmOpl)
+            c64.Add(new InfoRow("FM OPL", "Also plays an FM chip - an SFX Sound Expander or FM-YAM - which MagPlaySID does not have: only its SIDs are heard"));
+        if (file.SongLengths is { } lengths)
+            c64.Add(new InfoRow("Lengths in the file", string.Join(", ", lengths.Select((length, i) =>
+                (Songs > 1 ? $"{i + 1}: " : "") + (length is { } l ? l.ToString(l.TotalHours >= 1 ? @"h\:mm\:ss\.fff" : @"m\:ss\.fff", CultureInfo.InvariantCulture) : "?")))));
         int end = file.LoadAddress + file.Data.Length - 1;
         c64.Add(new InfoRow("Memory", $"${file.LoadAddress:X4}-${end:X4}, {file.Data.Length.ToString("N0", CultureInfo.InvariantCulture)} bytes"));
         if (!file.IsBasic)
@@ -144,6 +150,14 @@ internal sealed class InfoSheet
         }
         Sections.Add(new InfoSection("On the C64", c64));
     }
+
+    /// <summary>Where a SID is heard, for a tune whose SIDs are heard apart; nothing otherwise.</summary>
+    private static string Placed(SidFile file, int chip) => !file.IsStereo || chip >= file.Panning.Count ? "" : file.Panning[chip] switch
+    {
+        SidPan.Left => ", heard to the left",
+        SidPan.Right => ", heard to the right",
+        _ => ", heard in the middle",
+    };
 
     private static string Model(int bits, bool sameAsFirst = false) => bits switch
     {

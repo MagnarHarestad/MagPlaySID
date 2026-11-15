@@ -64,8 +64,8 @@ public sealed class C64 : IMemoryBus
     /// (Legend of Kage) - until it fades, after about 7,400 cycles on the 6581, as reSID and VICE
     /// have it; after that, 0.
     /// </summary>
-    private readonly byte[] _busValue = new byte[4];
-    private readonly long[] _busSince = new long[4];
+    private readonly byte[] _busValue = new byte[16];
+    private readonly long[] _busSince = new long[16];
     private const long BusHolds = 0x1D00;
     private readonly List<TimedWrite> _sidWrites = [];
     private readonly int[] _extraSids;

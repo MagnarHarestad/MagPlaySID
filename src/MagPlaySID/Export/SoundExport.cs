@@ -102,8 +102,9 @@ internal static class SoundExport
     /// <summary>What a module's sound, -1 to 1, is multiplied by into 16 bits: as the window plays it.</summary>
     private const float ModuleLoudness = 30000;
 
-    /// <summary>The song's samples, 16-bit mono at the engine's rate; <paramref name="progress"/>
-    /// told how far, 0-1, as it goes.</summary>
+    /// <summary>The song's samples, 16-bit at the engine's rate - mono, or left and right in turn for
+    /// a tune whose SIDs are heard apart (<see cref="Channels"/>); <paramref name="progress"/> told
+    /// how far, 0-1, as it goes.</summary>
     public static short[] Render(SidFile file, int song, TimeSpan length, bool fadeOut, IReadOnlyList<bool> muted,
                                  IProgress<double>? progress = null, CancellationToken cancel = default)
     {
@@ -112,10 +113,11 @@ internal static class SoundExport
             engine.SetVoiceMuted(voice, muted[voice]);
 
         int rate = C64PlaybackEngine.SampleRate;
+        int channels = engine.WaveFormat.Channels;
         int heard = (int)Math.Max(rate, length.TotalSeconds * rate);
         int fade = fadeOut ? (int)(FadeSeconds * rate) : 0;
-        var samples = new short[heard + fade];
-        var buffer = new byte[rate / 10 * 2];
+        var samples = new short[(heard + fade) * channels];
+        var buffer = new byte[rate / 10 * 2 * channels];
         for (int at = 0; at < samples.Length;)
         {
             cancel.ThrowIfCancellationRequested();
@@ -130,13 +132,17 @@ internal static class SoundExport
         for (int i = 0; i < fade; i++)
         {
             double left = 1 - ((i + 1) / (double)fade);
-            samples[heard + i] = (short)(samples[heard + i] * left * left);
+            for (int c = 0; c < channels; c++)
+                samples[((heard + i) * channels) + c] = (short)(samples[((heard + i) * channels) + c] * left * left);
         }
         return samples;
     }
 
+    /// <summary>The channels a tune's sound is rendered in: two for a v5 tune whose SIDs are heard apart.</summary>
+    public static int Channels(SidFile file) => file.IsStereo ? 2 : 1;
+
     public static void Write(Stream output, SoundFormat format, ReadOnlySpan<short> samples, SidFile file, int song) =>
-        Write(output, format, samples, C64PlaybackEngine.SampleRate, 1, Tags(file, song));
+        Write(output, format, samples, C64PlaybackEngine.SampleRate, Channels(file), Tags(file, song));
 
     /// <summary>A module's stereo samples from <see cref="Render(ITrackerModule, TimeSpan, bool, IReadOnlyList{bool}, double, IProgress{double}?, CancellationToken)"/>,
     /// its title as the file's.</summary>

@@ -61,7 +61,7 @@ internal sealed class C64Tune(C64PlaybackEngine engine) : ITunePlayback
     public WaveFormat WaveFormat => Engine.WaveFormat;
 
     /// <summary>The tune brought up to the loudness all .sid tunes play at - see <see cref="TuneLoudness"/>.</summary>
-    private readonly PeakLimiter _limiter = TuneLoudness.Limiter(1, C64PlaybackEngine.SampleRate, TuneLoudness.SidGainDb);
+    private readonly PeakLimiter _limiter = TuneLoudness.Limiter(engine.WaveFormat.Channels, C64PlaybackEngine.SampleRate, TuneLoudness.SidGainDb);
     private float[] _limited = [];
 
     public int Read(byte[] buffer, int offset, int count)
