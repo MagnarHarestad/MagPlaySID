@@ -139,6 +139,9 @@ internal sealed class PlaylistStrip : Border
     /// <summary>A playlist was made or a folder opened: the strip should be shown, if it is not.</summary>
     public event Action? ShowRequested;
 
+    /// <summary>A playlist was deleted: nothing more is played from it.</summary>
+    public event Action<Playlist>? Deleted;
+
     /// <summary>Whether there is any playlist.</summary>
     public bool HasPlaylists => _lists.Count > 0;
 
@@ -1365,9 +1368,18 @@ internal sealed class PlaylistStrip : Border
         if (!await MessageWindow.AskAsync(_owner, "Delete playlist",
                 $"Delete the playlist \"{playlist.Name}\"? Its tunes stay where they are; only the list goes.", "Delete", "Cancel"))
             return;
+        Delete(playlist);
+    }
+
+    /// <summary>The playlist gone, from the strip and from what is kept; nothing played from it after.</summary>
+    private void Delete(Playlist playlist)
+    {
         _favourites.Remove(playlist);
         _lists.Remove(playlist);
         Favourites.Save(_favourites);
+        if (_playingIn == playlist)
+            _playingIn = null;
+        Deleted?.Invoke(playlist);
         if (_listBox.SelectedItem is null && _lists.Count > 0)
             _listBox.SelectedIndex = 0;
         ShowTunes();

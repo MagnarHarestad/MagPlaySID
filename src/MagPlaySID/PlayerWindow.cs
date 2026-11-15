@@ -213,6 +213,7 @@ internal sealed class PlayerWindow : Window
             _foundRun = run;
             PlayFromList(run[at].List, run[at].Tune);
         };
+        _strip.Deleted += LeaveDeleted;
         _strip.RepeatChosen += path =>
         {
             // The tune playing set to repeat from its row: counted from the time playing now, as
@@ -1226,6 +1227,27 @@ internal sealed class PlayerWindow : Window
                     return run[i - 1];
         }
         return playlist.Before(tune) is { } before ? (playlist, before) : null;
+    }
+
+    /// <summary>A playlist deleted: the tune playing from it plays on, on its own - nothing follows
+    /// it from the list that is gone - and a search's hits in it are not played on to.</summary>
+    private void LeaveDeleted(Playlist playlist)
+    {
+        if (_foundRun is { } run && run.Any(h => h.List == playlist))
+        {
+            var kept = run.Where(h => h.List != playlist).ToList();
+            _foundRun = kept.Count > 0 ? kept : null;
+        }
+        if (_queue == playlist)
+        {
+            _queue = null;
+            _queueTune = null;
+            _finished = false;
+            _foundRun = null;
+            _strip.ShowPlaying(null, null);
+            RememberPlace();
+        }
+        ShowNextTune();
     }
 
     private void PlayNextInList()
