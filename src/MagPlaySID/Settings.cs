@@ -72,6 +72,19 @@ internal sealed class Settings
 
     public double TunesInto { get; set; }
 
+    /// <summary>The window's size when it was last closed - not maximized, in device-independent
+    /// pixels; 0 before it has been kept - and where on the screens it was, in pixels.</summary>
+    public double WindowWidth { get; set; }
+
+    public double WindowHeight { get; set; }
+
+    public int? WindowX { get; set; }
+
+    public int? WindowY { get; set; }
+
+    /// <summary>Whether the window was maximized when it was closed: it opens so again.</summary>
+    public bool WindowMaximized { get; set; }
+
     public static Settings Load()
     {
         try

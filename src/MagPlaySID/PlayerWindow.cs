@@ -195,12 +195,8 @@ internal sealed class PlayerWindow : Window
         Title = UpdateCheck.Product;
         if (typeof(PlayerWindow).Assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)) is { } icon)
             Icon = new WindowIcon(typeof(PlayerWindow).Assembly.GetManifestResourceStream(icon)!);
-        Width = 1180;
-        Height = 900;
-        MinWidth = 900;
-        MinHeight = 600;
         Background = SidPlayerPalette.Brush(SidPlayerPalette.Background);
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        PlaceOnScreen();
 
         _strip = new PlaylistStrip(this) { PlaylistsHeight = _settings.PlaylistsHeight };
         _strip.Play += (playlist, tune) =>
@@ -344,6 +340,7 @@ internal sealed class PlayerWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            KeepPlace();
             _settings.LastShown = _strip.ShownName;
             _settings.Save();
             _timer.Stop();
@@ -1227,6 +1224,81 @@ internal sealed class PlayerWindow : Window
                     return run[i - 1];
         }
         return playlist.Before(tune) is { } before ? (playlist, before) : null;
+    }
+
+    /// <summary>The window's size and place when it was not maximized or minimized, kept as it
+    /// changes: what it opens with next time, maximized or not.</summary>
+    private Size _normalSize;
+    private PixelPoint? _normalAt;
+    private bool _maximized;
+
+    /// <summary>The window as it was left - or its usual size, centred - made to fit the screen it
+    /// opens on; and set right again once open, its frame known, so the title bar is on the screen.</summary>
+    private void PlaceOnScreen()
+    {
+        Size? keptSize = _settings.WindowWidth > 0 && _settings.WindowHeight > 0 ? new Size(_settings.WindowWidth, _settings.WindowHeight) : null;
+        PixelPoint? kept = _settings.WindowX is { } x && _settings.WindowY is { } y ? new PixelPoint(x, y) : null;
+        if (Screens is { } screens && WindowPlacement.ScreenFor(screens, kept) is { } screen)
+        {
+            var (size, at, least) = WindowPlacement.Fit(screen.WorkingArea, screen.Scaling, keptSize, kept);
+            (MinWidth, MinHeight, Width, Height) = (least.Width, least.Height, size.Width, size.Height);
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Position = at;
+            _normalAt = at;
+        }
+        else
+        {
+            (MinWidth, MinHeight) = (WindowPlacement.LeastWidth, WindowPlacement.LeastHeight);
+            Width = keptSize?.Width ?? WindowPlacement.UsualWidth;
+            Height = keptSize?.Height ?? WindowPlacement.UsualHeight;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+        _normalSize = new Size(Width, Height);
+        if (_settings.WindowMaximized)
+        {
+            WindowState = WindowState.Maximized;
+            _maximized = true;
+        }
+
+        PositionChanged += (_, e) =>
+        {
+            if (WindowState == WindowState.Normal)
+                _normalAt = e.Point;
+        };
+        Resized += (_, e) =>
+        {
+            if (WindowState == WindowState.Normal)
+                _normalSize = e.ClientSize;
+        };
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == WindowStateProperty && WindowState != WindowState.Minimized)
+                _maximized = WindowState is WindowState.Maximized or WindowState.FullScreen;
+        };
+        Opened += (_, _) => KeepOnScreen();
+    }
+
+    /// <summary>The open window pulled onto its screen's working area, by its real frame: shorter
+    /// when it is taller than the screen, and moved so its title bar and edges can be reached.</summary>
+    private void KeepOnScreen()
+    {
+        if (WindowState != WindowState.Normal || FrameSize is not { } frame || Screens.ScreenFromWindow(this) is not { } screen)
+            return;
+        if (WindowPlacement.Correct(screen.WorkingArea, screen.Scaling, ClientSize, frame, Position) is { } better)
+        {
+            (Width, Height) = (better.Size.Width, better.Size.Height);
+            Position = better.Position;
+        }
+    }
+
+    /// <summary>The window's size, place and whether it was maximized, kept for next time.</summary>
+    private void KeepPlace()
+    {
+        if (_normalSize is { Width: > 0, Height: > 0 } size)
+            (_settings.WindowWidth, _settings.WindowHeight) = (Math.Round(size.Width), Math.Round(size.Height));
+        if (_normalAt is { } at)
+            (_settings.WindowX, _settings.WindowY) = (at.X, at.Y);
+        _settings.WindowMaximized = _maximized;
     }
 
     /// <summary>A playlist deleted: the tune playing from it plays on, on its own - nothing follows
