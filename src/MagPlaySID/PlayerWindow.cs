@@ -384,6 +384,8 @@ internal sealed class PlayerWindow : Window
         // The piano's stream opened in the background, a moment after the window: opened at the
         // first key struck, it held the window half a second.
         Opened += (_, _) => DispatcherTimer.RunOnce(OpenPianoSoon, TimeSpan.FromSeconds(2));
+        // The thread that draws the window a step above other programs' too, as the window's own is.
+        Opened += (_, _) => WindowPriority.RaiseDrawing(this);
     }
 
     private Control BuildLayout()

@@ -16,6 +16,8 @@ internal static class Program
         // No full collection that stops every thread while the music plays, when one can be done
         // alongside: a stop of the sound's thread is a gap in the sound.
         System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
+        // The window's thread a step above other programs', so one spinning every core does not hold it still.
+        WindowPriority.Raise();
         AudioOutput.Open = PortAudioOutput.Open;
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
