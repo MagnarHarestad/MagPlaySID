@@ -92,6 +92,18 @@ internal sealed class Settings
     /// <summary>Whether the window was maximized when it was closed: it opens so again.</summary>
     public bool WindowMaximized { get; set; }
 
+    /// <summary>The C64Music folder of the user's own copy of HVSC, used before HVSC online; null for none.</summary>
+    public string? HvscArchive { get; set; }
+
+    /// <summary>Whether HVSC's entry is left out above the playlists - for those who play no .sid.</summary>
+    public bool HideHvsc { get; set; }
+
+    /// <summary>Whether Modland's entry is left out above the playlists - for those who play no module.</summary>
+    public bool HideModland { get; set; }
+
+    /// <summary>Whether MagPlaySID tells, as it starts, that a newer HVSC is out than the user's copy.</summary>
+    public bool TellNewHvsc { get; set; } = true;
+
     public static Settings Load()
     {
         try

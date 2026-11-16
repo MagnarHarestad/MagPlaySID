@@ -202,7 +202,11 @@ internal sealed class PlayerWindow : Window
         Background = SidPlayerPalette.Brush(SidPlayerPalette.Background);
         PlaceOnScreen();
 
+        // The user's own copy of HVSC, when it is there: a drive taken out leaves it kept, unused.
+        HvscArchive.Folder = _settings.HvscArchive is { } archive ? HvscArchive.Find(archive) : null;
         _strip = new PlaylistStrip(this) { PlaylistsHeight = _settings.PlaylistsHeight };
+        _strip.ShowCollectionRow(MusicSource.Hvsc, !_settings.HideHvsc);
+        _strip.ShowCollectionRow(MusicSource.Modland, !_settings.HideModland);
         _strip.Play += (playlist, tune) =>
         {
             _foundRun = null;
@@ -329,7 +333,9 @@ internal sealed class PlayerWindow : Window
         AddHandler(DragDrop.DropEvent, (_, e) =>
         {
             var dropped = (e.DataTransfer.TryGetFiles() ?? []).Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
-            if (dropped is [var one] && File.Exists(one))
+            if (dropped.Count > 0 && dropped.All(M3u.IsPlaylistName))
+                _ = OpenM3uAsync(dropped);
+            else if (dropped is [var one] && File.Exists(one))
                 PlayFile(one);
             else if (dropped.Count > 0)
                 _ = OpenFolderAsync(dropped);
@@ -354,11 +360,17 @@ internal sealed class PlayerWindow : Window
         };
 
         ShowEmpty();
-        if (path is not null)
+        if (path is not null && M3u.IsPlaylistName(path))
+            Opened += (_, _) => _ = OpenM3uAsync([path]);
+        else if (path is not null)
             Opened += (_, _) => PlayFile(path);
         else
             Opened += (_, _) => Resume();
-        Opened += async (_, _) => await CheckForUpdatesAsync();
+        Opened += async (_, _) =>
+        {
+            await CheckForUpdatesAsync();
+            await TellNewHvscAsync();
+        };
         // The piano's stream opened in the background, a moment after the window: opened at the
         // first key struck, it held the window half a second.
         Opened += (_, _) => DispatcherTimer.RunOnce(OpenPianoSoon, TimeSpan.FromSeconds(2));
@@ -687,6 +699,10 @@ internal sealed class PlayerWindow : Window
 
         var openFolder = new MenuItem { Header = "Open folder as playlist..." };
         openFolder.Click += (_, _) => _ = PickFolderAsync();
+        var openM3u = new MenuItem { Header = "Open M3U playlist..." };
+        openM3u.Click += (_, _) => _ = PickM3uAsync();
+        var archives = new MenuItem { Header = "Music archives..." };
+        archives.Click += (_, _) => _ = ShowArchivesAsync();
 
         var meter = new MenuItem { Header = "Meter" };
         foreach (var (item, kind) in new[] { (_spectrumMeter, MeterKind.Spectrum), (_landscapeMeter, MeterKind.Landscape), (_neonMeter, MeterKind.Neon), (_ninjaMeter, MeterKind.LastNinja), (_direMeter, MeterKind.DireGuys), (_outrunMeter, MeterKind.Outrun) })
@@ -717,7 +733,7 @@ internal sealed class PlayerWindow : Window
             },
             Padding = new Thickness(9, 7),
             VerticalAlignment = VerticalAlignment.Center,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, _everySong, new Separator(), _exportNotes, _exportSound, new Separator(), meter, chip, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, openM3u, archives, _showPlaylists, _everySong, new Separator(), _exportNotes, _exportSound, new Separator(), meter, chip, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
@@ -810,6 +826,35 @@ internal sealed class PlayerWindow : Window
         }
         _smallFont.IsChecked = !_settings.BigFont;
         _bigFont.IsChecked = _settings.BigFont;
+    }
+
+    /// <summary>The Music archives window: where HVSC and Modland come from, and whether they are shown.</summary>
+    private Task ShowArchivesAsync() => ArchivesWindow.ShowAsync(this, _settings, source =>
+    {
+        _strip.ShowCollectionRow(MusicSource.Hvsc, !_settings.HideHvsc);
+        _strip.ShowCollectionRow(MusicSource.Modland, !_settings.HideModland);
+        if (source is not null)
+            _strip.CollectionChanged(source);
+    });
+
+    /// <summary>Told, as MagPlaySID starts, that a newer HVSC is out than the user's copy - from HVSC's
+    /// version API, and only when they have a copy and want to know.</summary>
+    private async Task TellNewHvscAsync()
+    {
+        if (!_settings.TellNewHvsc || HvscArchive.Folder is not { } folder || HvscArchive.VersionOf(folder) is not { } mine)
+            return;
+        HvscRelease latest;
+        try
+        {
+            latest = await HvscArchive.LatestAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (MusicWeb.Failed(ex))
+        {
+            return;
+        }
+        if (latest.Version > mine && await MessageWindow.AskAsync(this, "A newer HVSC",
+                $"HVSC #{latest.Version} is out - your copy is #{mine}. Open Music archives to update it?", "Open Music archives", "Not now"))
+            await ShowArchivesAsync();
     }
 
     /// <summary>The first start asks whether to look for updates - off until the user says yes,
@@ -1156,11 +1201,123 @@ internal sealed class PlayerWindow : Window
         {
             Title = "Open a tune",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("SID tunes, tracker modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.s3m", "*.xm", "*.it", "*.mptm", "*.wav", "*.flac", "*.mp3", "*.ogg", "*.oga", "*.m4a", "*.aac"] }, FilePickerFileTypes.All],
+            FileTypeFilter = [new FilePickerFileType("SID tunes, tracker modules and recordings") { Patterns = ["*.sid", "*.mod", "mod.*", "*.s3m", "*.xm", "*.it", "*.mptm", "*.wav", "*.flac", "*.mp3", "*.ogg", "*.oga", "*.m4a", "*.aac"] }, new FilePickerFileType("M3U playlists") { Patterns = ["*.m3u", "*.m3u8"] }, FilePickerFileTypes.All],
         });
 
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
-            PlayFile(path);
+        {
+            if (M3u.IsPlaylistName(path))
+                await OpenM3uAsync([path]);
+            else
+                PlayFile(path);
+        }
+    }
+
+    private async Task PickM3uAsync()
+    {
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Open an M3U playlist",
+                AllowMultiple = true,
+                FileTypeFilter = [new FilePickerFileType("M3U playlists") { Patterns = ["*.m3u", "*.m3u8"] }, FilePickerFileTypes.All],
+            });
+            var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
+            if (paths.Count > 0)
+                await OpenM3uAsync(paths);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            await MessageWindow.ShowAsync(this, "Cannot open the playlist", ex.Message);
+        }
+    }
+
+    /// <summary>M3U playlists from other players, each a playlist kept with the others, the first
+    /// played. A line naming a tune of HVSC that is not on this computer plays it from HVSC online;
+    /// the lines whose tunes are found nowhere are told of, and left out.</summary>
+    private async Task OpenM3uAsync(IReadOnlyList<string> paths)
+    {
+        Playlist? first = null;
+        var problems = new List<string>();
+        foreach (var path in paths)
+        {
+            string file = Path.GetFileName(path);
+            M3uList list;
+            try
+            {
+                list = await Task.Run(() => M3u.Load(path));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                problems.Add($"{file}: {ex.Message}");
+                continue;
+            }
+
+            MusicCatalog? catalog = null, modland = null;
+            string? hvscFailure = null, modlandFailure = null;
+            if (list.Entries.Any(e => e.InHvsc is not null))
+            {
+                try
+                {
+                    catalog = await Hvsc.CatalogAsync();
+                }
+                catch (Exception ex) when (ex is MusicSourceException or IOException or UnauthorizedAccessException or HttpRequestException or TaskCanceledException)
+                {
+                    hvscFailure = ex.Message;
+                }
+            }
+            if (list.Entries.Any(e => e.InModland is not null))
+            {
+                try
+                {
+                    modland = await Modland.CatalogAsync();
+                }
+                catch (Exception ex) when (ex is MusicSourceException or IOException or UnauthorizedAccessException or HttpRequestException or TaskCanceledException)
+                {
+                    modlandFailure = ex.Message;
+                }
+            }
+
+            var tunes = new List<string>();
+            var missing = new List<string>();
+            foreach (var entry in list.Entries)
+            {
+                string? found = entry.Local
+                    ?? (entry.InHvsc is { } inHvsc && catalog?.Tune(inHvsc) is { } tune ? Hvsc.LocalPath(tune.Path) : null)
+                    ?? (entry.InModland is { } inModland && modland?.Tune(inModland) is { } module ? Modland.LocalPath(module.Path) : null);
+                if (found is null)
+                    missing.Add(entry.Line);
+                else if (!tunes.Any(t => Playlist.SamePath(t, found)))
+                    tunes.Add(found);
+            }
+
+            if (missing.Count > 0)
+            {
+                string some = string.Join(Environment.NewLine, missing.Take(5).Select(m => "  " + m));
+                string more = missing.Count > 5 ? $"{Environment.NewLine}  ...and {missing.Count - 5} more" : "";
+                string why = (hvscFailure is not null ? $"{Environment.NewLine}HVSC could not be reached: {hvscFailure}" : "")
+                           + (modlandFailure is not null ? $"{Environment.NewLine}Modland could not be reached: {modlandFailure}" : "");
+                problems.Add($"{file}: {(missing.Count == 1 ? "1 tune" : $"{missing.Count} tunes")} not found{(tunes.Count > 0 ? " and left out" : "")}:{Environment.NewLine}{some}{more}{why}");
+            }
+            if (tunes.Count == 0)
+            {
+                if (missing.Count == 0)
+                    problems.Add($"{file}: there are no tunes in it.");
+                continue;
+            }
+            var playlist = _strip.AddFolder(list.Name, tunes);
+            first ??= playlist;
+        }
+
+        if (first is not null)
+        {
+            _foundRun = null;
+            PlayFromList(first, first.Tunes[0]);
+        }
+        if (problems.Count > 0)
+            await MessageWindow.ShowAsync(this, first is null ? "Cannot open the playlist" : "Not all of the playlist was found",
+                string.Join(Environment.NewLine + Environment.NewLine, problems));
     }
 
     private async Task PickFolderAsync()
@@ -1217,7 +1374,7 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>A playlist's tune, and the rest after it; one that will not play is passed over.</summary>
-    /// <param name="fetched">A tune just fetched from HVSC: played as it came, not fetched again.</param>
+    /// <param name="fetched">A tune just fetched from HVSC or Modland: played as it came, not fetched again.</param>
     private void PlayFromList(Playlist playlist, PlaylistTune tune, PlaylistTune? fetched = null)
     {
         // Each tried once: a repeating playlist none of whose tunes will play comes back round.
@@ -1235,8 +1392,8 @@ internal sealed class PlayerWindow : Window
             _queueTune = here.Tune;
             _finished = false;
             _strip.ShowPlaying(here.List, here.Tune);
-            // One of HVSC's not kept yet - or kept from an older HVSC: fetched, then played.
-            if (here.Tune != fetched && Hvsc.NeedsFetch(here.Tune.Path))
+            // One of HVSC's or Modland's not kept yet - or kept from an older HVSC: fetched, then played.
+            if (here.Tune != fetched && MusicSource.NeedsFetchAny(here.Tune.Path))
             {
                 _ = FetchThenPlayAsync(here.List, here.Tune);
                 return;
@@ -1244,8 +1401,8 @@ internal sealed class PlayerWindow : Window
             // Every song of it, from the one chosen to play first - or the first - or the one it starts on.
             if (Load(here.Tune.Path, quiet: true, everySong: _settings.PlayEverySong))
             {
-                // The next of HVSC's fetched while this one plays, so it follows without a wait.
-                if (After(here.List, here.Tune) is { } next && Hvsc.NeedsFetch(next.Tune.Path))
+                // The next of a collection's fetched while this one plays, so it follows without a wait.
+                if (After(here.List, here.Tune) is { } next && MusicSource.NeedsFetchAny(next.Tune.Path))
                     Prefetch(next.Tune.Path);
                 return;
             }
@@ -1254,42 +1411,44 @@ internal sealed class PlayerWindow : Window
         EndOfPlaylist();
     }
 
-    /// <summary>The fetch of an HVSC tune last asked for: one asked for before it, finished late, is
+    /// <summary>The fetch of a collection's tune last asked for: one asked for before it, finished late, is
     /// not played.</summary>
     private int _fetchTurn;
 
-    /// <summary>One of HVSC's tunes fetched, then played on in its list - unless another tune has been
+    /// <summary>One of a collection's tunes fetched, then played on in its list - unless another tune has been
     /// chosen meanwhile; why not, in the details line, when it cannot be fetched.</summary>
     private async Task FetchThenPlayAsync(Playlist playlist, PlaylistTune tune)
     {
         int turn = ++_fetchTurn;
+        var source = MusicSource.Of(tune.Path)!;
         _chipText = null;
-        _details.Text = $"Getting {tune.Title} from HVSC...";
+        _details.Text = $"Getting {tune.Title} from {source.Name}...";
         try
         {
-            await Hvsc.FetchAsync(tune.Path);
+            await source.FetchAsync(tune.Path);
         }
-        catch (Exception ex) when (ex is HvscException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is MusicSourceException or IOException or UnauthorizedAccessException)
         {
             if (turn == _fetchTurn && _queueTune == tune)
-                _details.Text = $"{tune.Title} could not be fetched from HVSC: {ex.Message}";
+                _details.Text = $"{tune.Title} could not be fetched from {source.Name}: {ex.Message}";
             return;
         }
         if (turn != _fetchTurn || _queueTune != tune || _queue != playlist)
             return;
-        _strip.HvscFetched(tune);
+        _strip.TuneFetched(tune);
         PlayFromList(playlist, tune, fetched: tune);
     }
 
-    /// <summary>An HVSC tune fetched ahead of its turn; a failure is let be - it is tried again when
+    /// <summary>A collection's tune fetched ahead of its turn; a failure is let be - it is tried again when
     /// its turn comes.</summary>
     private static async void Prefetch(string path)
     {
         try
         {
-            await Hvsc.FetchAsync(path);
+            if (MusicSource.Of(path) is { } source)
+                await source.FetchAsync(path);
         }
-        catch (Exception ex) when (ex is HvscException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is MusicSourceException or IOException or UnauthorizedAccessException)
         {
         }
     }

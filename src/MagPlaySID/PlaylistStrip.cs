@@ -10,6 +10,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -173,7 +174,7 @@ internal sealed partial class PlaylistStrip : Border
         _listBox.SelectionChanged += (_, _) =>
         {
             if (_listBox.SelectedItem is not null)
-                LeaveHvsc();
+                LeaveCollection();
             if (Searching)
                 _search.Text = "";
             else
@@ -310,7 +311,7 @@ internal sealed partial class PlaylistStrip : Border
 
         var top = new Grid { Margin = new Thickness(18, 6, 10, 6), Children = { _caption, _new } };
         var search = BuildSearch();
-        var head = new StackPanel { Children = { search, BuildHvscRow(), top } };
+        var head = new StackPanel { Children = { search, BuildCollectionRows(), top } };
 
         Restyle(_listBox);
         _listBox.ItemsSource = _lists;
@@ -358,10 +359,10 @@ internal sealed partial class PlaylistStrip : Border
         _playAll.VerticalContentAlignment = VerticalAlignment.Center;
         _playAll.Click += (_, _) =>
         {
-            if (_hvscShown)
+            if (CollectionShown)
             {
-                if (_hvscList is { Tunes.Count: > 0 } hvsc)
-                    Play?.Invoke(hvsc, hvsc.Tunes[0]);
+                if (_at?.List is { Tunes.Count: > 0 } listed)
+                    Play?.Invoke(listed, listed.Tunes[0]);
                 return;
             }
             if (Shown is { Tunes.Count: > 0 } playlist)
@@ -426,13 +427,13 @@ internal sealed partial class PlaylistStrip : Border
         _tuneBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Direct);
 
         var tunes = new DockPanel();
-        foreach (var docked in new Control[] { heading, _sort, BuildHvscNav(), _empty })
+        foreach (var docked in new Control[] { heading, _sort, BuildMusicNav(), _empty })
         {
             DockPanel.SetDock(docked, Dock.Top);
             tunes.Children.Add(docked);
         }
-        // A playlist's tunes, or HVSC's folders and tunes in their place.
-        tunes.Children.Add(new Grid { Children = { _tuneBox, _hvscBox } });
+        // A playlist's tunes, or a collection's folders and tunes in their place.
+        tunes.Children.Add(new Grid { Children = { _tuneBox, _musicBox } });
 
         _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto) { MinHeight = FewestPlaylistPixels });
@@ -522,6 +523,7 @@ internal sealed partial class PlaylistStrip : Border
             if (row.DataContext is Playlist playlist)
                 OpenMenu(row, [Item("Rename...", () => _ = RenameAsync(playlist)),
                                HeartColourItem(playlist),
+                               Item("Save as M3U...", () => _ = SaveM3uAsync(playlist)),
                                Item("Delete playlist...", () => _ = DeleteAsync(playlist))]);
         };
         return row;
@@ -673,8 +675,8 @@ internal sealed partial class PlaylistStrip : Border
         {
             if (_dragged || row.DataContext is not PlaylistTune tune)
                 return;
-            if (_hvscShown)
-                OpenHvscItem(tune);
+            if (CollectionShown)
+                OpenMusicItem(tune);
             else if (Searching)
                 PlayHit(tune);
             else if (Shown is { } playlist)
@@ -685,9 +687,9 @@ internal sealed partial class PlaylistStrip : Border
             e.Handled = true;
             if (row.DataContext is not PlaylistTune tune)
                 return;
-            if (_hvscShown)
+            if (CollectionShown)
             {
-                OpenMenu(row, HvscMenu(tune));
+                OpenMenu(row, MusicMenu(tune));
                 return;
             }
             var add = new MenuItem { Header = "Add to playlist" };
@@ -878,7 +880,7 @@ internal sealed partial class PlaylistStrip : Border
     private Playlist? Shown => _listBox.SelectedItem as Playlist;
 
     /// <summary>The name of the playlist shown; null with none.</summary>
-    public string? ShownName => _hvscShown ? HvscShownPrefix + (_hvscFolder?.Path ?? _hvscWanted) : Shown?.Name;
+    public string? ShownName => _at is { } at ? at.Prefix + (at.Folder?.Path ?? at.Wanted) : Shown?.Name;
 
     private bool Searching => !string.IsNullOrWhiteSpace(_search.Text);
 
@@ -984,9 +986,9 @@ internal sealed partial class PlaylistStrip : Border
 
         _search.TextChanged += (_, _) =>
         {
-            if (_hvscShown)
+            if (CollectionShown)
             {
-                ShowHvscView();
+                ShowMusicView();
                 return;
             }
             if (!Searching && _playingIn is { } playlist && Shown != playlist)
@@ -1006,14 +1008,14 @@ internal sealed partial class PlaylistStrip : Border
                 EndSearch();
                 e.Handled = true;
             }
-            else if (_hvscShown && e.Key is Key.Enter or Key.Down)
+            else if (CollectionShown && e.Key is Key.Enter or Key.Down)
             {
-                if (e.Key == Key.Enter && _hvscList is { Tunes.Count: > 0 } hvsc)
-                    Play?.Invoke(hvsc, hvsc.Tunes[0]);
-                else if (e.Key == Key.Down && _hvscBox.ItemCount > 0)
+                if (e.Key == Key.Enter && _at?.List is { Tunes.Count: > 0 } listed)
+                    Play?.Invoke(listed, listed.Tunes[0]);
+                else if (e.Key == Key.Down && _musicBox.ItemCount > 0)
                 {
-                    _hvscBox.SelectedIndex = 0;
-                    (_hvscBox.ContainerFromIndex(0) as Control)?.Focus();
+                    _musicBox.SelectedIndex = 0;
+                    (_musicBox.ContainerFromIndex(0) as Control)?.Focus();
                 }
                 e.Handled = true;
             }
@@ -1107,9 +1109,10 @@ internal sealed partial class PlaylistStrip : Border
     /// <summary>The playlist called <paramref name="name"/> shown, if there is one.</summary>
     public void Show(string? name)
     {
-        if (name?.StartsWith(HvscShownPrefix, StringComparison.Ordinal) == true)
+        if (_browsed.FirstOrDefault(b => name?.StartsWith(b.Prefix, StringComparison.Ordinal) == true) is { } browsed)
         {
-            ShowHvsc(name[HvscShownPrefix.Length..]);
+            if (browsed.Row.IsVisible)
+                ShowCollection(browsed.Source, name![browsed.Prefix.Length..]);
             return;
         }
         if (Find(name) is { } playlist)
@@ -1118,9 +1121,9 @@ internal sealed partial class PlaylistStrip : Border
 
     private void ShowTunes()
     {
-        if (_hvscShown)
+        if (CollectionShown)
         {
-            ShowHvscView();
+            ShowMusicView();
             return;
         }
         if (Searching)
@@ -1216,7 +1219,7 @@ internal sealed partial class PlaylistStrip : Border
 
     private async Task ShowInfoAsync(PlaylistTune tune)
     {
-        if (!await FetchHvscAsync(tune))
+        if (!await FetchMusicAsync(tune))
             return;
         if (TopLevel.GetTopLevel(this) is Window owner)
             await InfoWindow.ShowAsync(owner, tune.Path);
@@ -1266,13 +1269,13 @@ internal sealed partial class PlaylistStrip : Border
     public void Measured(string key)
     {
         var length = TuneHistory.Of(key)?.Length;
-        foreach (var tune in _lists.SelectMany(p => p.Tunes).Concat(_hvscTunes.Values).Where(t => t.Key == key))
+        foreach (var tune in _lists.SelectMany(p => p.Tunes).Concat(_browsed.SelectMany(b => b.Tunes.Values)).Where(t => t.Key == key))
             tune.Length = length;
     }
 
     private void Count()
     {
-        if (_hvscShown)
+        if (CollectionShown)
             return;
         if (Searching)
         {
@@ -1323,13 +1326,13 @@ internal sealed partial class PlaylistStrip : Border
             return;
 
         tune.IsPlaying = true;
-        if (IsHvscList(playlist))
+        if (IsMusicList(playlist))
         {
-            // One of HVSC's: lit where it is listed, if it is.
-            if (_hvscShown && _hvscList?.Tunes.Contains(tune) == true)
+            // One of a collection's: lit where it is listed, if it is.
+            if (_at?.List?.Tunes.Contains(tune) == true)
             {
-                _hvscBox.SelectedItem = tune;
-                _hvscBox.ScrollIntoView(tune);
+                _musicBox.SelectedItem = tune;
+                _musicBox.ScrollIntoView(tune);
             }
             return;
         }
@@ -1419,6 +1422,36 @@ internal sealed partial class PlaylistStrip : Border
             _heading.Text = name;
     }
 
+    /// <summary>The playlist saved as an M3U - or M3U8 - for other players, its tunes in the order
+    /// shown; their paths from the list's folder when they are in it.</summary>
+    private async Task SaveM3uAsync(Playlist playlist)
+    {
+        string suggested = string.Concat(playlist.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)).Trim();
+        try
+        {
+            var target = await _owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = $"Save {playlist.Name} as a playlist file",
+                SuggestedFileName = suggested.Length > 0 ? suggested : "Playlist",
+                DefaultExtension = "m3u",
+                FileTypeChoices = [new FilePickerFileType("M3U playlist") { Patterns = ["*.m3u"] }, new FilePickerFileType("M3U8 playlist (UTF-8)") { Patterns = ["*.m3u8"] }],
+                ShowOverwritePrompt = true,
+            });
+            if (target is null)
+                return;
+            string? folder = target.TryGetLocalPath() is { } local ? Path.GetDirectoryName(Path.GetFullPath(local)) : null;
+            var bytes = new System.Text.UTF8Encoding(false).GetBytes(M3u.Write(playlist.Name, playlist.Tunes.ToList(), folder));
+            await using var stream = await target.OpenWriteAsync();
+            if (stream.CanSeek)
+                stream.SetLength(0);
+            await stream.WriteAsync(bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            await MessageWindow.ShowAsync(_owner, "Cannot save the playlist", ex.Message);
+        }
+    }
+
     private async Task DeleteAsync(Playlist playlist)
     {
         if (!await MessageWindow.AskAsync(_owner, "Delete playlist",
@@ -1436,7 +1469,7 @@ internal sealed partial class PlaylistStrip : Border
         if (_playingIn == playlist)
             _playingIn = null;
         Deleted?.Invoke(playlist);
-        if (_listBox.SelectedItem is null && _lists.Count > 0 && !_hvscShown)
+        if (_listBox.SelectedItem is null && _lists.Count > 0 && !CollectionShown)
             _listBox.SelectedIndex = 0;
         ShowTunes();
     }
@@ -1452,6 +1485,10 @@ internal sealed partial class PlaylistStrip : Border
             {
                 if (tune.ReadHeader() is { } header)
                     Dispatcher.UIThread.Post(() => tune.Take(header), DispatcherPriority.Background);
+                // One of a collection's - from an M3U, or added from it - fetched only when played: as
+                // the collection's list has it till then.
+                else if (!File.Exists(tune.Path) && MusicSource.Listed(tune.Path) is { } hit)
+                    Dispatcher.UIThread.Post(() => DescribeFromList(tune, hit), DispatcherPriority.Background);
             }
             Dispatcher.UIThread.Post(() =>
             {
@@ -1474,10 +1511,13 @@ internal sealed partial class PlaylistStrip : Border
         _count.FontSize = 12 * _scale;
         _empty.FontSize = 12 * _scale;
         _sortName.FontSize = 12 * _scale;
-        _hvscRowName.FontSize = 13 * _scale;
-        _hvscRowCount.FontSize = 11 * _scale;
-        _hvscWay.FontSize = 12 * _scale;
-        _hvscBox.ItemsSource = null;
+        foreach (var browsed in _browsed)
+        {
+            browsed.RowName.FontSize = 13 * _scale;
+            browsed.RowCount.FontSize = 11 * _scale;
+        }
+        _musicWay.FontSize = 12 * _scale;
+        _musicBox.ItemsSource = null;
         Width = StripWidth * (1 + (_scale - 1) / 2);
         // The rows are made at the size: made again.
         var selected = _listBox.SelectedItem;

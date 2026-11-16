@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>MagPlaySID</AssemblyName>
     <RootNamespace>MagPlaySid</RootNamespace>
-    <Version>1.62</Version>
+    <Version>1.63</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -36,6 +36,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.20" />
     <!-- The sheet music's PDF: Skia writes it - the version Avalonia draws the window with. -->
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <PackageReference Include="SharpCompress" Version="0.48.0" />
   </ItemGroup>
 
   <ItemGroup>
