@@ -279,8 +279,8 @@ internal sealed class PlayerWindow : Window
 
         KeyDown += (_, e) =>
         {
-            // Typing in the search box is typing, not the window's keys.
-            if (e.Source is TextBox)
+            // Typing in the search box is typing, not the window's keys; nor is typing over a list.
+            if (e.Source is TextBox || _strip.WantsKey(e.Key, e.KeyModifiers))
                 return;
             if (e.Key == Key.F && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Meta)
             {
@@ -304,7 +304,7 @@ internal sealed class PlayerWindow : Window
         // Shift too: on some keyboards + is a shifted key. F fast-forwards while it is held.
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Source is TextBox)
+            if (e.Source is TextBox || _strip.WantsKey(e.Key, e.KeyModifiers))
                 return;
             if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.None)
             {
@@ -316,6 +316,13 @@ internal sealed class PlayerWindow : Window
                 shortcut();
                 e.Handled = true;
             }
+        }, RoutingStrategies.Tunnel);
+        // Letters typed with the mouse over a list - the playlists, a playlist's tunes, HVSC's or
+        // Modland's folders - jump in it to the first name that starts so.
+        AddHandler(TextInputEvent, (_, e) =>
+        {
+            if (e.Source is not TextBox && e.Text is { } text && _strip.TypeAhead(text))
+                e.Handled = true;
         }, RoutingStrategies.Tunnel);
         AddHandler(KeyUpEvent, (_, e) =>
         {

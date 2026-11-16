@@ -422,6 +422,17 @@ internal sealed partial class PlaylistStrip : Border
         _tuneBox.ItemTemplate = new FuncDataTemplate<PlaylistTune>((_, _) => TuneRow(), supportsRecycling: true);
         // Before the rows and the list see the pointer: a press may start a drag.
         _tuneBox.AddHandler(PointerPressedEvent, DragPressed, RoutingStrategies.Tunnel);
+        // Enter plays the tune chosen - by the arrows, or by typing its name.
+        _tuneBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter || _tuneBox.SelectedItem is not PlaylistTune tune)
+                return;
+            if (Searching)
+                PlayHit(tune);
+            else if (Shown is { } playlist)
+                Play?.Invoke(playlist, tune);
+            e.Handled = true;
+        };
         _tuneBox.AddHandler(PointerMovedEvent, DragMoved, RoutingStrategies.Tunnel);
         _tuneBox.AddHandler(PointerReleasedEvent, DragReleased, RoutingStrategies.Tunnel);
         _tuneBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Direct);
