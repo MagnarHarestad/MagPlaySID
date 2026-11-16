@@ -25,7 +25,7 @@ namespace MagPlaySid;
 /// down the playlist, in the user's own order. Sort above the tunes puts them in another, to go
 /// back from. Shown or hidden from the window's menu.
 /// </summary>
-internal sealed class PlaylistStrip : Border
+internal sealed partial class PlaylistStrip : Border
 {
     public const double StripWidth = 290;
 
@@ -172,6 +172,8 @@ internal sealed class PlaylistStrip : Border
         // A playlist chosen while searching ends the search: it is that playlist that is wanted.
         _listBox.SelectionChanged += (_, _) =>
         {
+            if (_listBox.SelectedItem is not null)
+                LeaveHvsc();
             if (Searching)
                 _search.Text = "";
             else
@@ -308,7 +310,7 @@ internal sealed class PlaylistStrip : Border
 
         var top = new Grid { Margin = new Thickness(18, 6, 10, 6), Children = { _caption, _new } };
         var search = BuildSearch();
-        var head = new StackPanel { Children = { search, top } };
+        var head = new StackPanel { Children = { search, BuildHvscRow(), top } };
 
         Restyle(_listBox);
         _listBox.ItemsSource = _lists;
@@ -356,6 +358,12 @@ internal sealed class PlaylistStrip : Border
         _playAll.VerticalContentAlignment = VerticalAlignment.Center;
         _playAll.Click += (_, _) =>
         {
+            if (_hvscShown)
+            {
+                if (_hvscList is { Tunes.Count: > 0 } hvsc)
+                    Play?.Invoke(hvsc, hvsc.Tunes[0]);
+                return;
+            }
             if (Shown is { Tunes.Count: > 0 } playlist)
                 Play?.Invoke(playlist, playlist.Tunes[0]);
         };
@@ -418,12 +426,13 @@ internal sealed class PlaylistStrip : Border
         _tuneBox.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Direct);
 
         var tunes = new DockPanel();
-        foreach (var docked in new Control[] { heading, _sort, _empty })
+        foreach (var docked in new Control[] { heading, _sort, BuildHvscNav(), _empty })
         {
             DockPanel.SetDock(docked, Dock.Top);
             tunes.Children.Add(docked);
         }
-        tunes.Children.Add(_tuneBox);
+        // A playlist's tunes, or HVSC's folders and tunes in their place.
+        tunes.Children.Add(new Grid { Children = { _tuneBox, _hvscBox } });
 
         _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         _layout.RowDefinitions.Add(new RowDefinition(GridLength.Auto) { MinHeight = FewestPlaylistPixels });
@@ -664,7 +673,9 @@ internal sealed class PlaylistStrip : Border
         {
             if (_dragged || row.DataContext is not PlaylistTune tune)
                 return;
-            if (Searching)
+            if (_hvscShown)
+                OpenHvscItem(tune);
+            else if (Searching)
                 PlayHit(tune);
             else if (Shown is { } playlist)
                 Play?.Invoke(playlist, tune);
@@ -674,6 +685,11 @@ internal sealed class PlaylistStrip : Border
             e.Handled = true;
             if (row.DataContext is not PlaylistTune tune)
                 return;
+            if (_hvscShown)
+            {
+                OpenMenu(row, HvscMenu(tune));
+                return;
+            }
             var add = new MenuItem { Header = "Add to playlist" };
             foreach (var item in AddToItems(tune.Path))
                 add.Items.Add(item);
@@ -862,7 +878,7 @@ internal sealed class PlaylistStrip : Border
     private Playlist? Shown => _listBox.SelectedItem as Playlist;
 
     /// <summary>The name of the playlist shown; null with none.</summary>
-    public string? ShownName => Shown?.Name;
+    public string? ShownName => _hvscShown ? HvscShownPrefix + (_hvscFolder?.Path ?? _hvscWanted) : Shown?.Name;
 
     private bool Searching => !string.IsNullOrWhiteSpace(_search.Text);
 
@@ -933,7 +949,7 @@ internal sealed class PlaylistStrip : Border
         _search.LostFocus += (_, _) => Lit();
         _search.TextChanged += (_, _) => Lit();
 
-        _search.Watermark = "Search tunes";
+        _search.Watermark = SearchHint;
         _search.InnerLeftContent = glass;
         _search.InnerRightContent = new Panel { Children = { keycap, _clearSearch } };
         _search.FontSize = 13;
@@ -968,6 +984,11 @@ internal sealed class PlaylistStrip : Border
 
         _search.TextChanged += (_, _) =>
         {
+            if (_hvscShown)
+            {
+                ShowHvscView();
+                return;
+            }
             if (!Searching && _playingIn is { } playlist && Shown != playlist)
             {
                 // The search over, the playlist of the tune played from it is the one shown.
@@ -983,6 +1004,17 @@ internal sealed class PlaylistStrip : Border
             if (e.Key == Key.Escape)
             {
                 EndSearch();
+                e.Handled = true;
+            }
+            else if (_hvscShown && e.Key is Key.Enter or Key.Down)
+            {
+                if (e.Key == Key.Enter && _hvscList is { Tunes.Count: > 0 } hvsc)
+                    Play?.Invoke(hvsc, hvsc.Tunes[0]);
+                else if (e.Key == Key.Down && _hvscBox.ItemCount > 0)
+                {
+                    _hvscBox.SelectedIndex = 0;
+                    (_hvscBox.ContainerFromIndex(0) as Control)?.Focus();
+                }
                 e.Handled = true;
             }
             else if (e.Key == Key.Enter && _hits.Count > 0)
@@ -1075,12 +1107,22 @@ internal sealed class PlaylistStrip : Border
     /// <summary>The playlist called <paramref name="name"/> shown, if there is one.</summary>
     public void Show(string? name)
     {
+        if (name?.StartsWith(HvscShownPrefix, StringComparison.Ordinal) == true)
+        {
+            ShowHvsc(name[HvscShownPrefix.Length..]);
+            return;
+        }
         if (Find(name) is { } playlist)
             _listBox.SelectedItem = playlist;
     }
 
     private void ShowTunes()
     {
+        if (_hvscShown)
+        {
+            ShowHvscView();
+            return;
+        }
         if (Searching)
         {
             ShowHits();
@@ -1174,6 +1216,8 @@ internal sealed class PlaylistStrip : Border
 
     private async Task ShowInfoAsync(PlaylistTune tune)
     {
+        if (!await FetchHvscAsync(tune))
+            return;
         if (TopLevel.GetTopLevel(this) is Window owner)
             await InfoWindow.ShowAsync(owner, tune.Path);
     }
@@ -1222,12 +1266,14 @@ internal sealed class PlaylistStrip : Border
     public void Measured(string key)
     {
         var length = TuneHistory.Of(key)?.Length;
-        foreach (var tune in _lists.SelectMany(p => p.Tunes).Where(t => t.Key == key))
+        foreach (var tune in _lists.SelectMany(p => p.Tunes).Concat(_hvscTunes.Values).Where(t => t.Key == key))
             tune.Length = length;
     }
 
     private void Count()
     {
+        if (_hvscShown)
+            return;
         if (Searching)
         {
             int lists = _found.Values.Distinct().Count();
@@ -1277,6 +1323,16 @@ internal sealed class PlaylistStrip : Border
             return;
 
         tune.IsPlaying = true;
+        if (IsHvscList(playlist))
+        {
+            // One of HVSC's: lit where it is listed, if it is.
+            if (_hvscShown && _hvscList?.Tunes.Contains(tune) == true)
+            {
+                _hvscBox.SelectedItem = tune;
+                _hvscBox.ScrollIntoView(tune);
+            }
+            return;
+        }
         if (Searching)
         {
             // Played while searching - a hit, or the next in a hit's playlist: the hits stay, and
@@ -1380,7 +1436,7 @@ internal sealed class PlaylistStrip : Border
         if (_playingIn == playlist)
             _playingIn = null;
         Deleted?.Invoke(playlist);
-        if (_listBox.SelectedItem is null && _lists.Count > 0)
+        if (_listBox.SelectedItem is null && _lists.Count > 0 && !_hvscShown)
             _listBox.SelectedIndex = 0;
         ShowTunes();
     }
@@ -1418,6 +1474,10 @@ internal sealed class PlaylistStrip : Border
         _count.FontSize = 12 * _scale;
         _empty.FontSize = 12 * _scale;
         _sortName.FontSize = 12 * _scale;
+        _hvscRowName.FontSize = 13 * _scale;
+        _hvscRowCount.FontSize = 11 * _scale;
+        _hvscWay.FontSize = 12 * _scale;
+        _hvscBox.ItemsSource = null;
         Width = StripWidth * (1 + (_scale - 1) / 2);
         // The rows are made at the size: made again.
         var selected = _listBox.SelectedItem;

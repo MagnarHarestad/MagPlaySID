@@ -1217,7 +1217,8 @@ internal sealed class PlayerWindow : Window
     }
 
     /// <summary>A playlist's tune, and the rest after it; one that will not play is passed over.</summary>
-    private void PlayFromList(Playlist playlist, PlaylistTune tune)
+    /// <param name="fetched">A tune just fetched from HVSC: played as it came, not fetched again.</param>
+    private void PlayFromList(Playlist playlist, PlaylistTune tune, PlaylistTune? fetched = null)
     {
         // Each tried once: a repeating playlist none of whose tunes will play comes back round.
         var tried = new HashSet<PlaylistTune>();
@@ -1234,12 +1235,63 @@ internal sealed class PlayerWindow : Window
             _queueTune = here.Tune;
             _finished = false;
             _strip.ShowPlaying(here.List, here.Tune);
+            // One of HVSC's not kept yet - or kept from an older HVSC: fetched, then played.
+            if (here.Tune != fetched && Hvsc.NeedsFetch(here.Tune.Path))
+            {
+                _ = FetchThenPlayAsync(here.List, here.Tune);
+                return;
+            }
             // Every song of it, from the one chosen to play first - or the first - or the one it starts on.
             if (Load(here.Tune.Path, quiet: true, everySong: _settings.PlayEverySong))
+            {
+                // The next of HVSC's fetched while this one plays, so it follows without a wait.
+                if (After(here.List, here.Tune) is { } next && Hvsc.NeedsFetch(next.Tune.Path))
+                    Prefetch(next.Tune.Path);
                 return;
+            }
         }
 
         EndOfPlaylist();
+    }
+
+    /// <summary>The fetch of an HVSC tune last asked for: one asked for before it, finished late, is
+    /// not played.</summary>
+    private int _fetchTurn;
+
+    /// <summary>One of HVSC's tunes fetched, then played on in its list - unless another tune has been
+    /// chosen meanwhile; why not, in the details line, when it cannot be fetched.</summary>
+    private async Task FetchThenPlayAsync(Playlist playlist, PlaylistTune tune)
+    {
+        int turn = ++_fetchTurn;
+        _chipText = null;
+        _details.Text = $"Getting {tune.Title} from HVSC...";
+        try
+        {
+            await Hvsc.FetchAsync(tune.Path);
+        }
+        catch (Exception ex) when (ex is HvscException or IOException or UnauthorizedAccessException)
+        {
+            if (turn == _fetchTurn && _queueTune == tune)
+                _details.Text = $"{tune.Title} could not be fetched from HVSC: {ex.Message}";
+            return;
+        }
+        if (turn != _fetchTurn || _queueTune != tune || _queue != playlist)
+            return;
+        _strip.HvscFetched(tune);
+        PlayFromList(playlist, tune, fetched: tune);
+    }
+
+    /// <summary>An HVSC tune fetched ahead of its turn; a failure is let be - it is tried again when
+    /// its turn comes.</summary>
+    private static async void Prefetch(string path)
+    {
+        try
+        {
+            await Hvsc.FetchAsync(path);
+        }
+        catch (Exception ex) when (ex is HvscException or IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// <summary>The tune after <paramref name="tune"/>: the next of the search's hits played from,
