@@ -108,7 +108,9 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
     private long _tuneSample;
 
     /// <param name="song">The subtune, counting from 1.</param>
-    public C64PlaybackEngine(SidFile file, int song)
+    /// <param name="model">The SID chip every SID of the tune is played on, whatever the tune says;
+    /// null for the one it asks for.</param>
+    public C64PlaybackEngine(SidFile file, int song, ChipModel? model = null)
     {
         int chips = 1 + Math.Min(MostChips - 1, file.ExtraSids.Count);
         IsStereo = chips > 1 && file.IsStereo;
@@ -146,7 +148,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         ClockHz = Machines.ClockHz(_tune.Computer.Machine);
         for (int chip = 0; chip < chips; chip++)
         {
-            bool is8580 = chip == 0 ? file.Is8580 : file.ExtraSids8580[chip - 1];
+            bool is8580 = model is { } chosen ? chosen == ChipModel.Mos8580
+                : chip == 0 ? file.Is8580 : file.ExtraSids8580[chip - 1];
             _chips[chip] = new SidChip();
             _chips[chip].SetChipModel(is8580 ? ChipModel.Mos8580 : ChipModel.Mos6581);
             _chips[chip].SetSamplingParameters(ClockHz, SamplingMethod.Interpolate, SampleRate);
@@ -312,10 +315,12 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
         if (rate == 0)
         {
+            SwitchWhileSilent();
             Array.Clear(buffer, offset, wanted * 2);
             return wanted * 2;
         }
 
+        PlanSwitch();
         int needed = wanted * rate;
         int before = _pendingCount;
         long started = Stopwatch.GetTimestamp();
@@ -325,6 +330,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
             {
                 _tune.Run(Slice);
                 ClockTo(_tune.Computer.Cycle);
+                SwitchIfDue();
             }
         }
         catch (Exception ex)
@@ -364,11 +370,13 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
             }
         }
         _applied = volume;
+        FadeAroundSwitch(output, ready, rate, 1);
         output[ready..].Clear();
 
         int used = ready * rate;
         Array.Copy(_pending, used, _pending, 0, _pendingCount - used);
         _pendingCount -= used;
+        HandedOver(used);
         return wanted * 2;
     }
 
@@ -391,10 +399,12 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
 
         if (rate == 0)
         {
+            SwitchWhileSilent();
             Array.Clear(buffer, offset, wanted * 4);
             return wanted * 4;
         }
 
+        PlanSwitch();
         int needed = wanted * rate;
         int before = _pendingCount;
         long started = Stopwatch.GetTimestamp();
@@ -404,6 +414,7 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
             {
                 _tune.Run(Slice);
                 ClockTo(_tune.Computer.Cycle);
+                SwitchIfDue();
             }
         }
         catch (Exception ex)
@@ -448,13 +459,108 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
             }
         }
         _applied = volume;
+        FadeAroundSwitch(output, ready, rate, 2);
         output[(ready * 2)..].Clear();
 
         int used = ready * rate;
         Array.Copy(_pending, used, _pending, 0, _pendingCount - used);
         Array.Copy(_pendingRight, used, _pendingRight, 0, _pendingCount - used);
         _pendingCount -= used;
+        HandedOver(used);
         return wanted * 4;
+    }
+
+    // ------------------------------------------------------------------ the chip changed as it plays
+
+    /// <summary>A change of SID chip asked for while playing: the chip, or null for the tune's own.</summary>
+    private sealed record ChipChange(ChipModel? Model);
+
+    private volatile ChipChange? _chipAsked;
+    private ChipChange? _chipChanging;
+
+    /// <summary>The tune's samples handed over so far: <see cref="_pending"/>[0] is the next.</summary>
+    private long _handedOver;
+
+    /// <summary>The tune's sample the sound is faded down to before the chip changes, and the one the
+    /// new chip's sound starts at - below 0 while there is no change under way.</summary>
+    private long _switchPlanned = -1, _switchedAt = -1;
+
+    /// <summary>The samples the sound fades down over before the chip changes, and up over after:
+    /// 15 ms - the jump in the 6581's DC level is not heard as a click, nor the change as a gap.</summary>
+    private const int SwitchFade = SampleRate * 15 / 1000;
+
+    /// <summary>Every SID of the tune heard on <paramref name="model"/> from now on - null for the
+    /// chip each asks for - its sound faded down and up around the change, the tune playing on as it
+    /// was. Safe from any thread; the change is made on the sound's.</summary>
+    public void UseChip(ChipModel? model) => _chipAsked = new ChipChange(model);
+
+    private void SetChips(ChipModel? model)
+    {
+        for (int chip = 0; chip < _chips.Length; chip++)
+        {
+            bool is8580 = model is { } chosen ? chosen == ChipModel.Mos8580
+                : chip == 0 ? File.Is8580 : File.ExtraSids8580[chip - 1];
+            _chips[chip].SetChipModel(is8580 ? ChipModel.Mos8580 : ChipModel.Mos6581);
+        }
+    }
+
+    /// <summary>Paused or stopped, the change made at once: nothing is heard to fade.</summary>
+    private void SwitchWhileSilent()
+    {
+        if (_chipChanging is { } changing && _switchedAt < 0)
+            SetChips(changing.Model);
+        if (Interlocked.Exchange(ref _chipAsked, null) is { } asked)
+            SetChips(asked.Model);
+        (_chipChanging, _switchPlanned, _switchedAt) = (null, -1, -1);
+    }
+
+    /// <summary>A change asked for planned: the sound faded down over the samples from the next to
+    /// be handed over, and the chip changed after them.</summary>
+    private void PlanSwitch()
+    {
+        if (_chipChanging is not null || Interlocked.Exchange(ref _chipAsked, null) is not { } asked)
+            return;
+        _chipChanging = asked;
+        _switchPlanned = _handedOver + SwitchFade;
+        _switchedAt = -1;
+    }
+
+    /// <summary>The chip changed once the tune has been made up to the sample planned.</summary>
+    private void SwitchIfDue()
+    {
+        if (_chipChanging is { } changing && _switchedAt < 0 && _handedOver + _pendingCount >= _switchPlanned)
+        {
+            SetChips(changing.Model);
+            _switchedAt = _handedOver + _pendingCount;
+        }
+    }
+
+    /// <summary>The sound handed over faded down to the change and up from it: each frame by the
+    /// tune's first sample in it.</summary>
+    private void FadeAroundSwitch(Span<short> output, int frames, int rate, int channels)
+    {
+        if (_chipChanging is null)
+            return;
+        for (int i = 0; i < frames; i++)
+        {
+            long at = _handedOver + ((long)i * rate);
+            float gain = at < _switchPlanned ? Math.Clamp((_switchPlanned - at) / (float)SwitchFade, 0, 1)
+                : _switchedAt < 0 || at < _switchedAt ? 0
+                : Math.Clamp((at - _switchedAt) / (float)SwitchFade, 0, 1);
+            if (gain >= 1)
+                continue;
+            for (int c = 0; c < channels; c++)
+                output[(i * channels) + c] = (short)(output[(i * channels) + c] * gain);
+        }
+    }
+
+    /// <summary><paramref name="used"/> of the tune's samples handed over; the change over once its
+    /// fade up has been.</summary>
+    private void HandedOver(int used)
+    {
+        _handedOver += used;
+        if (_switchedAt >= 0 && _handedOver >= _switchedAt + SwitchFade)
+            (_chipChanging, _switchPlanned, _switchedAt) = (null, -1, -1);
     }
 
     /// <summary>The speed the tune can play at here: <paramref name="speed"/>, or as many of its

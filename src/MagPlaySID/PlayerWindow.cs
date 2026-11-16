@@ -14,6 +14,7 @@ using MagPlay.C64;
 using MagPlaySid.Export;
 using MagPlaySid.Player;
 using MagSid.Playback;
+using MagSid.Sid;
 
 namespace MagPlaySid;
 
@@ -100,6 +101,9 @@ internal sealed class PlayerWindow : Window
     private readonly MenuItem _ninjaMeter = new() { Header = "Last Ninja" };
     private readonly MenuItem _direMeter = new() { Header = "Dire Guys" };
     private readonly MenuItem _outrunMeter = new() { Header = "Outrun" };
+    private readonly MenuItem _tuneChip = new() { Header = "As each tune asks" };
+    private readonly MenuItem _chip6581 = new() { Header = "MOS 6581" };
+    private readonly MenuItem _chip8580 = new() { Header = "MOS 8580" };
     private readonly MenuItem _showPlaylists = new();
     private readonly MenuItem _everySong = new();
     private readonly MenuItem _exportNotes = new();
@@ -365,6 +369,24 @@ internal sealed class PlayerWindow : Window
         _title.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Title);
         _details.Foreground = SidPlayerPalette.Brush(SidPlayerPalette.Subtitle);
         _details.Margin = new Thickness(0, 2, 0, 0);
+        // The SID chip in the line is plain text, but a click on it plays the tune on the other chip:
+        // the hand and a tip say so as the pointer goes over it.
+        _details.Background = Brushes.Transparent;
+        _details.PointerMoved += (_, e) =>
+        {
+            bool on = OnChip(e.GetPosition(_details));
+            _details.Cursor = on ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
+            ToolTip.SetTip(_details, on ? $"Click to hear it on the {(ChipHeard() == "6581" ? "8580" : "6581")}" : null);
+        };
+        _details.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(_details).Properties.IsLeftButtonPressed && OnChip(e.GetPosition(_details)))
+            {
+                SwapChip();
+                ToolTip.SetTip(_details, null);
+                e.Handled = true;
+            }
+        };
 
         // Under the tune's name and details, in the player's own colours rather than the theme's.
         _open.Content = "Open tune...";
@@ -423,7 +445,7 @@ internal sealed class PlayerWindow : Window
         _playPause.Click += TogglePause;
         _next.Click += NextTune;
         _repeat.Click += OpenRepeatMenu;
-        ToolTip.SetTip(_repeat, "Repeat this tune - a number of times, or forever");
+        ToolTip.SetTip(_repeat, "Repeat this tune - a number of times, or forever - or the whole playlist");
 
         // The controls together, play in the middle as their round heart and repeat a step apart
         // to its left - a setting, not a control; under them the time, played and to come, with a
@@ -675,6 +697,16 @@ internal sealed class PlayerWindow : Window
             meter.Items.Add(item);
         }
 
+        var chip = new MenuItem { Header = "SID chip" };
+        foreach (var (item, model) in new[] { (_tuneChip, (string?)null), (_chip6581, "6581"), (_chip8580, "8580") })
+        {
+            item.ToggleType = MenuItemToggleType.Radio;
+            item.GroupName = "Chip";
+            item.IsChecked = _settings.SidChip == model;
+            item.Click += (_, _) => ChooseChip(model);
+            chip.Items.Add(item);
+        }
+
         var menu = new Button
         {
             Content = new PathIcon
@@ -685,7 +717,7 @@ internal sealed class PlayerWindow : Window
             },
             Padding = new Thickness(9, 7),
             VerticalAlignment = VerticalAlignment.Center,
-            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, _everySong, new Separator(), _exportNotes, _exportSound, new Separator(), meter, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
+            Flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight, Items = { openFolder, _showPlaylists, _everySong, new Separator(), _exportNotes, _exportSound, new Separator(), meter, chip, new Separator(), _checkForUpdates, new Separator(), _smallFont, _bigFont } },
         };
         ToolTip.SetTip(menu, "Menu");
         AutomationProperties.SetName(menu, "Menu");
@@ -1025,29 +1057,37 @@ internal sealed class PlayerWindow : Window
     /// apart from what is heard, as fast as it goes, a window showing how far with a Cancel.</summary>
     private async Task ExportSoundAsync(SoundFormat format)
     {
+        // What plays now, taken before asking: the playlist may move on while the user chooses.
         int song = _song;
-        var length = _length?.Total ?? UnmeasuredLength;
-        bool fadeOut = _length is not { EndsQuiet: true };
+        var (playingModule, playingFile, playingPath) = (_module, _file, _path);
+        if (playingModule is null && (playingFile is null || !(_wholeTranscribed || _lengthUnknown)))
+            return;
         var muted = _muted.ToArray();
+        var chip = ChosenChip;
+        double width = _stereo.Value;
+        // The song's length and a fade after it, unless it ends in silence of its own - as asked.
+        string name = SoundExport.Name(format), extension = SoundExport.Extension(format);
+        if (await MessageWindow.ExportLengthAsync(this, $"Export the sound as {name}", _length?.Total ?? UnmeasuredLength,
+                _length is { EndsQuiet: true } ? 0 : SoundExport.FadeSeconds) is not var (length, fadeSeconds))
+            return;
+        bool fadeOut = fadeSeconds > 0;
         string title;
         Func<IProgress<double>, CancellationToken, short[]> render;
         Action<Stream, short[]> write;
-        if (_module is { } module && _path is { } modulePath)
+        if (playingModule is { } module && playingPath is { } modulePath)
         {
             title = SoundExport.FileName(module, modulePath);
-            double width = _stereo.Value;
-            render = (progress, cancel) => SoundExport.Render(module, length, fadeOut, muted, width, progress, cancel);
+            render = (progress, cancel) => SoundExport.Render(module, length, fadeOut, muted, width, progress, cancel, fadeSeconds);
             write = (stream, samples) => SoundExport.Write(stream, format, samples, module, modulePath);
         }
-        else if (_file is { } file && (_wholeTranscribed || _lengthUnknown))
+        else if (playingFile is { } file)
         {
             title = SoundExport.FileName(file, song);
-            render = (progress, cancel) => SoundExport.Render(file, song, length, fadeOut, muted, progress, cancel);
+            render = (progress, cancel) => SoundExport.Render(file, song, length, fadeOut, muted, progress, cancel, chip, fadeSeconds);
             write = (stream, samples) => SoundExport.Write(stream, format, samples, file, song);
         }
         else
             return;
-        string name = SoundExport.Name(format), extension = SoundExport.Extension(format);
         var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = $"Export the sound as {name}",
@@ -1179,7 +1219,9 @@ internal sealed class PlayerWindow : Window
     /// <summary>A playlist's tune, and the rest after it; one that will not play is passed over.</summary>
     private void PlayFromList(Playlist playlist, PlaylistTune tune)
     {
-        for ((Playlist List, PlaylistTune Tune)? at = (playlist, tune); at is { } here; at = After(here.List, here.Tune))
+        // Each tried once: a repeating playlist none of whose tunes will play comes back round.
+        var tried = new HashSet<PlaylistTune>();
+        for ((Playlist List, PlaylistTune Tune)? at = (playlist, tune); at is { } here && tried.Add(here.Tune); at = After(here.List, here.Tune))
         {
             if (_foundRun is { } run && !run.Any(h => h.Tune == here.Tune))
             {
@@ -1210,7 +1252,10 @@ internal sealed class PlayerWindow : Window
                 if (run[i].Tune == tune)
                     return run[i + 1];
         }
-        return playlist.After(tune) is { } next ? (playlist, next) : null;
+        if (playlist.After(tune) is { } next)
+            return (playlist, next);
+        // Repeating the playlist: after its last, its first again.
+        return _settings.RepeatPlaylist && playlist.Tunes.Count > 0 ? (playlist, playlist.Tunes[0]) : null;
     }
 
     /// <summary>The tune before <paramref name="tune"/>: the hit before it while playing a search's
@@ -1320,6 +1365,7 @@ internal sealed class PlayerWindow : Window
             RememberPlace();
         }
         ShowNextTune();
+        ShowRepeat();
     }
 
     private void PlayNextInList()
@@ -1537,6 +1583,7 @@ internal sealed class PlayerWindow : Window
 
     private string DescribeFile()
     {
+        _chipText = null;
         if (_recording is not null)
         {
             var said = new List<string>();
@@ -1562,7 +1609,9 @@ internal sealed class PlayerWindow : Window
             parts.Add(file.Author);
         if (!string.IsNullOrWhiteSpace(file.Released))
             parts.Add(file.Released);
-        parts.Add(file.Is8580 ? "8580" : "6581");
+        string asked = file.Is8580 ? "8580" : "6581";
+        int chipPart = parts.Count;
+        parts.Add(_settings.SidChip is { } chosen && chosen != asked ? $"{chosen} chosen, not {asked}" : asked);
         if (file.IsNtsc)
             parts.Add("NTSC");
         if (file.IsRsid)
@@ -1575,7 +1624,10 @@ internal sealed class PlayerWindow : Window
             parts.Add("CIA timer");
         if (file.Songs > 1)
             parts.Add($"{file.Songs} songs");
-        return string.Join("   ·   ", parts);
+        // Where the chip is in the line, for a click on it to swap it.
+        int start = parts.Take(chipPart).Sum(p => p.Length + Separator.Length);
+        _chipText = (start, parts[chipPart].Length);
+        return string.Join(Separator, parts);
     }
 
     /// <summary>Where the user left off: the tune last played, at the song it was on, paused at
@@ -1654,7 +1706,7 @@ internal sealed class PlayerWindow : Window
         try
         {
             _engine = prepared ?? (_recording is { } recording ? new AudioTune(recording, TakeDecoder(recording))
-                : _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song)));
+                : _module is { } module ? new ModuleTune(module) : new C64Tune(new C64PlaybackEngine(_file!, song, ChosenChip)));
             if (_engine is AudioTune audio && _recording is { } heard && _heardNotes.TryGetValue(heard, out var notes))
                 audio.SetNotes(notes);
             _engine.Volume = _volumeKnob.Gain;
@@ -2220,7 +2272,67 @@ internal sealed class PlayerWindow : Window
         else if (engine is AudioTune audio)
             _audioView.Show(audio, at);
         if (engine.Failure is { } failure && !_details.Text!.StartsWith("The tune stopped", StringComparison.Ordinal))
+        {
+            _chipText = null;
             _details.Text = $"The tune stopped: {failure}";
+        }
+    }
+
+    // ------------------------------------------------------------------ SID chip
+
+    private const string Separator = "   ·   ";
+
+    /// <summary>Where the SID chip is written in the details line - its first character and how many -
+    /// while a .sid's details are shown.</summary>
+    private (int Start, int Length)? _chipText;
+
+    /// <summary>Whether <paramref name="point"/>, on the details line, is on the chip written there.</summary>
+    private bool OnChip(Point point)
+    {
+        if (_chipText is not { } chip || _file is null)
+            return false;
+        var hit = _details.TextLayout.HitTestPoint(point - new Point(_details.Padding.Left, _details.Padding.Top));
+        return hit.IsInside && hit.TextPosition >= chip.Start && hit.TextPosition < chip.Start + chip.Length;
+    }
+
+    /// <summary>The chip the tune playing is heard on: the one chosen, or the one it asks for.</summary>
+    private string ChipHeard() => _settings.SidChip ?? (_file is { Is8580: true } ? "8580" : "6581");
+
+    /// <summary>The chip written in the details line clicked: the tune heard on the other one - the
+    /// 6581 for the 8580, the 8580 for the 6581 - and back on its own at the next click.</summary>
+    private void SwapChip()
+    {
+        if (_file is not { } file)
+            return;
+        string asked = file.Is8580 ? "8580" : "6581";
+        string heard = _settings.SidChip ?? asked;
+        string other = heard == "6581" ? "8580" : "6581";
+        ChooseChip(other == asked ? null : other);
+    }
+
+    /// <summary>The SID chip chosen to play every tune on; null for the one each tune asks for.</summary>
+    private ChipModel? ChosenChip => _settings.SidChip switch
+    {
+        "6581" => ChipModel.Mos6581,
+        "8580" => ChipModel.Mos8580,
+        _ => null,
+    };
+
+    /// <summary>The SID chip chosen and kept; a .sid playing heard on it at once, playing on.</summary>
+    private void ChooseChip(string? model)
+    {
+        if (_settings.SidChip == model)
+            return;
+        _settings.SidChip = model;
+        _settings.Save();
+        _tuneChip.IsChecked = model is null;
+        _chip6581.IsChecked = model == "6581";
+        _chip8580.IsChecked = model == "8580";
+        if (_file is null || _engine is not C64Tune playing)
+            return;
+        _details.Text = DescribeFile();
+        // Changed inside the tune as it plays - faded down and up around it - not made again.
+        playing.Engine.UseChip(ChosenChip);
     }
 
     // ------------------------------------------------------------------ repeat
@@ -2271,10 +2383,11 @@ internal sealed class PlayerWindow : Window
     private void ShowRepeat()
     {
         var times = RepeatTimes;
-        _repeat.Lit = times is not null;
+        bool wholeList = _settings.RepeatPlaylist && _queue is not null;
+        _repeat.Lit = times is not null || wholeList;
         _repeat.Badge = times switch
         {
-            null => null,
+            null => wholeList ? "All" : null,
             Favourites.Forever => "∞",
             { } n => $"{Math.Min(_played + 1, n)}/{n}",
         };
@@ -2300,6 +2413,23 @@ internal sealed class PlayerWindow : Window
             };
             menu.Items.Add(item);
         }
+        var wholeList = new MenuItem
+        {
+            Header = "Repeat the playlist",
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsChecked = _settings.RepeatPlaylist,
+        };
+        wholeList.Click += (_, _) =>
+        {
+            _settings.RepeatPlaylist = wholeList.IsChecked;
+            _settings.Save();
+            if (_settings.RepeatPlaylist)
+                _finished = false;
+            ShowRepeat();
+            ShowNextTune();
+        };
+        menu.Items.Add(new Separator());
+        menu.Items.Add(wholeList);
         menu.Open(_repeat);
     }
 
@@ -2323,7 +2453,16 @@ internal sealed class PlayerWindow : Window
             return;
         var target = TimeSpan.FromSeconds(length.Total.TotalSeconds * Math.Clamp(share, 0, 0.999));
         long sample = (long)(target.TotalSeconds * C64PlaybackEngine.SampleRate);
+        JumpToSample(sample, share);
+    }
+
+    /// <summary>The tune made again and run to <paramref name="sample"/> off the window's thread,
+    /// then played from there - paused, if it was; the time bar shows <paramref name="share"/> as it
+    /// goes, or nothing when below 0.</summary>
+    private async void JumpToSample(long sample, double share)
+    {
         var (file, module, recording, song, path) = (_file, _module, _recording, _song, _path);
+        var chip = ChosenChip;
         double stereo = _stereo.Value;
         var cancel = new CancellationTokenSource();
         _jump = cancel;
@@ -2341,7 +2480,7 @@ internal sealed class PlayerWindow : Window
                     moduleTune.SkipTo(sample, cancel.Token);
                     return moduleTune;
                 }
-                var engine = new C64PlaybackEngine(file!, song);
+                var engine = new C64PlaybackEngine(file!, song, chip);
                 engine.SkipTo(sample, cancel.Token);
                 return new C64Tune(engine);
             }, cancel.Token);

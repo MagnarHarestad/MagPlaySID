@@ -72,6 +72,13 @@ internal sealed class Settings
 
     public double TunesInto { get; set; }
 
+    /// <summary>The SID chip every tune plays on - "6581" or "8580" - whatever the tune asks for;
+    /// null for the one each asks for.</summary>
+    public string? SidChip { get; set; }
+
+    /// <summary>Whether a playlist starts again from its first tune when its last has played.</summary>
+    public bool RepeatPlaylist { get; set; }
+
     /// <summary>The window's size when it was last closed - not maximized, in device-independent
     /// pixels; 0 before it has been kept - and where on the screens it was, in pixels.</summary>
     public double WindowWidth { get; set; }

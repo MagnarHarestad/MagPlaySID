@@ -62,7 +62,7 @@ internal static class SoundExport
     /// <see cref="ModuleRate"/>, as loud as it plays in the window; <paramref name="progress"/> told
     /// how far, 0-1, as it goes.</summary>
     public static short[] Render(ITrackerModule module, TimeSpan length, bool fadeOut, IReadOnlyList<bool> muted, double stereoWidth,
-                                 IProgress<double>? progress = null, CancellationToken cancel = default)
+                                 IProgress<double>? progress = null, CancellationToken cancel = default, double fadeSeconds = FadeSeconds)
     {
         var player = module.CreatePlayer(ModuleRate, stereoWidth);
         for (int channel = 0; channel < muted.Count; channel++)
@@ -70,7 +70,7 @@ internal static class SoundExport
 
         int rate = ModuleRate;
         int heard = (int)Math.Max(rate, length.TotalSeconds * rate);
-        int fade = fadeOut ? (int)(FadeSeconds * rate) : 0;
+        int fade = fadeOut ? (int)(fadeSeconds * rate) : 0;
         var samples = new short[(heard + fade) * 2];
         var left = new float[rate / 10];
         var right = new float[left.Length];
@@ -106,16 +106,17 @@ internal static class SoundExport
     /// a tune whose SIDs are heard apart (<see cref="Channels"/>); <paramref name="progress"/> told
     /// how far, 0-1, as it goes.</summary>
     public static short[] Render(SidFile file, int song, TimeSpan length, bool fadeOut, IReadOnlyList<bool> muted,
-                                 IProgress<double>? progress = null, CancellationToken cancel = default)
+                                 IProgress<double>? progress = null, CancellationToken cancel = default,
+                                 MagSid.Sid.ChipModel? model = null, double fadeSeconds = FadeSeconds)
     {
-        var engine = new C64PlaybackEngine(file, song);
+        var engine = new C64PlaybackEngine(file, song, model);
         for (int voice = 0; voice < muted.Count; voice++)
             engine.SetVoiceMuted(voice, muted[voice]);
 
         int rate = C64PlaybackEngine.SampleRate;
         int channels = engine.WaveFormat.Channels;
         int heard = (int)Math.Max(rate, length.TotalSeconds * rate);
-        int fade = fadeOut ? (int)(FadeSeconds * rate) : 0;
+        int fade = fadeOut ? (int)(fadeSeconds * rate) : 0;
         var samples = new short[(heard + fade) * channels];
         var buffer = new byte[rate / 10 * 2 * channels];
         for (int at = 0; at < samples.Length;)
