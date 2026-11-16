@@ -129,7 +129,7 @@ internal sealed class InfoSheet
             c64.Add(new InfoRow($"SID {i + 2}", $"${file.ExtraSids[i]:X4}, {model}{Placed(file, i + 1)}"));
         }
         if (file.RequiresFmOpl)
-            c64.Add(new InfoRow("FM OPL", "Also plays an FM chip - an SFX Sound Expander or FM-YAM - which MagPlaySID does not have: only its SIDs are heard"));
+            c64.Add(new InfoRow("FM OPL", "Also plays an FM chip - an SFX Sound Expander or FM-YAM - heard with its SIDs, as Nuked OPL3 emulates it"));
         if (file.SongLengths is { } lengths)
             c64.Add(new InfoRow("Lengths in the file", string.Join(", ", lengths.Select((length, i) =>
                 (Songs > 1 ? $"{i + 1}: " : "") + (length is { } l ? l.ToString(l.TotalHours >= 1 ? @"h\:mm\:ss\.fff" : @"m\:ss\.fff", CultureInfo.InvariantCulture) : "?")))));

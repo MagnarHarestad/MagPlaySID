@@ -141,6 +141,9 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
             _voiceScopes[voice] = new float[RingSamples];
         }
 
+        // A tune for the Sound Expander has its FM chip heard with the SIDs.
+        if (file.RequiresFmOpl)
+            _fm = new FmSound(SampleRate);
         _tune = SidTune.Load(file, Math.Clamp(song, 1, Math.Max(1, file.Songs)), this, record: false);
         _tune.Computer.KeepsCalls = false;
         File = file;
@@ -592,6 +595,41 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
         }
     }
 
+    void ISidPort.WriteFm(long cycle, int register, int value)
+    {
+        if (_fm is null)
+            return;
+        if (!_skipping)
+            ClockTo(cycle);
+        _fm.Write(register, value);
+    }
+
+    /// <summary>The Sound Expander's FM chip, for a tune that asks for it; null for none.</summary>
+    private readonly FmSound? _fm;
+
+    /// <summary>The FM chip's sample to the SIDs': one to one - on the tunes made for it, the FM chip
+    /// and the SIDs then sound about as loud as each other.</summary>
+    private static double FmGain = 1.0;
+
+    /// <summary>The SIDs and the FM chip together taken down by this, so the two at their loudest do
+    /// not clip: given back by the loudness after (<see cref="FmHeadroomDb"/>).</summary>
+    private const double FmMix = 0.6;
+
+    /// <summary>The headroom <see cref="FmMix"/> leaves, in dB, for the loudness to give back.</summary>
+    public static readonly double FmHeadroomDb = -20 * Math.Log10(FmMix);
+
+    /// <summary>Whether the tune is heard with a Sound Expander's FM chip.</summary>
+    public bool HasFm => _fm is not null;
+
+    /// <summary>The FM chip's next sample added to the one just made - to both sides of a stereo tune.</summary>
+    private void AddFm()
+    {
+        double fm = _fm!.Next() * FmGain;
+        _pending[_pendingCount] = (short)Math.Clamp((_pending[_pendingCount] + fm) * FmMix, short.MinValue, short.MaxValue);
+        if (IsStereo)
+            _pendingRight[_pendingCount] = (short)Math.Clamp((_pendingRight[_pendingCount] + fm) * FmMix, short.MinValue, short.MaxValue);
+    }
+
     /// <summary>Whether the tune plays a digi through the volume register - known once it has.</summary>
     public bool PlaysDigi { get; private set; }
 
@@ -639,6 +677,8 @@ public sealed class C64PlaybackEngine : IWaveProvider, IScopeSource, ISidPort
                 MixIn(before - cycles, sampled);
             if (sampled == 0)
                 break;
+            if (_fm is not null)
+                AddFm();
             if (_silent)
                 continue;
             Capture(IsStereo ? (short)((_pending[_pendingCount] + _pendingRight[_pendingCount]) / 2) : _pending[_pendingCount]);

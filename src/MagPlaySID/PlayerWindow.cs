@@ -1842,7 +1842,7 @@ internal sealed class PlayerWindow : Window
         if (file.ExtraSids.Count > 0)
             parts.Add($"{1 + file.ExtraSids.Count}SID{(file.IsStereo ? " stereo" : "")}");
         if (file.RequiresFmOpl)
-            parts.Add("FM OPL not heard");
+            parts.Add("FM Sound Expander");
         if (file.UsesCiaTimer(_song))
             parts.Add("CIA timer");
         if (file.Songs > 1)

@@ -59,6 +59,8 @@ public sealed class SidTune
             return LoadBasic(file, song, sid, record);
 
         var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids, sid, record);
+        if (file.RequiresFmOpl)
+            machine.Expander = new SoundExpander(Machines.ClockHz(machine.Machine));
         // What the KERNAL leaves for a tune that asks which machine it is on, to set its pitches and
         // tempo by - 1 for PAL. Before the tune's own bytes, should it load over it.
         machine.Ram[PalFlag] = machine.Machine == Machine.Pal ? (byte)1 : (byte)0;
@@ -90,6 +92,8 @@ public sealed class SidTune
     private static SidTune LoadBasic(SidFile file, int song, ISidPort? sid, bool record)
     {
         var machine = new C64(file.IsNtsc ? Machine.Ntsc : Machine.Pal, file.ExtraSids, sid, record);
+        if (file.RequiresFmOpl)
+            machine.Expander = new SoundExpander(Machines.ClockHz(machine.Machine));
         BasicRoms.Install(machine);
         machine.Vic.StealsCycles = true;
         machine.Ram[PalFlag] = machine.Machine == Machine.Pal ? (byte)1 : (byte)0;

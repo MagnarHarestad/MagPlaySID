@@ -12,6 +12,12 @@ public interface ISidPort
     void Write(long cycle, int chip, int register, int value);
 
     byte Read(long cycle, int chip, int register);
+
+    /// <summary>A write to the FM chip of a Sound Expander (see <see cref="SoundExpander"/>): its
+    /// register, and the value.</summary>
+    void WriteFm(long cycle, int register, int value)
+    {
+    }
 }
 
 /// <summary>What the 6510 was running when it wrote to the SID.</summary>
@@ -152,6 +158,10 @@ public sealed class C64 : IMemoryBus
 
     public Vic Vic { get; }
 
+    /// <summary>The Sound Expander in the expansion port, for a tune that asks for its FM chip; null
+    /// for none - I/O 2 is then empty.</summary>
+    public SoundExpander? Expander { get; set; }
+
     /// <summary>All RAM, whatever is banked over it.</summary>
     public byte[] Ram => _ram;
 
@@ -181,6 +191,13 @@ public sealed class C64 : IMemoryBus
             if (chip.Since(Cpu.Cycles, Machines.ClockHz(Machine)) is not { } quiet)
                 return null;
             since = Math.Max(since, quiet);
+        }
+        // A tune for the Sound Expander is quiet only when its FM chip is too.
+        if (Expander is { } fm)
+        {
+            if (fm.QuietSince() is not { } fmQuiet)
+                return null;
+            since = Math.Max(since, fmQuiet);
         }
         return since;
     }
@@ -527,6 +544,7 @@ public sealed class C64 : IMemoryBus
             < 0xDC00 => (byte)(_colour[address - 0xD800] | 0xF0),
             < 0xDD00 => Cia1.Read(address),
             < 0xDE00 => Cia2.Read(address),
+            SoundExpander.StatusPort when Expander is { } fm => fm.ReadStatus(_io),
             _ => 0xFF,
         };
     }
@@ -555,6 +573,13 @@ public sealed class C64 : IMemoryBus
             case < 0xDC00: _colour[address - 0xD800] = (byte)(value & 0x0F); break;
             case < 0xDD00: Cia1.Write(address, value); break;
             case < 0xDE00: Cia2.Write(address, value); break;
+            case SoundExpander.AddressPort when Expander is { } fm:
+                fm.WriteAddress(value);
+                break;
+            case SoundExpander.DataPort when Expander is { } fm:
+                fm.WriteData(_io, value);
+                _chip?.WriteFm(_io, fm.Latch, value);
+                break;
         }
     }
 

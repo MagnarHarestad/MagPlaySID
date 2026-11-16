@@ -132,6 +132,29 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+## Nuked OPL3
+
+MagPlaySID plays the FM chip of the SFX Sound Expander and FM-YAM cartridges - for SID tunes that
+ask for it - with a C# translation of Nuked OPL3 1.8 (https://github.com/nukeykt/Nuked-OPL3), in
+`src/MagPlay.C64/NukedOpl3.cs`. That file stays under the GNU Lesser General Public License, version
+2.1 or later (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html); its source is the file
+itself, in this repository.
+
+```
+Nuked OPL3
+Copyright (C) 2013-2020 Nuke.YKT
+
+Nuked OPL3 is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as
+published by the Free Software Foundation, either version 2.1
+of the License, or (at your option) any later version.
+
+Nuked OPL3 is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+```
+
 ## Microsoft BASIC for 6502
 
 `src/MagPlay.C64/Basic/m6502.asm` is Microsoft's source of its 6502 BASIC, version 1.1 (1978), as
