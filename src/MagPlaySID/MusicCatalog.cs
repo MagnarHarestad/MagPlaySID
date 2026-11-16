@@ -102,8 +102,13 @@ internal sealed class MusicCatalog
 {
     private readonly Dictionary<string, MusicTune> _byPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, MusicFolder> _folders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _searchMade = new();
     private MusicTune[]? _all;
     private string[]? _searched;
+
+    /// <summary>The folder the last tune added went into, by its path: a list is in order, so the next
+    /// tune is most often in the same folder, found without a path made for each of its folders.</summary>
+    private MusicFolder? _lastFolder;
 
     private MusicCatalog(Collection from, string name)
     {
@@ -183,6 +188,14 @@ internal sealed class MusicCatalog
     {
         if (!_byPath.TryAdd(tune.Path, tune))
             return;
+        int slash = tune.Path.LastIndexOf('/');
+        if (_lastFolder is { } last && slash == last.Path.Length && tune.Path.AsSpan(0, slash).Equals(last.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            for (var up = last; up is not null; up = up.Parent)
+                up.Count++;
+            last.Tunes.Add(tune);
+            return;
+        }
         var folder = Root;
         var parts = tune.Path.Split('/');
         for (int i = 0; i < parts.Length - 1; i++)
@@ -199,6 +212,7 @@ internal sealed class MusicCatalog
         }
         folder.Count++;
         folder.Tunes.Add(tune);
+        _lastFolder = folder;
     }
 
     private void Arrange(MusicFolder folder)
@@ -217,10 +231,13 @@ internal sealed class MusicCatalog
         var words = Plain(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0)
             return [];
-        if (_searched is null)
+        lock (_searchMade)
         {
-            _all = [.. _byPath.Values.OrderBy(t => t.Path, StringComparer.OrdinalIgnoreCase)];
-            _searched = [.. _all.Select(t => Plain(t.Path))];
+            if (_searched is null)
+            {
+                _all = [.. _byPath.Values.OrderBy(t => t.Path, StringComparer.OrdinalIgnoreCase)];
+                _searched = [.. _all.Select(t => Plain(t.Path))];
+            }
         }
         var named = new List<MusicTune>();
         var inFolder = new List<MusicTune>();
@@ -249,13 +266,22 @@ internal sealed class MusicCatalog
             .Take(most)];
     }
 
-    /// <summary>The words of every path made ready, off the UI thread: the first search is then as
-    /// quick as the rest.</summary>
+    /// <summary>The words of every path made ready, off the UI thread - after the list is shown: the
+    /// first search is then as quick as the rest.</summary>
     public void Warm() => Search("warm", 1);
 
     /// <summary>Lower case, without accents, a word's parts apart: "Mötley_Crüe" is "motley crue".</summary>
     private static string Plain(string text)
     {
+        // Most names are plain letters already: made so in one go, not taken apart for accents.
+        if (System.Text.Ascii.IsValid(text))
+        {
+            return string.Create(text.Length, text, (to, from) =>
+            {
+                for (int i = 0; i < from.Length; i++)
+                    to[i] = from[i] is '_' or '-' ? ' ' : char.ToLowerInvariant(from[i]);
+            });
+        }
         var plain = new StringBuilder(text.Length);
         foreach (char c in text.Normalize(NormalizationForm.FormD))
         {

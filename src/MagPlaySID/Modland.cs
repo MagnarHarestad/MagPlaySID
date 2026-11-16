@@ -50,8 +50,21 @@ internal static class Modland
     /// with a module's name.</summary>
     public static bool Wanted(string path)
     {
+        // Read for each of half a million lines: nothing made to tell.
         int slash = path.IndexOf('/');
-        return slash > 0 && Formats.Contains(path[..slash]) && TrackerModules.IsModuleName(path);
+        if (slash <= 0)
+            return false;
+        var format = path.AsSpan(0, slash);
+        bool ours = false;
+        foreach (var known in Formats)
+            ours |= format.Equals(known, StringComparison.OrdinalIgnoreCase);
+        if (!ours)
+            return false;
+        var name = path.AsSpan(path.LastIndexOf('/') + 1);
+        return name.StartsWith("mod.", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".mod", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".s3m", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".xm", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".it", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".mptm", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The list of Modland's modules, read off the UI thread: the one kept, fetched again
@@ -78,7 +91,8 @@ internal static class Modland
         MusicCatalog catalog;
         using (var reader = new StreamReader(ListPath, Encoding.UTF8))
             catalog = MusicCatalog.ParseModland(reader, Wanted);
-        catalog.Warm();
+        // Its words for searching made behind it: the list is shown without waiting for them.
+        _ = Task.Run(catalog.Warm);
         return catalog;
     }
 

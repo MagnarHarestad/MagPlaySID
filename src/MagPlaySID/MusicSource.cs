@@ -32,6 +32,9 @@ internal abstract class MusicSource
 
     public abstract Task<MusicCatalog> CatalogAsync();
 
+    /// <summary>Whether its list is on this computer - read with nothing asked online.</summary>
+    public abstract bool ListHere { get; }
+
     /// <summary>Where one of its tunes - by its path in it - is kept on this computer.</summary>
     public abstract string LocalPath(string path);
 
@@ -68,6 +71,7 @@ internal abstract class MusicSource
             : "Getting the list of HVSC's tunes - 5 MB, fetched again once a week...";
         public override MusicCatalog? Catalog => MagPlaySid.Hvsc.Catalog;
         public override Task<MusicCatalog> CatalogAsync() => MagPlaySid.Hvsc.CatalogAsync();
+        public override bool ListHere => MagPlaySid.Hvsc.ListHere;
         public override string LocalPath(string path) => MagPlaySid.Hvsc.LocalPath(path);
         public override string? PathOf(string localPath) => MagPlaySid.Hvsc.HvscPath(localPath);
         public override bool NeedsFetch(string localPath) => MagPlaySid.Hvsc.NeedsFetch(localPath);
@@ -86,6 +90,7 @@ internal abstract class MusicSource
             : "Getting the list of Modland's modules - 6 MB, fetched again once a week...";
         public override MusicCatalog? Catalog => MagPlaySid.Modland.Catalog;
         public override Task<MusicCatalog> CatalogAsync() => MagPlaySid.Modland.CatalogAsync();
+        public override bool ListHere => File.Exists(MagPlaySid.Modland.ListPath);
         public override string LocalPath(string path) => MagPlaySid.Modland.LocalPath(path);
         public override string? PathOf(string localPath) => MagPlaySid.Modland.ModlandPath(localPath);
         public override bool NeedsFetch(string localPath) => MagPlaySid.Modland.NeedsFetch(localPath);

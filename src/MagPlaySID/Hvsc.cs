@@ -30,6 +30,9 @@ internal static class Hvsc
 
     private static string ListPath => System.IO.Path.Combine(Root, "DOCUMENTS", "Songlengths.md5");
 
+    /// <summary>Whether the list can be read without HVSC online: from the user's copy, or kept.</summary>
+    public static bool ListHere => HvscArchive.ListFile is not null || File.Exists(ListPath);
+
     private static Task<MusicCatalog>? _loading;
     private static readonly Dictionary<string, Task> Fetching = new(StringComparer.OrdinalIgnoreCase);
 
@@ -81,7 +84,8 @@ internal static class Hvsc
         MusicCatalog catalog;
         using (var reader = new StreamReader(list, Encoding.Latin1))
             catalog = MusicCatalog.ParseSonglengths(reader);
-        catalog.Warm();
+        // Its words for searching made behind it: the list is shown without waiting for them.
+        _ = Task.Run(catalog.Warm);
         return catalog;
     }
 

@@ -1117,13 +1117,17 @@ internal sealed partial class PlaylistStrip : Border
     public Playlist? Find(string? name) =>
         name is null ? null : _lists.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The playlist called <paramref name="name"/> shown, if there is one.</summary>
+    /// <summary>The playlist called <paramref name="name"/> shown, if there is one - as the program
+    /// starts. A collection's folder is shown again only when its list is on this computer: the
+    /// program does not start waiting on HVSC or Modland online - the first playlist then.</summary>
     public void Show(string? name)
     {
         if (_browsed.FirstOrDefault(b => name?.StartsWith(b.Prefix, StringComparison.Ordinal) == true) is { } browsed)
         {
-            if (browsed.Row.IsVisible)
+            if (browsed.Row.IsVisible && browsed.Source.ListHere)
                 ShowCollection(browsed.Source, name![browsed.Prefix.Length..]);
+            else if (_listBox.SelectedItem is null && _lists.Count > 0)
+                _listBox.SelectedIndex = 0;
             return;
         }
         if (Find(name) is { } playlist)

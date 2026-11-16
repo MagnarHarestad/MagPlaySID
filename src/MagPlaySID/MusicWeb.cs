@@ -18,7 +18,8 @@ internal static class MusicWeb
 
     private static HttpClient Client(TimeSpan timeout)
     {
-        var http = new HttpClient { Timeout = timeout };
+        // A site that does not answer at all is given up on in seconds: the timeout is for a slow one.
+        var http = new HttpClient(new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(8) }) { Timeout = timeout };
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("MagPlaySID", UpdateCheck.Describe(UpdateCheck.Current)[1..]));
         return http;
     }
