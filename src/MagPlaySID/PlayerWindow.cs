@@ -204,6 +204,9 @@ internal sealed class PlayerWindow : Window
 
         // The user's own copy of HVSC, when it is there: a drive taken out leaves it kept, unused.
         HvscArchive.Folder = _settings.HvscArchive is { } archive ? HvscArchive.Find(archive) : null;
+        // An update of it cut short - MagPlaySID stopped half way - undone: the copy as it was before.
+        if (HvscArchive.Folder is { } copy)
+            HvscUpdate.Recover(copy);
         _strip = new PlaylistStrip(this) { PlaylistsHeight = _settings.PlaylistsHeight };
         _strip.ShowCollectionRow(MusicSource.Hvsc, !_settings.HideHvsc);
         _strip.ShowCollectionRow(MusicSource.Modland, !_settings.HideModland);

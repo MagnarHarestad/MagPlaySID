@@ -85,6 +85,70 @@ internal static partial class HvscArchive
     public static string? TunePath(string hvscPath) =>
         Folder is { } folder && Path.Combine([folder, .. hvscPath.Split('/')]) is var path && File.Exists(path) ? path : null;
 
+    /// <summary>
+    /// The updates that take a copy of HVSC #<paramref name="mine"/> to the newest, each by its number and
+    /// where it is: the one HVSC's API names, when the copy is the HVSC it needs; for an older copy, the
+    /// ones before it too, named as it is named - up to four. Null when the copy cannot be updated so,
+    /// and the whole of HVSC is downloaded instead.
+    /// </summary>
+    public static IReadOnlyList<(int Version, string Url)>? UpdatesFor(HvscRelease latest, int mine)
+    {
+        if (latest.UpdateUrl is not { } url || latest.UpdateFrom is not { } from || mine >= latest.Version || mine > from)
+            return null;
+        if (mine == from)
+            return [(latest.Version, url)];
+        string number = latest.Version.ToString(CultureInfo.InvariantCulture);
+        int at = url.LastIndexOf("_" + number + ".", StringComparison.OrdinalIgnoreCase);
+        if (at < 0 || latest.Version - mine > 4 || from != latest.Version - 1)
+            return null;
+        return [.. Enumerable.Range(mine + 1, latest.Version - mine)
+            .Select(v => (v, url[..(at + 1)] + v.ToString(CultureInfo.InvariantCulture) + url[(at + 1 + number.Length)..]))];
+    }
+
+    /// <summary>
+    /// The user's copy updated in place - each of <paramref name="updates"/> downloaded, unpacked beside
+    /// it and applied, as HVSC's Update Tool would, its tunes checked against the new list after each. The
+    /// copy is checked first: one that is not as HVSC made it is not updated, but downloaded whole.
+    /// A failure or a cancel leaves the copy as it was before that update. Throws
+    /// <see cref="MusicSourceException"/> saying why.
+    /// </summary>
+    public static async Task UpdateAsync(string c64Music, IReadOnlyList<(int Version, string Url)> updates, IProgress<(string Step, double Part)> progress, CancellationToken cancel)
+    {
+        string parent = Path.GetDirectoryName(Path.GetFullPath(c64Music).TrimEnd(Path.DirectorySeparatorChar))!;
+        HvscUpdate.Recover(c64Music);
+        int? mine = VersionOf(c64Music);
+        progress.Report(($"Checking your HVSC #{mine}", 0));
+        if (await Task.Run(() => HvscUpdate.Check(c64Music, progress, $"Checking your HVSC #{mine}", cancel), cancel) is { } wrong)
+            throw new MusicSourceException($"your copy is not HVSC #{mine} as HVSC made it: {wrong}");
+
+        foreach (var (version, url) in updates)
+        {
+            string downloaded = Path.Combine(parent, $"HVSC_Update_{version}.7z");
+            string unpacked = HvscUpdate.UnpackFolder(c64Music);
+            try
+            {
+                var told = new Progress<double>(part => progress.Report(($"Downloading update #{version}", part)));
+                await MusicWeb.DownloadAsync(Source, url, downloaded, told, cancel);
+                if (Directory.Exists(unpacked))
+                    Directory.Delete(unpacked, true);
+                await Task.Run(() => Extract(downloaded, unpacked, $"Unpacking update #{version}", progress, cancel), cancel);
+                await Task.Run(() => HvscUpdate.Apply(c64Music, unpacked, version, progress, cancel), cancel);
+            }
+            finally
+            {
+                try
+                {
+                    File.Delete(downloaded);
+                    if (Directory.Exists(unpacked))
+                        Directory.Delete(unpacked, true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+    }
+
     /// <summary>The newest HVSC, from HVSC's version API.</summary>
     public static async Task<HvscRelease> LatestAsync(CancellationToken cancel)
     {
@@ -134,7 +198,7 @@ internal static partial class HvscArchive
             string fresh = Path.Combine(parent, "C64Music.new");
             if (Directory.Exists(fresh))
                 Directory.Delete(fresh, true);
-            await Task.Run(() => Extract(sevenZip, fresh, progress, cancel), cancel);
+            await Task.Run(() => Extract(sevenZip, fresh, "Unpacking HVSC", progress, cancel), cancel);
             string unpacked = Find(fresh) ?? throw new MusicSourceException($"{Path.GetFileName(sevenZip)} holds no HVSC: there is no DOCUMENTS{Path.DirectorySeparatorChar}Songlengths.md5 in it.");
 
             progress.Report(("Putting HVSC in place", 1));
@@ -181,7 +245,7 @@ internal static partial class HvscArchive
 
     /// <summary>Every file of a .7z into <paramref name="into"/>, in the order it is packed - read once
     /// from start to end, as a solid archive must be. A name that would land outside is refused.</summary>
-    private static void Extract(string sevenZip, string into, IProgress<(string Step, double Part)> progress, CancellationToken cancel)
+    private static void Extract(string sevenZip, string into, string step, IProgress<(string Step, double Part)> progress, CancellationToken cancel)
     {
         string root = Path.GetFullPath(into) + Path.DirectorySeparatorChar;
         Directory.CreateDirectory(root);
@@ -211,7 +275,7 @@ internal static partial class HvscArchive
                 if ((int)(done * 500 / total) is var now && now != told)
                 {
                     told = now;
-                    progress.Report(("Unpacking HVSC", (double)done / total));
+                    progress.Report((step, (double)done / total));
                 }
             }
         }

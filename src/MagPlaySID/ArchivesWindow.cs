@@ -39,6 +39,9 @@ internal sealed class ArchivesWindow : Window
     private bool _modlandBusy;
     private HvscRelease? _latest;
     private long? _latestSize;
+
+    /// <summary>How large each update is to download, by where it is, as it is learned.</summary>
+    private readonly Dictionary<string, long?> _updateSizes = [];
     private string? _latestFailure;
     private bool _asking = true;
     private CancellationTokenSource? _work;
@@ -160,6 +163,7 @@ internal sealed class ArchivesWindow : Window
             _latest = await HvscArchive.LatestAsync(CancellationToken.None);
             _latestFailure = null;
             _latestSize = await MusicWeb.SizeAsync(_latest.CompleteUrl, CancellationToken.None);
+            await MeasureUpdatesAsync();
         }
         catch (Exception ex) when (MusicWeb.Failed(ex))
         {
@@ -167,6 +171,23 @@ internal sealed class ArchivesWindow : Window
         }
         _asking = false;
         ShowState();
+    }
+
+    /// <summary>The updates that take the user's copy to the newest HVSC, when it can be updated so - and
+    /// each is there to download: one the site does not have, the whole of HVSC is offered instead.</summary>
+    private IReadOnlyList<(int Version, string Url)>? Updates()
+    {
+        var updates = _latest is { } latest && HvscArchive.Folder is { } folder && HvscArchive.VersionOf(folder) is { } mine
+            ? HvscArchive.UpdatesFor(latest, mine) : null;
+        return updates is not null && updates.Any(u => _updateSizes.TryGetValue(u.Url, out var size) && size is null) ? null : updates;
+    }
+
+    /// <summary>How large the updates are, asked of where they are.</summary>
+    private async Task MeasureUpdatesAsync()
+    {
+        foreach (var (_, url) in Updates() ?? [])
+            if (!_updateSizes.ContainsKey(url))
+                _updateSizes[url] = await MusicWeb.SizeAsync(url, CancellationToken.None) is > 0 and var size ? size : null;
     }
 
     private void ShowState()
@@ -189,6 +210,13 @@ internal sealed class ArchivesWindow : Window
             : "";
 
         string size = _latestSize is { } bytes ? $" ({bytes / (1024.0 * 1024.0):0} MB)" : "";
+        var updates = Updates();
+        if (updates is not null)
+        {
+            // The updates' own size: a few megabytes, where the whole is eighty.
+            var sizes = updates.Select(u => _updateSizes.GetValueOrDefault(u.Url)).ToList();
+            size = sizes.All(s => s is not null) ? $" ({sizes.Sum(s => s!.Value) / (1024.0 * 1024.0):0.0} MB)" : "";
+        }
         _download.Content = _latest is null ? "Download HVSC"
             : folder is null ? $"Download HVSC #{_latest.Version}{size}"
             : $"Update to HVSC #{_latest.Version}{size}";
@@ -202,9 +230,54 @@ internal sealed class ArchivesWindow : Window
 
     private async Task DownloadAsync()
     {
-        if (_latest is not { } latest || await ParentAsync() is not { } parent)
+        if (_latest is not { } latest)
             return;
-        await InstallAsync(latest.CompleteUrl, parent);
+        if (HvscArchive.Folder is { } folder && Updates() is { } updates)
+        {
+            await UpdateInPlaceAsync(folder, latest, updates);
+            return;
+        }
+        if (await ParentAsync() is { } parent)
+            await InstallAsync(latest.CompleteUrl, parent);
+    }
+
+    /// <summary>The user's copy updated where it is, by HVSC's updates; when that cannot be done, the
+    /// whole of HVSC offered in its place.</summary>
+    private async Task UpdateInPlaceAsync(string folder, HvscRelease latest, IReadOnlyList<(int Version, string Url)> updates)
+    {
+        using var work = _work = new CancellationTokenSource();
+        _step.Text = "Starting...";
+        _bar.Value = 0;
+        ShowState();
+        string? failure = null;
+        try
+        {
+            var progress = new Progress<(string Step, double Part)>(told =>
+            {
+                _step.Text = $"{told.Step}... {told.Part * 100:0}%";
+                _bar.Value = told.Part;
+            });
+            await HvscArchive.UpdateAsync(folder, updates, progress, work.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex) when (MusicWeb.Failed(ex))
+        {
+            failure = ex.Message;
+        }
+        finally
+        {
+            _work = null;
+            // The list read again: the copy may have moved on by an update or more, even when a later one failed.
+            Use(folder);
+        }
+        if (failure is not null && IsVisible
+            && await MessageWindow.AskAsync(this, "HVSC could not be updated",
+                   $"The update could not be applied: {failure}.{Environment.NewLine}{Environment.NewLine}Your copy is as it was before it. "
+                   + $"Download the whole of HVSC #{latest.Version}{(_latestSize is { } bytes ? $" ({bytes / (1024.0 * 1024.0):0} MB)" : "")} in its place instead?",
+                   "Download it", "Cancel"))
+            await InstallAsync(latest.CompleteUrl, Path.GetDirectoryName(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar))!);
     }
 
     private async Task From7zAsync()
