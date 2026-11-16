@@ -83,7 +83,14 @@ internal sealed class ModuleView : Control, ICustomHitTest
 
     private double TrackerWidth => RowNumberWidth + Channels * (ChannelWidth + Gap);
 
-    private double PanelWidth => 30 * _charWidth;
+    /// <summary>The panel as wide as the module's longest sample name needs: 18 characters at least,
+    /// 28 at most - S3M's longest; ProTracker's and FastTracker's are 22, Impulse Tracker's 26.</summary>
+    private int _nameChars = MinNameChars;
+
+    private const int MinNameChars = 18;
+    private const int MostNameChars = 28;
+
+    private double PanelWidth => (_nameChars + 12) * _charWidth;
 
     /// <summary>The width the rows and the samples take.</summary>
     public double ContentWidth => TrackerWidth + Gap + PanelWidth;
@@ -115,13 +122,15 @@ internal sealed class ModuleView : Control, ICustomHitTest
             _empties = [];
             _sampleLines = [];
             _listed = [];
+            _nameChars = MinNameChars;
         }
         else
         {
             _cells = new string[module.PatternCount][];
             _empties = new bool[module.PatternCount][];
             _rowDigits = Enumerable.Range(0, module.PatternCount).Any(p => module.RowsIn(p) > 100) ? 3 : 2;
-            _sampleLines = module.Samples.Select((s, i) => SampleLine(i + 1, s)).ToArray();
+            _nameChars = Math.Clamp(module.Samples.Select(s => s.Name.TrimEnd().Length).DefaultIfEmpty(0).Max(), MinNameChars, MostNameChars);
+            _sampleLines = module.Samples.Select((s, i) => SampleLine(i + 1, s, _nameChars)).ToArray();
             // An empty slot - ProTracker keeps it two bytes long - and no name: nothing to list.
             _listed = Enumerable.Range(0, module.Samples.Count)
                 .Where(s => module.Samples[s].Bytes > 2 || !string.IsNullOrEmpty(module.Samples[s].Name)).ToArray();
@@ -316,7 +325,7 @@ internal sealed class ModuleView : Control, ICustomHitTest
     }
 
     /// <summary>The bar's left edge and width: in the panel's last characters, past the sizes.</summary>
-    private double BarLeft => _listLeft + (28.6 * _charWidth);
+    private double BarLeft => _listLeft + ((_nameChars + 10.6) * _charWidth);
     private double BarWidth => 5 * _scale;
 
     private double Thumb => Math.Max(RowHeight, _listShown * RowHeight * _listShown / Math.Max(1, _listed.Length));
@@ -410,11 +419,13 @@ internal sealed class ModuleView : Control, ICustomHitTest
         base.OnPointerReleased(e);
     }
 
-    private static string SampleLine(int number, ModuleSample sample)
+    private static string SampleLine(int number, ModuleSample sample, int nameChars)
     {
-        string name = sample.Name.Length > 18 ? sample.Name[..18] : sample.Name;
+        string name = sample.Name.TrimEnd();
+        if (name.Length > nameChars)
+            name = name[..nameChars];
         string size = sample.Bytes >= 10000 ? $"{sample.Bytes / 1024}K" : $"{sample.Bytes}";
-        return $"{number:X2} {name,-18} {size,6}";
+        return $"{number:X2} {name.PadRight(nameChars)} {size,6}";
     }
 
     private TextLayout Measure(string text, Color? ink = null, bool bold = false)
