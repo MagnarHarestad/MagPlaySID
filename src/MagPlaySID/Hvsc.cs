@@ -11,10 +11,10 @@ namespace MagPlaySid;
 /// </summary>
 internal static class Hvsc
 {
-    /// <summary>HVSC's own site first, then a mirror.</summary>
+    /// <summary>HVSC's default mirror, kept by Laust for HVSC: the one HVSC's own version API
+    /// downloads from, more often up than HVSC's site - which HVSC asks players not to lean on.</summary>
     private static readonly string[] Mirrors =
     [
-        "https://hvsc.de/download/C64Music/",
         "https://hvsc.brona.dk/HVSC/C64Music/",
     ];
 
