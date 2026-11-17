@@ -34,7 +34,10 @@ public sealed class SoundExpander(double c64ClockHz)
 
     /// <summary>The cycle from which the FM chip has been silent, a release after its last note went
     /// off; null while a note is keyed.</summary>
-    public long? QuietSince() => _keyed != 0 || _drums != 0 ? null : _lastOff + (long)(ReleaseSeconds * c64ClockHz);
+    public long? QuietSince() => _keyed != 0 || _drums != 0 || _digi ? null : _lastOff + (long)(ReleaseSeconds * c64ClockHz);
+
+    /// <summary>Whether a digi is armed (<see cref="FmSound"/>): sounding, as a keyed note is.</summary>
+    private bool _digi;
     private bool _run1, _run2, _mask1, _mask2, _flag1, _flag2;
     private double _due1, _due2;
 
@@ -44,6 +47,13 @@ public sealed class SoundExpander(double c64ClockHz)
     public void WriteData(long cycle, int value)
     {
         Update(cycle);
+        if (Latch == 0x01)
+        {
+            bool digi = (value & 0xFF) == FmSound.DigiArm;
+            if (_digi && !digi)
+                _lastOff = cycle;
+            _digi = digi;
+        }
         if (Latch is >= 0xB0 and <= 0xB8)
             Key(cycle, ref _keyed, 1 << (Latch - 0xB0), (value & 0x20) != 0);
         else if (Latch == 0xBD)
@@ -137,12 +147,35 @@ public sealed class FmSound
     private bool _waveformsOn;
     private readonly short[] _pair = new short[2];
 
+    /// <summary>The test register's value that arms the digi: 0x04 written to $01.</summary>
+    public const int DigiArm = 0x04;
+
+    /// <summary>
+    /// A digi played through the FM chip. A real OPL2 sounds the bytes a tune writes to channel 1's and
+    /// 2's frequency ($A0, $A1) once 0x04 is in its test register; Nuked OPL3 does not. While armed - as
+    /// SIDKick-Pico, and Wilfred Bos's SID-Device after it, do - those bytes are 8-bit samples, held
+    /// until the next, and they are the FM chip's sound: its own is not made. Any other value in the test
+    /// register lets the chip sound again, from where it stopped.
+    /// </summary>
+    private bool _digi;
+    private readonly int[] _digiSample = new int[2];
+
+    /// <summary>A digi byte, 0-255 around 128, made a sample: as loud as SID-Device makes it.</summary>
+    private const int DigiScale = 64;
+
     public FmSound(int sampleRate) => _chip = new NukedOpl3(sampleRate);
 
     public void Write(int register, int value)
     {
         register &= 0xFF;
         byte data = (byte)value;
+        if (register == 0x01)
+            _digi = data == DigiArm;
+        if (_digi && register is 0xA0 or 0xA1)
+        {
+            _digiSample[register - 0xA0] = (data - 128) * DigiScale;
+            return;
+        }
         if (register == 0x01)
         {
             bool on = (data & 0x20) != 0;
@@ -166,6 +199,8 @@ public sealed class FmSound
     /// <summary>The next sample, mono - an OPL2 has one output.</summary>
     public short Next()
     {
+        if (_digi)
+            return (short)Math.Clamp(_digiSample[0] + _digiSample[1], short.MinValue, short.MaxValue);
         _chip.GenerateResampled(_pair);
         return _pair[0];
     }
