@@ -100,20 +100,26 @@ internal sealed class MusicFolder(Collection from, string name, string path, Mus
 /// </summary>
 internal sealed class MusicCatalog
 {
-    private readonly Dictionary<string, MusicTune> _byPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, MusicTune> _byPath;
     private readonly Dictionary<string, MusicFolder> _folders = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _searchMade = new();
     private MusicTune[]? _all;
-    private string[]? _searched;
+
+    /// <summary>Every tune's path made plain for searching (<see cref="Plain"/>), one after another
+    /// in <see cref="_all"/>'s order, tune i's from _starts[i] to _starts[i + 1]: one block, not a
+    /// string for each of 166,000 tunes for the collector to go through again and again.</summary>
+    private char[]? _searched;
+    private int[]? _starts;
 
     /// <summary>The folder the last tune added went into, by its path: a list is in order, so the next
     /// tune is most often in the same folder, found without a path made for each of its folders.</summary>
     private MusicFolder? _lastFolder;
 
-    private MusicCatalog(Collection from, string name)
+    private MusicCatalog(Collection from, string name, int expected)
     {
         From = from;
         Root = new MusicFolder(from, name, "", null);
+        _byPath = new(Math.Max(0, expected), StringComparer.OrdinalIgnoreCase);
     }
 
     public Collection From { get; }
@@ -127,61 +133,137 @@ internal sealed class MusicCatalog
     public MusicFolder? Folder(string path) => path.Length == 0 ? Root : _folders.GetValueOrDefault(path);
 
     /// <summary>HVSC's Songlengths.md5 read: "; /MUSICIANS/H/Hubbard_Rob/Commando.sid" over each
-    /// "md5=3:22 1:05" line.</summary>
-    public static MusicCatalog ParseSonglengths(TextReader reader)
+    /// "md5=3:22 1:05" line. <paramref name="expected"/>, the tunes there are about, makes room for
+    /// them at once.</summary>
+    public static MusicCatalog ParseSonglengths(TextReader reader, int expected = 0)
     {
-        var catalog = new MusicCatalog(Collection.Hvsc, "HVSC");
+        var catalog = new MusicCatalog(Collection.Hvsc, "HVSC", expected);
         string? path = null;
-        for (string? line = reader.ReadLine(); line is not null; line = reader.ReadLine())
+        ForEachLine(reader, line =>
         {
             if (line.StartsWith("; /", StringComparison.Ordinal))
             {
-                path = line[3..].Trim();
-                continue;
+                path = new string(line[3..].Trim());
+                return;
             }
             int equals = line.IndexOf('=');
             if (path is null || equals != 32)
-                continue;
-            catalog.Add(new MusicTune(Collection.Hvsc, path, line[..32].ToUpperInvariant(), Lengths(line[(equals + 1)..])));
+                return;
+            catalog.Add(new MusicTune(Collection.Hvsc, path, Upper(line[..32]), Lengths(line[(equals + 1)..])));
             path = null;
-        }
+        });
         catalog.Arrange(catalog.Root);
         return catalog;
     }
 
     /// <summary>Modland's list read - "117992&lt;tab&gt;Protracker/4-Mat/1978.mod" for each file - keeping
-    /// those <paramref name="wanted"/> says are tunes played here.</summary>
-    public static MusicCatalog ParseModland(TextReader reader, Func<string, bool> wanted)
+    /// those <paramref name="wanted"/> says are tunes played here. <paramref name="expected"/>, the
+    /// tunes there are about, makes room for them at once.</summary>
+    public static MusicCatalog ParseModland(TextReader reader, Func<string, bool> wanted, int expected = 0)
     {
-        var catalog = new MusicCatalog(Collection.Modland, "Modland");
-        for (string? line = reader.ReadLine(); line is not null; line = reader.ReadLine())
+        var catalog = new MusicCatalog(Collection.Modland, "Modland", expected);
+        ForEachLine(reader, line =>
         {
             int tab = line.IndexOf('\t');
             if (tab <= 0 || tab == line.Length - 1)
-                continue;
-            string path = line[(tab + 1)..];
+                return;
+            string path = new(line[(tab + 1)..]);
             if (wanted(path))
                 catalog.Add(new MusicTune(Collection.Modland, path, "", []));
-        }
+        });
         catalog.Arrange(catalog.Root);
         return catalog;
     }
 
-    /// <summary>"3:22 1:05.250(G)" - each song's length, any old mark after it let go.</summary>
-    private static TimeSpan[] Lengths(string text)
+    private delegate void LineReader(ReadOnlySpan<char> line);
+
+    /// <summary>Each line of <paramref name="reader"/>, as <see cref="TextReader.ReadLine"/> splits
+    /// them - at "\r\n", "\n" or "\r", the last one with or without - but read into one buffer: a
+    /// string is made only of what is kept, not of every line.</summary>
+    private static void ForEachLine(TextReader reader, LineReader take)
     {
-        var lengths = new List<TimeSpan>();
-        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        var buffer = new char[64 * 1024];
+        int start = 0, end = 0;
+        bool done = false;
+        while (true)
         {
-            string plain = word.Split('(')[0];
-            var parts = plain.Split(':');
-            if (parts.Length == 2 && int.TryParse(parts[0], out int minutes)
-                && double.TryParse(parts[1], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double seconds))
-                lengths.Add(TimeSpan.FromSeconds((minutes * 60) + seconds));
-            else
-                lengths.Add(TimeSpan.Zero);
+            int at = buffer.AsSpan(start, end - start).IndexOfAny('\r', '\n');
+            // A line ends where its "\r" is only once it is known whether a "\n" follows it.
+            if (at >= 0 && (buffer[start + at] == '\n' || start + at + 1 < end || done))
+            {
+                take(buffer.AsSpan(start, at));
+                start += at + 1;
+                if (buffer[start - 1] == '\r' && start < end && buffer[start] == '\n')
+                    start++;
+                continue;
+            }
+            if (done)
+            {
+                if (start < end)
+                    take(buffer.AsSpan(start, end - start));
+                return;
+            }
+            // More read in behind what is left: moved to the front, the buffer made bigger for a
+            // line longer than it.
+            int left = end - start;
+            if (left == buffer.Length)
+                Array.Resize(ref buffer, buffer.Length * 2);
+            else if (start > 0)
+                Array.Copy(buffer, start, buffer, 0, left);
+            (start, end) = (0, left);
+            int read = reader.Read(buffer, end, buffer.Length - end);
+            if (read == 0)
+                done = true;
+            end += read;
         }
-        return [.. lengths];
+    }
+
+    /// <summary>An MD5 in upper case: one string made, not two.</summary>
+    private static string Upper(ReadOnlySpan<char> md5)
+    {
+        Span<char> upper = stackalloc char[md5.Length];
+        md5.ToUpperInvariant(upper);
+        return new string(upper);
+    }
+
+    /// <summary>"3:22 1:05.250(G)" - each song's length, any old mark after it let go.</summary>
+    private static TimeSpan[] Lengths(ReadOnlySpan<char> text)
+    {
+        int count = 0;
+        for (var rest = text; NextWord(ref rest, out _);)
+            count++;
+        if (count == 0)
+            return [];
+        var lengths = new TimeSpan[count];
+        int i = 0;
+        for (var rest = text; NextWord(ref rest, out var word);)
+        {
+            int mark = word.IndexOf('(');
+            var plain = mark >= 0 ? word[..mark] : word;
+            int colon = plain.IndexOf(':');
+            if (colon >= 0 && plain[(colon + 1)..].IndexOf(':') < 0 && int.TryParse(plain[..colon], out int minutes)
+                && double.TryParse(plain[(colon + 1)..], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double seconds))
+                lengths[i++] = TimeSpan.FromSeconds((minutes * 60) + seconds);
+            else
+                lengths[i++] = TimeSpan.Zero;
+        }
+        return lengths;
+    }
+
+    /// <summary>The next of the words <paramref name="rest"/> has between its spaces - as splitting
+    /// at ' ' with no empty words finds them - and the rest after it.</summary>
+    private static bool NextWord(ref ReadOnlySpan<char> rest, out ReadOnlySpan<char> word)
+    {
+        rest = rest.TrimStart(' ');
+        if (rest.IsEmpty)
+        {
+            word = default;
+            return false;
+        }
+        int space = rest.IndexOf(' ');
+        word = space < 0 ? rest : rest[..space];
+        rest = space < 0 ? default : rest[space..];
+        return true;
     }
 
     private void Add(MusicTune tune)
@@ -234,22 +316,71 @@ internal sealed class MusicCatalog
         lock (_searchMade)
         {
             if (_searched is null)
-            {
-                _all = [.. _byPath.Values.OrderBy(t => t.Path, StringComparer.OrdinalIgnoreCase)];
-                _searched = [.. _all.Select(t => Plain(t.Path))];
-            }
+                MakeSearchable();
         }
+        var all = _all!;
+        var searched = _searched!;
+        var starts = _starts!;
         var named = new List<MusicTune>();
         var inFolder = new List<MusicTune>();
-        for (int i = 0; i < _searched.Length && named.Count < most; i++)
+        for (int i = 0; i < all.Length && named.Count < most; i++)
         {
-            string path = _searched[i];
-            if (!words.All(w => path.Contains(w, StringComparison.Ordinal)))
+            var path = searched.AsSpan(starts[i], starts[i + 1] - starts[i]);
+            if (!HoldsAll(path, words))
                 continue;
-            string name = path[(path.LastIndexOf('/') + 1)..];
-            (words.All(w => name.Contains(w, StringComparison.Ordinal)) ? named : inFolder).Add(_all![i]);
+            var name = path[(path.LastIndexOf('/') + 1)..];
+            (HoldsAll(name, words) ? named : inFolder).Add(all[i]);
         }
         return [.. named.Concat(inFolder).Take(most)];
+    }
+
+    private static bool HoldsAll(ReadOnlySpan<char> text, string[] words)
+    {
+        foreach (string word in words)
+            if (text.IndexOf(word, StringComparison.Ordinal) < 0)
+                return false;
+        return true;
+    }
+
+    /// <summary>The tunes in order of their paths, and the paths made plain into one block.</summary>
+    private void MakeSearchable()
+    {
+        var all = _byPath.Values.ToArray();
+        Array.Sort(all, (a, b) => string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase));
+        // Most paths are plain letters, made plain as they go into the block; the few that are not
+        // made plain first, as they may come out shorter.
+        var odd = new Dictionary<int, string>();
+        int length = 0;
+        for (int i = 0; i < all.Length; i++)
+        {
+            string path = all[i].Path;
+            if (Ascii.IsValid(path))
+                length += path.Length;
+            else
+                length += (odd[i] = Plain(path)).Length;
+        }
+        var searched = new char[length];
+        var starts = new int[all.Length + 1];
+        int at = 0;
+        for (int i = 0; i < all.Length; i++)
+        {
+            starts[i] = at;
+            if (odd.TryGetValue(i, out var plain))
+            {
+                plain.CopyTo(searched.AsSpan(at));
+                at += plain.Length;
+                continue;
+            }
+            foreach (char c in all[i].Path)
+                searched[at++] = PlainAscii(c);
+        }
+        starts[all.Length] = at;
+
+        var folders = _folders.Values.Where(f => f.Tunes.Count > 0).ToArray();
+        Array.Sort(folders, (a, b) => string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase));
+        _folderNames = [.. folders.Select(f => Plain(f.Name))];
+        _searchedFolders = folders;
+        (_all, _starts, _searched) = (all, starts, searched);
     }
 
     /// <summary>The folders of tunes whose name holds every word typed - "hubbard" finds Hubbard_Rob -
@@ -260,26 +391,40 @@ internal sealed class MusicCatalog
         var words = Plain(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0)
             return [];
-        return [.. _folders.Values
-            .Where(f => f.Tunes.Count > 0 && words.All(w => Plain(f.Name).Contains(w, StringComparison.Ordinal)))
-            .OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
-            .Take(most)];
+        lock (_searchMade)
+        {
+            if (_searched is null)
+                MakeSearchable();
+        }
+        var folders = _searchedFolders!;
+        var names = _folderNames!;
+        var found = new List<MusicFolder>();
+        for (int i = 0; i < folders.Length && found.Count < most; i++)
+            if (HoldsAll(names[i], words))
+                found.Add(folders[i]);
+        return found;
     }
+
+    /// <summary>The folders with tunes of their own in order of their paths, and their names made plain.</summary>
+    private MusicFolder[]? _searchedFolders;
+    private string[]? _folderNames;
 
     /// <summary>The words of every path made ready, off the UI thread - after the list is shown: the
     /// first search is then as quick as the rest.</summary>
     public void Warm() => Search("warm", 1);
 
+    private static char PlainAscii(char c) => c is '_' or '-' ? ' ' : char.ToLowerInvariant(c);
+
     /// <summary>Lower case, without accents, a word's parts apart: "Mötley_Crüe" is "motley crue".</summary>
     private static string Plain(string text)
     {
         // Most names are plain letters already: made so in one go, not taken apart for accents.
-        if (System.Text.Ascii.IsValid(text))
+        if (Ascii.IsValid(text))
         {
             return string.Create(text.Length, text, (to, from) =>
             {
                 for (int i = 0; i < from.Length; i++)
-                    to[i] = from[i] is '_' or '-' ? ' ' : char.ToLowerInvariant(from[i]);
+                    to[i] = PlainAscii(from[i]);
             });
         }
         var plain = new StringBuilder(text.Length);

@@ -90,7 +90,7 @@ internal static class Modland
     {
         MusicCatalog catalog;
         using (var reader = new StreamReader(ListPath, Encoding.UTF8))
-            catalog = MusicCatalog.ParseModland(reader, Wanted);
+            catalog = MusicCatalog.ParseModland(reader, Wanted, (int)(reader.BaseStream.Length / 40));
         // Its words for searching made behind it: the list is shown without waiting for them.
         _ = Task.Run(catalog.Warm);
         return catalog;

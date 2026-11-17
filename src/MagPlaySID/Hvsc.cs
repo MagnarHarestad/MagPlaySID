@@ -83,7 +83,7 @@ internal static class Hvsc
     {
         MusicCatalog catalog;
         using (var reader = new StreamReader(list, Encoding.Latin1))
-            catalog = MusicCatalog.ParseSonglengths(reader);
+            catalog = MusicCatalog.ParseSonglengths(reader, (int)(reader.BaseStream.Length / 80));
         // Its words for searching made behind it: the list is shown without waiting for them.
         _ = Task.Run(catalog.Warm);
         return catalog;

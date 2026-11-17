@@ -117,6 +117,7 @@ public sealed class Filter
 
         SetW0();
         SetQ();
+        SetRouting();
     }
 
     public void WriteFcLo(int fcLo)
@@ -137,6 +138,7 @@ public sealed class Filter
         SetQ();
 
         _filt = resFilt & 0x0f;
+        SetRouting();
     }
 
     public void WriteModeVol(int modeVol)
@@ -144,6 +146,21 @@ public sealed class Filter
         _voice3Off = modeVol & 0x80;
         _hpBpLp = (modeVol >> 4) & 0x07;
         _vol = modeVol & 0x0f;
+        SetRouting();
+    }
+
+    // The routing as masks, all bits set for an input that goes through the filter, none for one
+    // that goes past it - so a cycle adds them up without RouteVoices' switch. Voice 3 off, and not
+    // filtered, is a voice 3 masked away (_keep3 none).
+    private int _filt1, _filt2, _filt3, _filtExt, _keep3 = -1;
+
+    private void SetRouting()
+    {
+        _filt1 = (_filt & 0x01) != 0 ? -1 : 0;
+        _filt2 = (_filt & 0x02) != 0 ? -1 : 0;
+        _filt3 = (_filt & 0x04) != 0 ? -1 : 0;
+        _filtExt = (_filt & 0x08) != 0 ? -1 : 0;
+        _keep3 = _voice3Off != 0 && (_filt & 0x04) == 0 ? 0 : -1;
     }
 
     private void SetW0()
@@ -179,25 +196,22 @@ public sealed class Filter
         voice2 >>= 7;
 
         // NB! Voice 3 is not silenced by voice3off if it is routed through the filter.
-        if (_voice3Off != 0 && (_filt & 0x04) == 0)
-        {
-            voice3 = 0;
-        }
-        else
-        {
-            voice3 >>= 7;
-        }
+        voice3 = (voice3 >> 7) & _keep3;
 
         extIn >>= 7;
 
+        int all = voice1 + voice2 + voice3 + extIn;
         if (!_enabled)
         {
-            _vnf = voice1 + voice2 + voice3 + extIn;
+            _vnf = all;
             _vhp = _vbp = _vlp = 0;
             return;
         }
 
-        int vi = RouteVoices(voice1, voice2, voice3, extIn, _filt, out _vnf);
+        // RouteVoices' sums without its switch: what goes through the filter by the masks, the
+        // rest past it.
+        int vi = (voice1 & _filt1) + (voice2 & _filt2) + (voice3 & _filt3) + (extIn & _filtExt);
+        _vnf = all - vi;
 
         int dVbp = (_w0Ceil1 * _vhp) >> 20;
         int dVlp = (_w0Ceil1 * _vbp) >> 20;

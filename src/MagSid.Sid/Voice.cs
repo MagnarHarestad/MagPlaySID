@@ -60,5 +60,11 @@ public sealed class Voice
 
     /// <summary>Amplitude modulated waveform output. Range [-2048*255, 2047*255].</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int Output() => (Wave.Output() - _waveZero) * Envelope.Output() + _voiceDC;
+    public int Output()
+    {
+        // A voice whose envelope is down at 0 multiplies its waveform away: only the DC is left,
+        // whatever it plays - and a silent voice is the most common voice there is.
+        int envelope = Envelope.Output();
+        return envelope == 0 ? _voiceDC : (Wave.Output() - _waveZero) * envelope + _voiceDC;
+    }
 }

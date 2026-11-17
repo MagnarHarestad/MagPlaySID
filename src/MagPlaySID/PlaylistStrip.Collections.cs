@@ -303,6 +303,7 @@ internal sealed partial class PlaylistStrip
         browsed.Loading = true;
         browsed.Error = null;
         ShowMusicView();
+        await FirstFrameAsync();
         try
         {
             browsed.Catalog = await browsed.Source.CatalogAsync();
@@ -316,6 +317,23 @@ internal sealed partial class PlaylistStrip
         browsed.Loading = false;
         if (_at == browsed)
             ShowMusicView();
+    }
+
+    /// <summary>Whether the window has drawn its first frame.</summary>
+    private bool _drawn;
+
+    /// <summary>Done once the window's first frame is drawn - or after a second, if no frame comes. A
+    /// collection's list read as the app starts - 166,000 of Modland's modules - makes garbage the
+    /// collector stops every thread for: read after the window is up, it no longer holds it back.</summary>
+    private async Task FirstFrameAsync()
+    {
+        if (_drawn || TopLevel.GetTopLevel(this) is not { } top)
+            return;
+        var drawn = new TaskCompletionSource();
+        // The second frame asked for in the first: called once the first has been drawn.
+        top.RequestAnimationFrame(_ => top.RequestAnimationFrame(_ => drawn.TrySetResult()));
+        await Task.WhenAny(drawn.Task, Task.Delay(TimeSpan.FromSeconds(1)));
+        _drawn = true;
     }
 
     /// <summary>What the collection shown shows now: the folder it is at, or the search's hits - or why it cannot.</summary>

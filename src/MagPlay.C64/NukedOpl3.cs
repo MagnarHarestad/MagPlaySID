@@ -746,9 +746,19 @@ public sealed class NukedOpl3
     private short Accumulate(Channel channel) =>
         (short)(_signals[channel.Out[0]] + _signals[channel.Out[1]] + _signals[channel.Out[2]] + _signals[channel.Out[3]]);
 
+    /// <summary>Whether a register of the second bank has been written. Until one is, its nine
+    /// channels are as they powered up - keyed off, at full attenuation - and put out nothing: an
+    /// OPL2's tune, the Sound Expander's, never writes one.</summary>
+    private bool _secondBankUsed;
+
     /// <summary>One sample at the chip's own rate: its four outputs - A, B, C, D - into <paramref name="buf4"/>.</summary>
     public void Generate4Ch(Span<short> buf4)
     {
+        if (!_secondBankUsed)
+        {
+            Generate4ChFirstBank(buf4);
+            return;
+        }
         buf4[1] = ClipSample(_mixBuff[1]);
         buf4[3] = ClipSample(_mixBuff[3]);
 
@@ -790,6 +800,60 @@ public sealed class NukedOpl3
         for (int ii = 33; ii < 36; ii++)
             ProcessSlot(_slot[ii]);
 
+        AdvanceTimers();
+    }
+
+    /// <summary><see cref="Generate4Ch"/> while the second bank is unused: its slots worked out
+    /// only for what they change of the chip's own - the noise, stepped once by each slot's phase -
+    /// and its channels, silent, left out of the mix. The same samples, in half the work.</summary>
+    private void Generate4ChFirstBank(Span<short> buf4)
+    {
+        buf4[1] = ClipSample(_mixBuff[1]);
+        buf4[3] = ClipSample(_mixBuff[3]);
+
+        for (int ii = 0; ii < 15; ii++)
+            ProcessSlot(_slot[ii]);
+
+        int mix0 = 0, mix1 = 0;
+        for (int ii = 0; ii < 9; ii++)
+        {
+            var channel = _channel[ii];
+            short accm = Accumulate(channel);
+            mix0 += (short)(accm & channel.Cha);
+            mix1 += (short)(accm & channel.Chc);
+        }
+        _mixBuff[0] = mix0;
+        _mixBuff[2] = mix1;
+
+        for (int ii = 15; ii < 18; ii++)
+            ProcessSlot(_slot[ii]);
+
+        buf4[0] = ClipSample(_mixBuff[0]);
+        buf4[2] = ClipSample(_mixBuff[2]);
+
+        // The second bank's eighteen slots: the noise is all they move.
+        uint noise = _noise;
+        for (int ii = 18; ii < 36; ii++)
+            noise = (noise >> 1) | ((((noise >> 14) ^ noise) & 0x01) << 22);
+        _noise = noise;
+
+        mix0 = mix1 = 0;
+        for (int ii = 0; ii < 9; ii++)
+        {
+            var channel = _channel[ii];
+            short accm = Accumulate(channel);
+            mix0 += (short)(accm & channel.Chb);
+            mix1 += (short)(accm & channel.Chd);
+        }
+        _mixBuff[1] = mix0;
+        _mixBuff[3] = mix1;
+
+        AdvanceTimers();
+    }
+
+    /// <summary>The tremolo, vibrato and envelope timers a sample on: the end of every sample.</summary>
+    private void AdvanceTimers()
+    {
         if ((_timer & 0x3f) == 0x3f)
             _tremoloPos = (byte)((_tremoloPos + 1) % 210);
         _tremolo = _tremoloPos < 105 ? (byte)(_tremoloPos >> _tremoloShift) : (byte)((210 - _tremoloPos) >> _tremoloShift);
@@ -906,6 +970,7 @@ public sealed class NukedOpl3
             ChannelSetupAlg(channel);
         }
         _noise = 1;
+        _secondBankUsed = false;
         _rateRatio = (sampleRate << RsmFrac) / NativeRate;
         _tremoloShift = 4;
         _vibShift = 1;
@@ -916,6 +981,8 @@ public sealed class NukedOpl3
     {
         int high = (reg >> 8) & 0x01;
         int regm = reg & 0xff;
+        if (high != 0)
+            _secondBankUsed = true;
         switch (regm & 0xf0)
         {
             case 0x00:
