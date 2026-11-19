@@ -95,14 +95,25 @@ public static class Music
             rises[v] = [];
         }
 
+        var tested = new List<int>[count];
+        for (int v = 0; v < count; v++)
+            tested[v] = [];
         for (int c = 0; c < calls; c++)
         {
             var rose = new bool[count];
+            var test = new bool[count];
             foreach (var write in recording.CallWrites[c])
             {
                 int r = write.Register, chip = r >> 5, own = r & 0x1F;
-                if (own < 0x15 && own % 7 == 4 && (write.Value & 1) != 0 && (registers[r] & 1) == 0)
-                    rose[chip * 3 + own / 7] = true;
+                if (own < 0x15 && own % 7 == 4)
+                {
+                    if ((write.Value & 1) != 0 && (registers[r] & 1) == 0)
+                        rose[chip * 3 + own / 7] = true;
+                    // The test bit set with the gate held on: the oscillator started again - a note
+                    // begun without its gate let go, as Jeroen Tel's 64 Dwarfs on XTC begins each.
+                    else if ((write.Value & 0x09) == 0x09 && (registers[r] & 0x09) == 0x01)
+                        test[chip * 3 + own / 7] = true;
+                }
                 registers[r] = write.Value;
             }
 
@@ -114,11 +125,44 @@ public static class Music
                                          registers[b + 4], registers[b + 5], registers[b + 6]);
                 if (rose[v])
                     rises[v].Add(c);
+                else if (test[v])
+                    tested[v].Add(c);
             }
+        }
+
+        // A test bit that only leads up to the gate let go and set again is that note's hard restart:
+        // the note starts where the gate rises. One with another start close by, either side, is a
+        // sound's own - a waveform cycled through every few calls, a digi through the test bit - not a
+        // note's; and so is one held on.
+        double seconds = calls > 1 ? (recording.Calls[^1] - recording.Calls[0]) / Machines.ClockHz(recording.Machine) : 0;
+        int apart = Math.Max(LongestHardRestart + 1, (int)Math.Ceiling(TestNotesApart * (seconds > 0 ? (calls - 1) / seconds : 50)));
+        for (int v = 0; v < count; v++)
+        {
+            if (tested[v].Count == 0)
+                continue;
+            var own = rises[v];
+            var all = own.Concat(tested[v]).Order().ToList();
+            var starts = tested[v].Where(t =>
+            {
+                int next = own.BinarySearch(t);
+                next = next < 0 ? ~next : next;
+                if (next < own.Count && own[next] - t <= LongestHardRestart)
+                    return false;
+                // Held on, the test bit silences the voice: a note's end, not its start.
+                var voice = frames[v];
+                if (!Enumerable.Range(t, Math.Min(LongestHardRestart, voice.Length - t)).Any(k => (voice[k].Control & 0x08) == 0))
+                    return false;
+                int at = all.BinarySearch(t);
+                return (at == 0 || t - all[at - 1] >= apart) && (at == all.Count - 1 || all[at + 1] - t >= apart);
+            });
+            rises[v] = [.. own.Concat(starts).Order()];
         }
 
         return frames;
     }
+
+    /// <summary>Seconds a note begun by the test bit is from the voice's other starts at least.</summary>
+    private const double TestNotesApart = 0.1;
 
     /// <summary>The filter and volume after a call: cutoff, resonance and routing, mode and volume.</summary>
     internal readonly record struct Global(int Cutoff, int Control, int ModeVolume);
