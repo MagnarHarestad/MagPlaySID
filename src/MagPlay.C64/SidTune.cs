@@ -80,6 +80,9 @@ public sealed class SidTune
         machine.Cpu.SP = 0xFF;
         machine.Cpu.InterruptDisable = true;
         machine.Cpu.PC = driver;
+        // The CLI before an RSID's init is the driver's, not the tune's.
+        if (file.IsRsid)
+            machine.DriverClis = machine.Cpu.Clis + 1;
         return new SidTune(machine, file, song, driver);
     }
 
@@ -226,6 +229,13 @@ public sealed class SidTune
         int initBank = file.IsRsid ? bank : Banking(file, file.InitAddress);
         if (initBank != bank)
             Emit(0xA9, initBank, 0x85, 0x01);
+        // An RSID's init is called with interrupts on, as on a C64 after SYS and as libsidplayfp
+        // calls it: the KERNAL's interrupt goes on being answered while init runs. Called with
+        // them off, CIA 1's timer runs out under a long init - I Like It copies 15 pages first -
+        // and its interrupt, left pending by a tune that stops the timer and ends its own handler
+        // past the KERNAL's acknowledge, is taken again after every RTI: six times too fast.
+        if (file.IsRsid)
+            Emit(0x58);
         Emit(0xA9, Math.Max(0, song - 1), 0x20, file.InitAddress & 0xFF, file.InitAddress >> 8);
         if (psid || initBank != bank)
             Emit(0xA9, bank, 0x85, 0x01);

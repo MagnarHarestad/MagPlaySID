@@ -98,6 +98,10 @@ public sealed class Mos6502
     /// <summary>Instructions executed since construction, for diagnostics.</summary>
     public long Steps { get; private set; }
 
+    /// <summary>CLI instructions executed since construction: whether a program has turned
+    /// interrupts on itself.</summary>
+    public int Clis { get; private set; }
+
     /// <summary>
     /// Where a called routine's closing <c>rts</c> lands. $0000 because no tune's code lives there -
     /// a PSID never loads that low, and the two bytes below the stack are the CPU's own port
@@ -407,7 +411,7 @@ public sealed class Mos6502
             // --- flags ---
             case 0x18: Carry = false; break;
             case 0x38: Carry = true; break;
-            case 0x58: InterruptDisable = false; break;
+            case 0x58: InterruptDisable = false; Clis++; break;
             case 0x78: InterruptDisable = true; break;
             case 0xD8: Decimal = false; break;
             case 0xF8: Decimal = true; break;

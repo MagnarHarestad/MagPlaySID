@@ -385,7 +385,7 @@ public sealed class C64 : IMemoryBus
     private void Enter(bool nmi)
     {
         Unwind();
-        if (!nmi && !InCall())
+        if (!nmi && !InCall() && (Cpu.Clis > DriverClis || !KernalAnswers()))
         {
             if (KeepsCalls || _calls.Count == 0)
                 _calls.Add(Cpu.Cycles);
@@ -393,6 +393,20 @@ public sealed class C64 : IMemoryBus
         }
         _interrupts.Add((nmi, Cpu.SP & 0xFF));
     }
+
+    /// <summary>Whether an IRQ about to be taken only runs the KERNAL's own handler - its vectors
+    /// as a reset left them - which plays nothing. An RSID's init runs with interrupts on, and one
+    /// that plays from a loop that never returns would otherwise be measured by the KERNAL's
+    /// interrupts alone.</summary>
+    private bool KernalAnswers() =>
+        (Banking & 0x02) != 0 && (_ram[0x0314] | (_ram[0x0315] << 8)) == Kernal.IrqDefault
+        && (_kernal[0x1FFE] | (_kernal[0x1FFF] << 8)) == Kernal.Irq;
+
+    /// <summary>The CLIs a driver runs itself before calling init: until the CPU has run one
+    /// more - the tune's own, or the driver's once init returns - an IRQ only the KERNAL answers is
+    /// not a call, as it could not have been taken had init been called with interrupts off.
+    /// -1, the default, counts every one.</summary>
+    public int DriverClis { get; set; } = -1;
 
     /// <summary>Whether an IRQ is being run - looked for without LINQ, which would allocate an
     /// enumerator on every interrupt.</summary>
