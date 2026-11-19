@@ -95,7 +95,14 @@ public sealed class Recording
         tune.Computer.Keep = context => context == player || tune.Computer.Calls.Count == 0;
         var length = C64SongLength.Measure(tune, maxSeconds, cancel);
         cancel.ThrowIfCancellationRequested();
-        length = SongPeriods.Refine(Of(tune.Computer, player, frames: file.IsBasic), length);
+        // Sharpened by the SID writes recorded - but not for a tune whose FM chip plays it all while its
+        // SIDs stay silent, no voice gated or with a waveform: the recording holds no FM writes, and
+        // FDance27's SIDs, written the same every frame, made a loop of a fiftieth of a second.
+        var recorded = Of(tune.Computer, player, frames: file.IsBasic);
+        bool fmAlone = file.RequiresFmOpl
+            && Music.Frames(recorded, out _).All(voice => voice.All(frame => (frame.Control & 0xF1) == 0));
+        if (!fmAlone)
+            length = SongPeriods.Refine(recorded, length);
 
         double clock = Machines.ClockHz(tune.Computer.Machine);
         double keep = length is null ? seconds : Math.Min(seconds, length.Total.TotalSeconds + 1);
